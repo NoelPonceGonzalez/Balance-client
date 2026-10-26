@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Dumbbell, Plus, Search, Trash2, Watch, Wallet } from 'lucide-react';
+import { Check, Dumbbell, Plus, Search, Trash2, Watch, Wallet } from 'lucide-react';
 import { PlatformLogo } from '@/components/PlatformLogo';
 import { SpendIcon } from '@/components/SpendIcon';
 import { Modal } from '@/components/Modal';
@@ -44,6 +44,7 @@ export interface CashFlow {
   surprise: boolean;
   absorbed?: boolean;
   open?: boolean;
+  automatic?: boolean;
 }
 
 export interface FixedRule {
@@ -153,6 +154,8 @@ interface Activity {
   note: string;
   amount: number;
   image?: string | null;
+  checked?: boolean;
+  onToggle?: () => void;
   onOpen?: () => void;
 }
 
@@ -180,8 +183,8 @@ function matchesActivity(label: string, amount: number, query: string): boolean 
   return plain.startsWith(text) || String(abs).startsWith(numeric) || Math.abs(abs - Number(numeric)) < 0.001;
 }
 
-function cashPath(cash: number, events: { day: string; amount: number; absorbed?: boolean }[], today: string): LinePoint[] {
-  const ordered = [...events].sort((a, b) => a.day.localeCompare(b.day));
+function cashPath(cash: number, events: { day: string; amount: number; absorbed?: boolean; open?: boolean }[], today: string): LinePoint[] {
+  const ordered = [...events].filter((row) => !row.open).sort((a, b) => a.day.localeCompare(b.day));
   if (!ordered.length) return [];
   const absorbed = ordered.filter((row) => row.absorbed).reduce((sum, row) => sum + row.amount, 0);
   let balance = round2(cash - absorbed);
@@ -308,13 +311,27 @@ function ActivityList({ rows, hidden }: { rows: Activity[]; hidden: boolean }) {
                 </span>
               </>
             );
+            const mark = row.onToggle ? (
+              <button
+                type="button"
+                aria-pressed={row.checked === true}
+                aria-label={row.checked ? `Quitar marca de ${row.label}` : `Marcar ${row.label}`}
+                onClick={row.onToggle}
+                className={cn('grid h-[22px] w-[22px] shrink-0 place-items-center rounded-full border-2 bg-white dark:bg-transparent', row.checked ? 'border-[#16c784] bg-[#16c784] text-white dark:bg-[#16c784]' : 'border-slate-300 text-transparent dark:border-slate-500')}
+              >
+                <Check size={13} strokeWidth={3} />
+              </button>
+            ) : null;
             return (
               <li key={row.id}>
-                {row.onOpen ? (
-                  <button type="button" onClick={row.onOpen} className={className}>{body}</button>
-                ) : (
-                  <div className={className}>{body}</div>
-                )}
+                <div className={className}>
+                  {mark}
+                  {row.onOpen ? (
+                    <button type="button" onClick={row.onOpen} className="flex min-w-0 flex-1 items-center gap-3 text-left">{body}</button>
+                  ) : (
+                    <div className="flex min-w-0 flex-1 items-center gap-3">{body}</div>
+                  )}
+                </div>
               </li>
             );
           })}
@@ -424,6 +441,7 @@ export function Wallets({ accounts, hidden, openId, stickTop = 0, onOpen, onAdd,
         surprise: flow.surprise,
         absorbed: flow.absorbed === true,
         open: flow.open === true,
+        automatic: flow.automatic === true,
         image: null as string | null,
       })),
       ...(current.purchases || []).map((item) => ({
@@ -457,7 +475,7 @@ export function Wallets({ accounts, hidden, openId, stickTop = 0, onOpen, onAdd,
     ].sort((a, b) => a.day.localeCompare(b.day) || a.label.localeCompare(b.label));
     let balance = current.cash;
     const walked = rows.map((row) => {
-      if (!row.absorbed) balance = Math.round((balance + row.amount) * 100) / 100;
+      if (!row.absorbed && !row.open) balance = Math.round((balance + row.amount) * 100) / 100;
       return { ...row, balance };
     });
     return walked.sort((a, b) => b.day.localeCompare(a.day) || a.label.localeCompare(b.label));
@@ -564,6 +582,17 @@ export function Wallets({ accounts, hidden, openId, stickTop = 0, onOpen, onAdd,
     }
   };
 
+  const togglePlan = async (key: string, paid: boolean) => {
+    if (!current?.planId || !key) return;
+    setError('');
+    try {
+      await api(`/api/plans/${current.planId}/mark`, { method: 'POST', body: JSON.stringify({ key, paid }) });
+      await onSaved?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se ha podido cambiar la marca.');
+    }
+  };
+
   const removeEntry = async () => {
     if (!entryDraft || !current) return;
     setError('');
@@ -662,7 +691,7 @@ export function Wallets({ accounts, hidden, openId, stickTop = 0, onOpen, onAdd,
                 <p className="text-xl font-black tabular-nums">{money(cashSide.total, hidden)}</p>
               </div>
               <p className="mt-1 text-xs font-medium text-slate-400">Es el efectivo de ahora. El entrenador del 14 y el Seiko ya están restados aquí.</p>
-              {current && <SectionChart points={cashPath(current.cash, statement.map((row) => ({ day: row.day, amount: row.amount, absorbed: row.absorbed })), todayKey())} title="Efectivo" />}
+              {current && <SectionChart points={cashPath(current.cash, statement.map((row) => ({ day: row.day, amount: row.amount, absorbed: row.absorbed, open: row.open })), todayKey())} title="Efectivo" />}
             </section>
           )}
           {current?.extras && (
@@ -766,6 +795,10 @@ export function Wallets({ accounts, hidden, openId, stickTop = 0, onOpen, onAdd,
                   note: row.absorbed ? `${formatDay(row.day)} · ${row.open ? 'Falta confirmarlo' : 'ya en el efectivo'}` : `${formatDay(row.day)} · queda ${money(row.balance, hidden)}`,
                   amount: row.amount,
                   image: row.image,
+                  checked: row.source === 'plan' && !row.automatic && !row.open,
+                  onToggle: row.source === 'plan' && !row.automatic && /^(expense|income|savings|recurring|interval):/.test(row.key)
+                    ? () => void togglePlan(row.key, row.open === true)
+                    : undefined,
                   onOpen: row.source === 'wallet' || row.key ? () => setEntryDraft({
                     id: row.source === 'wallet' ? row.id : null,
                     name: row.name,
