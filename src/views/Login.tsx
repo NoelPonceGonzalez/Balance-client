@@ -1,0 +1,117 @@
+import { useState, type FormEvent } from 'react';
+import { Lock, Eye, EyeOff } from 'lucide-react';
+import { Mark } from '@/components/Mark';
+import { Button } from '@/components/ui/Button';
+import { Input } from '@/components/ui/Input';
+import { api, ApiError } from '@/lib/api';
+import { cn } from '@/lib/utils';
+import type { User as AppUser } from '@/lib/types';
+
+const REMEMBERED = 'pat_login_id';
+
+export function LoginView({ onLogin }: { onLogin: (user: AppUser, token: string) => void }) {
+  const [mode, setMode] = useState<'login' | 'register'>('login');
+  const [name, setName] = useState('');
+  const [username, setUsername] = useState('');
+  const [login, setLogin] = useState(() => localStorage.getItem(REMEMBERED) || '');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    setLoading(true);
+    setError('');
+    try {
+      if (mode === 'register' && !/^[a-zA-Z][a-zA-Z0-9._-]{2,23}$/.test(username.trim())) {
+        throw new Error('El usuario empieza por una letra y tiene entre 3 y 24 caracteres.');
+      }
+      const path = mode === 'login' ? '/api/auth/login' : '/api/auth/register';
+      const body = mode === 'login' ? { login: login.trim(), password } : { name, username: username.trim(), email, password };
+      const data = await api<{ token: string; user: AppUser }>(path, { method: 'POST', body: JSON.stringify(body) });
+      localStorage.setItem('pat_token', data.token);
+      localStorage.setItem(REMEMBERED, mode === 'login' ? login.trim() : username.trim());
+      onLogin(data.user, data.token);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se ha podido entrar.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="auth-scroll bg-[#f3f4f6] text-slate-950 dark:bg-black dark:text-white">
+      <div className="mx-auto flex min-h-full w-full max-w-[26rem] flex-col justify-center px-6 py-14">
+        <div className="mb-10">
+          <div className="mb-7 grid h-11 w-11 place-items-center rounded-xl bg-slate-950 text-white dark:bg-white dark:text-slate-950">
+            <Mark size={24} />
+          </div>
+          <h1 className="text-[1.75rem] font-semibold tracking-tight">Balance</h1>
+          <p className="mt-2 text-sm leading-6 text-slate-500">Acceso privado. La sesión permanece en este dispositivo hasta que la cierres.</p>
+        </div>
+
+        <div className="mb-8 flex gap-6 border-b border-slate-200 dark:border-white/10">
+          {(['login', 'register'] as const).map((item) => (
+            <button
+              key={item}
+              type="button"
+              onClick={() => {
+                setMode(item);
+                setError('');
+              }}
+              className={cn(
+                '-mb-px border-b pb-3 text-sm font-semibold',
+                mode === item ? 'border-slate-950 text-slate-950 dark:border-white dark:text-white' : 'border-transparent text-slate-400',
+              )}
+            >
+              {item === 'login' ? 'Entrar' : 'Crear cuenta'}
+            </button>
+          ))}
+        </div>
+
+        <form onSubmit={submit} className="space-y-5">
+          {mode === 'register' && (
+            <>
+              <Input label="Nombre" value={name} onChange={(e) => setName(e.target.value)} required autoComplete="name" placeholder="Cómo quieres que aparezca" />
+              <Input label="Usuario" value={username} onChange={(e) => setUsername(e.target.value)} required autoComplete="username" placeholder="noel" spellCheck={false} />
+              <Input label="Correo" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" placeholder="tu@email.com" />
+            </>
+          )}
+          {mode === 'login' && (
+            <Input
+              label="Correo o usuario"
+              value={login}
+              onChange={(e) => setLogin(e.target.value)}
+              required
+              autoComplete="username"
+              spellCheck={false}
+              placeholder="Usuario o correo"
+            />
+          )}
+          <Input
+            label="Contraseña"
+            type={showPassword ? 'text' : 'password'}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+            minLength={8}
+            autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+            icon={<Lock size={16} />}
+            placeholder="Mínimo 8 caracteres"
+            trailing={
+              <button type="button" onClick={() => setShowPassword((value) => !value)} className="rounded-lg p-2 text-slate-400" aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}>
+                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            }
+          />
+          {error && <p className="text-sm font-medium text-rose-700 dark:text-rose-300">{error}</p>}
+          <Button type="submit" variant="secondary" className="w-full" size="lg" disabled={loading}>
+            {loading ? 'Un momento…' : mode === 'login' ? 'Entrar' : 'Crear cuenta'}
+          </Button>
+        </form>
+      </div>
+    </div>
+  );
+}

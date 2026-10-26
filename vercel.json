@@ -1,0 +1,12 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://bidding-essays-gym-reunion.trycloudflare.com/api/:path*"
+    },
+    {
+      "source": "/health",
+      "destination": "https://bidding-essays-gym-reunion.trycloudflare.com/health"
+    }
+  ]
+}
