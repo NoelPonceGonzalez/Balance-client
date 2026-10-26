@@ -42,17 +42,17 @@ export function LoginView({ onLogin }: { onLogin: (user: AppUser, token: string)
   };
 
   return (
-    <div className="auth-scroll bg-[#f3f4f6] text-slate-950 dark:bg-black dark:text-white">
+    <div className="auth-scroll bg-white text-slate-950">
       <div className="mx-auto flex min-h-full w-full max-w-[26rem] flex-col justify-center px-6 py-14">
         <div className="mb-10">
-          <div className="mb-7 grid h-11 w-11 place-items-center rounded-xl bg-slate-950 text-white dark:bg-white dark:text-slate-950">
+          <div className="mb-7 grid h-11 w-11 place-items-center rounded-xl bg-slate-950 text-white">
             <Mark size={24} />
           </div>
           <h1 className="text-[1.75rem] font-semibold tracking-tight">Balance</h1>
           <p className="mt-2 text-sm leading-6 text-slate-500">Acceso privado. La sesión permanece en este dispositivo hasta que la cierres.</p>
         </div>
 
-        <div className="mb-8 flex gap-6 border-b border-slate-200 dark:border-white/10">
+        <div className="mb-8 flex gap-6 border-b border-slate-200">
           {(['login', 'register'] as const).map((item) => (
             <button
               key={item}
@@ -63,7 +63,7 @@ export function LoginView({ onLogin }: { onLogin: (user: AppUser, token: string)
               }}
               className={cn(
                 '-mb-px border-b pb-3 text-sm font-semibold',
-                mode === item ? 'border-slate-950 text-slate-950 dark:border-white dark:text-white' : 'border-transparent text-slate-400',
+                mode === item ? 'border-slate-950 text-slate-950' : 'border-transparent text-slate-400',
               )}
             >
               {item === 'login' ? 'Entrar' : 'Crear cuenta'}
@@ -106,7 +106,7 @@ export function LoginView({ onLogin }: { onLogin: (user: AppUser, token: string)
               </button>
             }
           />
-          {error && <p className="text-sm font-medium text-rose-700 dark:text-rose-300">{error}</p>}
+          {error && <p className="text-sm font-medium text-rose-700">{error}</p>}
           <Button type="submit" variant="secondary" className="w-full" size="lg" disabled={loading}>
             {loading ? 'Un momento…' : mode === 'login' ? 'Entrar' : 'Crear cuenta'}
           </Button>

@@ -58,8 +58,13 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    applyTheme(user?.theme || 'system');
-  }, [user?.theme]);
+    if (!user) {
+      document.documentElement.classList.remove('dark');
+      document.documentElement.style.colorScheme = 'light';
+      return;
+    }
+    applyTheme(user.theme || 'system');
+  }, [user]);
 
   const changeHero = (ms: number) => {
     setHeroMs(ms);
@@ -74,11 +79,11 @@ export default function App() {
   if (!ready) return <QuietLoad kind="screen" />;
   if (offline && !user) {
     return (
-      <div className="grid h-dvh place-items-center bg-[#f3f4f6] px-6 dark:bg-black">
+      <div className="grid h-dvh place-items-center bg-white px-6">
         <div className="max-w-sm">
           <h1 className="text-xl font-semibold tracking-tight">La sesión sigue guardada</h1>
           <p className="mt-2 text-sm leading-6 text-slate-500">No hay conexión con el servidor. Cuando vuelva, entras sin repetir la contraseña.</p>
-          <button type="button" onClick={restoreSession} className="mt-6 rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white dark:bg-white dark:text-slate-950">
+          <button type="button" onClick={restoreSession} className="mt-6 rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white">
             Reintentar
           </button>
         </div>
