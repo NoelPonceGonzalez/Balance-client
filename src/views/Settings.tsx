@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { PasswordReset } from '@/components/PasswordReset';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
@@ -65,6 +66,11 @@ export function Settings({
         <Input label="Nombre" value={name} onChange={(e) => setName(e.target.value)} />
         <p className="text-sm text-slate-500">{user.email}</p>
         <Button onClick={saveProfile}>Guardar</Button>
+      </Card>
+      <Card className="space-y-3">
+        <h2 className="font-black">Contraseña</h2>
+        <p className="text-sm text-slate-500">Te llega un código a {user.email}. Con ese código eliges la nueva contraseña.</p>
+        <PasswordReset email={user.email} lockEmail onDone={onUser} />
       </Card>
       <Card>
         <h2 className="font-black">Apariencia</h2>

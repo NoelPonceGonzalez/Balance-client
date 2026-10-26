@@ -1072,7 +1072,7 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
           <h2 className="min-w-0 truncate text-base font-black">{openAccount.name}</h2>
         </div>
       )}
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-1">
           <p className={cn('truncate text-[26px] font-black leading-none tabular-nums sm:text-[32px]', hidden || (view === 'cartera' && openAccount) ? 'text-slate-900 dark:text-white' : totalClass)}>
             {barValue == null ? '—' : <RisingAmount value={barValue} hidden={hidden} card />}

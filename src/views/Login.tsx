@@ -1,6 +1,8 @@
 import { useState, type FormEvent } from 'react';
 import { Lock, Eye, EyeOff } from 'lucide-react';
+import { InstallApp } from '@/components/InstallApp';
 import { Mark } from '@/components/Mark';
+import { PasswordReset } from '@/components/PasswordReset';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { api, ApiError } from '@/lib/api';
@@ -19,6 +21,7 @@ export function LoginView({ onLogin }: { onLogin: (user: AppUser, token: string)
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [recover, setRecover] = useState(false);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -50,6 +53,9 @@ export function LoginView({ onLogin }: { onLogin: (user: AppUser, token: string)
           </div>
           <h1 className="text-[1.75rem] font-semibold tracking-tight">Balance</h1>
           <p className="mt-2 text-sm leading-6 text-slate-500">Acceso privado. La sesión permanece en este dispositivo hasta que la cierres.</p>
+          <div className="mt-5">
+            <InstallApp />
+          </div>
         </div>
 
         <div className="mb-8 flex gap-6 border-b border-slate-200">
@@ -71,6 +77,14 @@ export function LoginView({ onLogin }: { onLogin: (user: AppUser, token: string)
           ))}
         </div>
 
+        {recover ? (
+          <div className="space-y-4">
+            <PasswordReset onDone={onLogin} />
+            <button type="button" onClick={() => setRecover(false)} className="text-sm font-semibold text-slate-500">
+              Volver a entrar
+            </button>
+          </div>
+        ) : (
         <form onSubmit={submit} className="space-y-5">
           {mode === 'register' && (
             <>
@@ -110,7 +124,13 @@ export function LoginView({ onLogin }: { onLogin: (user: AppUser, token: string)
           <Button type="submit" variant="secondary" className="w-full" size="lg" disabled={loading}>
             {loading ? 'Un momento…' : mode === 'login' ? 'Entrar' : 'Crear cuenta'}
           </Button>
+          {mode === 'login' && (
+            <button type="button" onClick={() => setRecover(true)} className="w-full text-sm font-semibold text-slate-500">
+              Cambiar contraseña
+            </button>
+          )}
         </form>
+        )}
       </div>
     </div>
   );

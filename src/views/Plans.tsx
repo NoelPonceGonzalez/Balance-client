@@ -634,7 +634,7 @@ export function Plans({ embedded = false }: { embedded?: boolean }) {
       {error && <p className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">{error}</p>}
       {!ready && !plan && <QuietLoad />}
       {ready && !selected && (
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2">
           {items.map((item) => {
             const id = docId(item.plan);
             const opening = item.forecast.months?.[0]?.lines[0]?.balance ?? item.plan.openingBalance ?? 0;

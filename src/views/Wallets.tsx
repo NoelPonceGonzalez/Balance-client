@@ -612,7 +612,7 @@ export function Wallets({ accounts, hidden, openId, stickTop = 0, onOpen, onAdd,
       {current && (
         <div className="space-y-3">
           {hasCash && (
-            <div className="sticky z-20 -mx-4 flex items-center gap-2 bg-[var(--app-bg)] px-4 py-2 md:-mx-8 md:px-8" style={{ top: stickTop }}>
+            <div className="sticky z-20 -mx-4 flex flex-wrap items-center gap-2 bg-[var(--app-bg)] px-4 py-2 md:-mx-8 md:px-8" style={{ top: stickTop }}>
               {hasCash && hasBook && (
                 <div className="flex min-w-0 rounded-2xl border border-white/50 bg-white/30 p-1 backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
                   <button type="button" onClick={() => { setPlace('efectivo'); setFocus(null); }} className={laneClass(onEfectivo)}>

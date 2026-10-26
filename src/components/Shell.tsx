@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { LayoutDashboard, Target, Settings, ArrowLeftRight, LineChart } from 'lucide-react';
+import { InstallApp } from '@/components/InstallApp';
 import { Mark } from '@/components/Mark';
 import { NotificationsBell } from '@/components/NotificationsBell';
 import { cn } from '@/lib/utils';
@@ -47,7 +48,10 @@ export function Shell({
           </button>
         </div>
       </header>
-      <main className="app-scroll min-h-0 flex-1 overflow-y-auto px-4 py-2 pb-28 md:px-8">{children}</main>
+      <main className="app-scroll min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-4 py-2 pb-28 md:px-8">
+        <InstallApp />
+        {children}
+      </main>
       <div className="pointer-events-none absolute inset-x-0 bottom-0 z-40">
         <div className="pointer-events-auto flex justify-center px-3 pb-[max(1rem,env(safe-area-inset-bottom))] pt-2">
         <nav className="flex max-w-full items-center gap-0.5 overflow-x-auto rounded-full border border-white/70 bg-white/55 p-1.5 shadow-[0_8px_32px_rgba(15,23,42,0.08)] backdrop-blur-2xl dark:border-white/15 dark:bg-slate-950/50">
@@ -60,14 +64,14 @@ export function Shell({
                 type="button"
                 onClick={() => onChange(item.id)}
                 className={cn(
-                  'flex shrink-0 items-center gap-2 rounded-full px-3.5 py-2 text-[13px] font-semibold transition',
+                  'flex shrink-0 items-center gap-2 rounded-full px-3 py-2 text-[13px] font-semibold transition min-[480px]:px-3.5',
                   active
                     ? 'bg-white/85 text-indigo-700 shadow-sm dark:bg-white/15 dark:text-white'
                     : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200',
                 )}
               >
                 <Icon size={16} strokeWidth={1.75} />
-                {item.label}
+                <span className="sr-only min-[480px]:not-sr-only">{item.label}</span>
               </button>
             );
           })}
