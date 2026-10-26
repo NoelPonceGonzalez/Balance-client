@@ -589,7 +589,7 @@ export function Wallets({ accounts, hidden, openId, stickTop = 0, onOpen, onAdd,
     <div className="space-y-4">
       {error && <p className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">{error}</p>}
       {!current && (
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 min-[480px]:grid-cols-2">
           {accounts.map((account) => (
             <button
               key={account.key}
@@ -601,7 +601,7 @@ export function Wallets({ accounts, hidden, openId, stickTop = 0, onOpen, onAdd,
                 {account.image ? <img src={account.image} alt="" className="h-[22px] w-[22px] rounded-lg object-cover" /> : <PlatformLogo name={account.logoName} size={22} />}
                 <span className="min-w-0 truncate text-sm font-black">{account.name}</span>
               </span>
-              <span className="mt-3 block text-[28px] font-black leading-none tabular-nums">{account.value == null ? '—' : money(account.value, hidden)}</span>
+              <span className="mt-2 block text-[22px] font-black leading-none tabular-nums sm:text-[26px]">{account.value == null ? '—' : money(account.value, hidden)}</span>
               <span className="mt-2 block text-[11px] font-semibold text-slate-400">
                 {(account.sides || []).map((side) => side.title).join(' · ') || 'Sin desglose'}
               </span>
@@ -645,7 +645,7 @@ export function Wallets({ accounts, hidden, openId, stickTop = 0, onOpen, onAdd,
                     <span className="mt-0.5 block truncate text-[11px] font-medium text-slate-400">{item.caption} · {count} {item.id === 'crypto' ? (count === 1 ? 'moneda' : 'monedas') : count === 1 ? 'cosa' : 'cosas'}</span>
                   </span>
                 </span>
-                <span className="text-xl font-black tabular-nums">{money(total, hidden)}</span>
+                <span className="shrink-0 text-base font-black tabular-nums sm:text-xl">{money(total, hidden)}</span>
               </button>
             );
           })}

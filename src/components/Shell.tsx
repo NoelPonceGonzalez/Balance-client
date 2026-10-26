@@ -48,7 +48,7 @@ export function Shell({
           </button>
         </div>
       </header>
-      <main className="app-scroll min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-4 py-2 pb-28 md:px-8">
+      <main className="app-scroll min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-4 py-2 pb-36 md:px-8">
         <InstallApp />
         {children}
       </main>

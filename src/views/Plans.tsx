@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import { bindHold, HoldMenu, holdItemClass, placeMenu } from '@/components/HoldMenu';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'motion/react';
 import { Banknote, Cake, Check, ChevronLeft, Dumbbell, Gift, GripVertical, ImageIcon, Pencil, PiggyBank, Plus, RotateCcw, Trash2, Utensils, Wallet, Watch, type LucideIcon } from 'lucide-react';
@@ -344,10 +345,8 @@ export function Plans({ embedded = false }: { embedded?: boolean }) {
   };
 
   const openMenu = (line: PlanMonthLine, rect: DOMRect) => {
-    const width = 188;
-    const left = Math.max(12, Math.min(rect.left, window.innerWidth - width - 12));
-    const top = Math.min(rect.bottom + 8, window.innerHeight - 140);
-    setMenu({ line, top, left });
+    const place = placeMenu(rect.left + rect.width / 2, rect.top + 8);
+    setMenu({ line, ...place });
   };
 
   const onDragStart = (line: PlanMonthLine, x: number, y: number) => {
@@ -484,28 +483,10 @@ export function Plans({ embedded = false }: { embedded?: boolean }) {
   };
 
   const holdCard = (id: string, event: ReactPointerEvent) => {
-    if (event.button !== 0) return;
-    const x = event.clientX;
-    const y = event.clientY;
-    let moved = false;
-    const timer = window.setTimeout(() => {
-      if (moved) return;
+    bindHold(event, (x, y) => {
       suppressCard.current = true;
-      setCardMenu({ id, top: Math.min(y, window.innerHeight - 120), left: Math.min(x, window.innerWidth - 188), confirm: false });
-    }, 380);
-    const move = (ev: PointerEvent) => {
-      if (Math.hypot(ev.clientX - x, ev.clientY - y) > 12) {
-        moved = true;
-        window.clearTimeout(timer);
-      }
-    };
-    const up = () => {
-      window.clearTimeout(timer);
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', up);
-    };
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', up);
+      setCardMenu({ id, ...placeMenu(x, y), confirm: false });
+    });
   };
 
   const removeCard = async (id: string) => {
@@ -634,7 +615,7 @@ export function Plans({ embedded = false }: { embedded?: boolean }) {
       {error && <p className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">{error}</p>}
       {!ready && !plan && <QuietLoad />}
       {ready && !selected && (
-        <div className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2">
+        <div className="grid grid-cols-1 gap-3 min-[480px]:grid-cols-2">
           {items.map((item) => {
             const id = docId(item.plan);
             const opening = item.forecast.months?.[0]?.lines[0]?.balance ?? item.plan.openingBalance ?? 0;
@@ -648,7 +629,7 @@ export function Plans({ embedded = false }: { embedded?: boolean }) {
                 onPointerDown={(event) => holdCard(id, event)}
                 onContextMenu={(event) => {
                   event.preventDefault();
-                  setCardMenu({ id, top: Math.min(event.clientY, window.innerHeight - 120), left: Math.min(event.clientX, window.innerWidth - 188), confirm: false });
+                  setCardMenu({ id, ...placeMenu(event.clientX, event.clientY), confirm: false });
                 }}
                 onClick={() => {
                   if (suppressCard.current) {
@@ -658,7 +639,7 @@ export function Plans({ embedded = false }: { embedded?: boolean }) {
                   setSelected(id);
                   setConfirmDelete(false);
                 }}
-                className="plan-rise cursor-pointer rounded-[24px] border border-white/70 bg-white/70 p-3 text-left shadow-lg shadow-slate-900/5 backdrop-blur-xl transition-transform duration-300 hover:scale-[1.02] dark:border-white/10 dark:bg-slate-900/60"
+                className="hold-target plan-rise cursor-pointer rounded-2xl border border-white/70 bg-white/70 p-3 text-left shadow-lg shadow-slate-900/5 backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/60"
               >
                 <span className="flex items-start justify-between gap-2">
                   <span className="flex min-w-0 items-center gap-2">
@@ -668,7 +649,7 @@ export function Plans({ embedded = false }: { embedded?: boolean }) {
                   <PlanCorner balance={balance} target={item.plan.targetAmount} delta={delta} beat={beat} />
                 </span>
                 <span className="mt-2 block text-[11px] font-semibold text-slate-400">{kindLabel(item.plan)}</span>
-                <span className="mt-1 block text-[28px] font-black leading-none tabular-nums"><SoftEur value={balance} /></span>
+                <span className="mt-1 block text-[22px] font-black leading-none tabular-nums sm:text-[28px]"><SoftEur value={balance} /></span>
                 <span className="mt-3 block h-1.5 overflow-hidden rounded-full bg-slate-200/80 dark:bg-white/10">
                   <span className="block h-full rounded-full bg-slate-800 transition-[width] duration-700 dark:bg-white" style={{ width: `${barWidth(balance, item.plan.targetAmount)}%` }} />
                 </span>
@@ -694,41 +675,37 @@ export function Plans({ embedded = false }: { embedded?: boolean }) {
           <button
             type="button"
             onClick={() => { setEditing(null); setDraft(blank()); setShaped(false); setConfirmDelete(false); }}
-            className="flex min-h-40 flex-col items-center justify-center gap-2 rounded-[24px] border border-dashed border-slate-300 bg-white/40 text-sm font-bold text-slate-500 transition-colors hover:bg-white/70 dark:border-white/15 dark:bg-white/5"
+            className="flex min-h-28 flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-slate-300 bg-white/40 text-sm font-bold text-slate-500 transition-colors hover:bg-white/70 dark:border-white/15 dark:bg-white/5"
           >
             <Plus size={18} />
             Nuevo plan
           </button>
         </div>
       )}
-      {cardMenu && createPortal(
-        <>
-          <button type="button" className="fixed inset-0 z-[60] cursor-default" aria-label="Cerrar menú" onClick={() => setCardMenu(null)} />
-          <div className="plan-menu fixed z-[70] w-44 overflow-hidden rounded-2xl bg-white py-1 text-sm shadow-2xl ring-1 ring-black/5 dark:bg-slate-900 dark:ring-white/10" style={{ top: cardMenu.top, left: cardMenu.left }}>
-            <button
-              type="button"
-              onClick={() => {
-                const item = items.find((entry) => docId(entry.plan) === cardMenu.id);
-                setCardMenu(null);
-                if (!item) return;
-                setEditing(cardMenu.id);
-                setShaped(true);
-                setDraft(fromPlan(item.plan));
-              }}
-              className="flex w-full items-center gap-2 px-3 py-2.5 text-left font-semibold text-slate-800 hover:bg-slate-50 dark:text-slate-100 dark:hover:bg-white/5"
-            >
-              <Pencil size={15} /> Editar
-            </button>
-            <button
-              type="button"
-              onClick={() => { if (cardMenu.confirm) void removeCard(cardMenu.id); else setCardMenu({ ...cardMenu, confirm: true }); }}
-              className="flex w-full items-center gap-2 px-3 py-2.5 text-left font-semibold text-[#ea3943] hover:bg-slate-50 dark:hover:bg-white/5"
-            >
-              <Trash2 size={15} /> {cardMenu.confirm ? 'Confirmar' : 'Eliminar'}
-            </button>
-          </div>
-        </>,
-        document.body,
+      {cardMenu && (
+        <HoldMenu top={cardMenu.top} left={cardMenu.left} onClose={() => setCardMenu(null)}>
+          <button
+            type="button"
+            onClick={() => {
+              const item = items.find((entry) => docId(entry.plan) === cardMenu.id);
+              setCardMenu(null);
+              if (!item) return;
+              setEditing(cardMenu.id);
+              setShaped(true);
+              setDraft(fromPlan(item.plan));
+            }}
+            className={cn(holdItemClass, 'text-slate-800 dark:text-slate-100')}
+          >
+            <Pencil size={14} /> Editar
+          </button>
+          <button
+            type="button"
+            onClick={() => { if (cardMenu.confirm) void removeCard(cardMenu.id); else setCardMenu({ ...cardMenu, confirm: true }); }}
+            className={cn(holdItemClass, 'text-[#ea3943]')}
+          >
+            <Trash2 size={14} /> {cardMenu.confirm ? 'Confirmar' : 'Eliminar'}
+          </button>
+        </HoldMenu>
       )}
       {plan && forecast && (
         <article className="rounded-[28px] border border-white/60 bg-white/55 p-4 shadow-2xl shadow-slate-900/10 backdrop-blur-2xl dark:border-white/10 dark:bg-slate-900/55 sm:p-5">
@@ -821,19 +798,15 @@ export function Plans({ embedded = false }: { embedded?: boolean }) {
               );
             })}
           </div>
-          {menu && createPortal(
-            <>
-              <button type="button" className="fixed inset-0 z-[60] cursor-default" aria-label="Cerrar menú" onClick={() => setMenu(null)} />
-              <div className="plan-menu fixed z-[70] w-44 overflow-hidden rounded-2xl bg-white py-1 text-sm shadow-2xl ring-1 ring-black/5 dark:bg-slate-900 dark:ring-white/10" style={{ top: menu.top, left: menu.left }}>
-                <button type="button" onClick={() => { const line = menu.line; setMenu(null); beginEdit(line); }} className="flex w-full items-center gap-2 px-3 py-2.5 text-left font-semibold text-slate-800 transition-colors hover:bg-slate-50 dark:text-slate-100 dark:hover:bg-white/5"><Pencil size={15} /> Editar</button>
-                <button type="button" onClick={() => void removeLine(menu.line)} className="flex w-full items-center gap-2 px-3 py-2.5 text-left font-semibold text-[#ea3943] transition-colors hover:bg-slate-50 dark:hover:bg-white/5"><Trash2 size={15} /> Eliminar</button>
-              </div>
-            </>,
-            document.body,
+          {menu && (
+            <HoldMenu top={menu.top} left={menu.left} onClose={() => setMenu(null)}>
+              <button type="button" onClick={() => { const line = menu.line; setMenu(null); beginEdit(line); }} className={cn(holdItemClass, 'text-slate-800 dark:text-slate-100')}><Pencil size={14} /> Editar</button>
+              <button type="button" onClick={() => void removeLine(menu.line)} className={cn(holdItemClass, 'text-[#ea3943]')}><Trash2 size={14} /> Eliminar</button>
+            </HoldMenu>
           )}
           {drag && createPortal(
             <div
-              className="pointer-events-none fixed z-[70] flex w-64 -translate-x-1/2 -translate-y-1/2 items-center gap-3 rounded-2xl bg-white px-3 py-2.5 text-sm shadow-2xl ring-2 ring-indigo-300 dark:bg-slate-900 dark:ring-indigo-400/60"
+              className="pointer-events-none fixed z-[70] flex w-52 -translate-x-1/2 -translate-y-1/2 items-center gap-2 rounded-xl bg-white px-2.5 py-2 text-[13px] shadow-lg ring-2 ring-indigo-300 dark:bg-slate-900 dark:ring-indigo-400/60"
               style={{ left: drag.x, top: drag.y }}
             >
               <LineIcon label={drag.line.label} />
@@ -1243,7 +1216,7 @@ function PlanLine({ line, index, lifted, today, ahead, until, onMark, onOpenMenu
     timer.current = null;
   };
   return (
-    <div className={cn('flex items-center gap-3 px-3 py-2.5 text-sm transition-all duration-300', index > 0 && 'border-t border-slate-200/70 dark:border-white/10', lifted && 'scale-[0.98] opacity-40', (line.tone === 'plain' || line.tone === 'final') && 'font-semibold')}>
+    <div className={cn('hold-target flex items-center gap-2 px-2.5 py-2 text-[13px] transition-transform duration-200 sm:gap-3 sm:px-3 sm:text-sm', index > 0 && 'border-t border-slate-200/70 dark:border-white/10', lifted && 'scale-[0.98] opacity-40', (line.tone === 'plain' || line.tone === 'final') && 'font-semibold')}>
       {line.markKey ? (
         <button type="button" aria-label={markLabel} aria-pressed={line.paid === true} onPointerDown={(event) => event.stopPropagation()} onClick={onMark} className={cn('grid h-[22px] w-[22px] shrink-0 place-items-center rounded-full border-2 bg-white transition-all duration-300 dark:bg-transparent', line.paid ? 'border-[#16c784] bg-[#16c784] text-white dark:bg-[#16c784]' : 'border-slate-300 text-transparent dark:border-slate-500')}>
           <Check size={13} strokeWidth={3} className={cn('transition-all duration-300', line.paid ? 'scale-100 opacity-100' : 'scale-75 opacity-0')} />
@@ -1255,8 +1228,8 @@ function PlanLine({ line, index, lifted, today, ahead, until, onMark, onOpenMenu
         <button
           ref={ref}
           type="button"
-          title={movable ? 'Mantén para las opciones. El asa mueve la fila.' : 'Mantén para las opciones'}
-          className="flex min-w-0 flex-1 items-center gap-3 text-left"
+          title="Mantén para editar"
+          className="flex min-w-0 flex-1 items-center gap-2 text-left sm:gap-3"
           onContextMenu={(event) => {
             event.preventDefault();
             clear();
@@ -1264,34 +1237,27 @@ function PlanLine({ line, index, lifted, today, ahead, until, onMark, onOpenMenu
           }}
           onPointerDown={(event) => {
             if (event.button !== 0) return;
+            const node = event.currentTarget;
             point.current = { x: event.clientX, y: event.clientY, held: false };
             clear();
-            const pointerId = event.pointerId;
+            const scroller = node.closest('.app-scroll');
+            let drop = () => {};
+            const cancelScroll = () => { clear(); drop(); };
+            scroller?.addEventListener('scroll', cancelScroll, { passive: true });
+            drop = () => scroller?.removeEventListener('scroll', cancelScroll);
             timer.current = window.setTimeout(() => {
+              drop();
               point.current.held = true;
-              ref.current?.setPointerCapture(pointerId);
-              if (movable) onDragStart(line, point.current.x, point.current.y);
-              else if (ref.current) onOpenMenu(line, ref.current.getBoundingClientRect());
-            }, 280);
+              node.classList.add('hold-pop');
+              if (navigator.vibrate) navigator.vibrate(10);
+              if (ref.current) onOpenMenu(line, ref.current.getBoundingClientRect());
+            }, 420);
+            const end = () => { clear(); drop(); };
+            node.addEventListener('pointerup', end, { once: true });
+            node.addEventListener('pointercancel', end, { once: true });
           }}
           onPointerMove={(event) => {
-            if (!point.current.held) {
-              if (Math.hypot(event.clientX - point.current.x, event.clientY - point.current.y) > 22) clear();
-              return;
-            }
-            if (movable) onDragMove(event.clientX, event.clientY);
-          }}
-          onPointerUp={(event) => {
-            const held = point.current.held;
-            clear();
-            point.current.held = false;
-            if (held && movable) onDragEnd(event.clientX, event.clientY, ref.current?.getBoundingClientRect() ?? new DOMRect(event.clientX, event.clientY, 0, 0));
-          }}
-          onPointerCancel={() => {
-            const held = point.current.held;
-            clear();
-            point.current.held = false;
-            if (held && movable) onDragEnd(point.current.x, point.current.y, ref.current?.getBoundingClientRect() ?? new DOMRect());
+            if (!point.current.held && Math.hypot(event.clientX - point.current.x, event.clientY - point.current.y) > 6) clear();
           }}
         >
           <LineIcon label={line.label} />
@@ -1310,7 +1276,7 @@ function PlanLine({ line, index, lifted, today, ahead, until, onMark, onOpenMenu
           <span className="min-w-0 truncate text-slate-800 dark:text-slate-100">{line.label}</span>
         </span>
       )}
-      <span className={cn('shrink-0 tabular-nums font-semibold transition-opacity duration-500', lineClass(line), line.markKey && !line.paid && 'opacity-40')}>
+      <span className={cn('shrink-0 text-[13px] tabular-nums font-semibold transition-opacity duration-300', lineClass(line), line.markKey && !line.paid && 'opacity-40')}>
         {line.amount == null ? <SoftEur value={line.balance} /> : formatSignedEur(line.amount)}
       </span>
       {movable ? (

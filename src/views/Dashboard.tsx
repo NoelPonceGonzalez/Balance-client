@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type Dispatch, type PointerEvent as ReactPointerEvent, type SetStateAction } from 'react';
-import { createPortal } from 'react-dom';
+import { bindHold, HoldMenu, holdItemClass, placeMenu } from '@/components/HoldMenu';
 import { AnimatePresence, motion } from 'motion/react';
 import { ArrowUpDown, ChevronLeft, Eye, EyeOff, Pencil, Plus, Search, Trash2 } from 'lucide-react';
 import { PlatformLogo } from '@/components/PlatformLogo';
@@ -172,7 +172,7 @@ function formatRisingEur(value: number, target: number, card: boolean): string {
 }
 
 function RisingAmount({ value, hidden, signed = false, card = false, delay = 0 }: { value: number; hidden: boolean; signed?: boolean; card?: boolean; delay?: number }) {
-  const shown = useRise(Math.abs(value), !hidden, 1100, delay);
+  const shown = useRise(Math.abs(value), !hidden, 680, delay);
   if (hidden) return <>*****</>;
   const text = formatRisingEur(shown, Math.abs(value), card);
   if (!signed) return <>{text}</>;
@@ -181,16 +181,16 @@ function RisingAmount({ value, hidden, signed = false, card = false, delay = 0 }
   return <>{text}</>;
 }
 
-const rise = { duration: 0.55, ease: [0.22, 1, 0.36, 1] as const };
+const rise = { duration: 0.28, ease: [0.22, 1, 0.36, 1] as const };
 
 function Donut({ slices }: { slices: { key: string; eur: number; color: string }[] }) {
-  const progress = useRise(1, true, 1200, 80);
+  const progress = useRise(1, true, 700, 40);
   const total = slices.reduce((sum, slice) => sum + slice.eur, 0);
   const radius = 68;
   const circumference = 2 * Math.PI * radius;
   let cursor = 0;
   return (
-    <svg viewBox="0 0 200 200" className="mx-auto h-56 w-56" role="img" aria-label="De dónde viene el patrimonio">
+    <svg viewBox="0 0 200 200" className="mx-auto h-40 w-40 sm:h-52 sm:w-52" role="img" aria-label="De dónde viene el patrimonio">
       <circle cx="100" cy="100" r={radius} fill="none" stroke="currentColor" strokeWidth="24" className="text-slate-100 dark:text-slate-800" />
       {total > 0 && slices.map((slice) => {
         const length = (slice.eur / total) * circumference * progress;
@@ -747,35 +747,12 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
   };
 
   const holdAccount = (row: (typeof rows)[number], event: ReactPointerEvent) => {
-    if (event.button !== 0) return;
-    const x = event.clientX;
-    const y = event.clientY;
-    let moved = false;
-    const timer = window.setTimeout(() => {
-      if (moved) return;
+    bindHold(event, (x, y) => {
       suppressClick.current = true;
       setConfirmDelete(false);
-      setMenu({
-        id: row.key,
-        name: row.name,
-        cash: row.cash,
-        top: Math.min(y, window.innerHeight - 120),
-        left: Math.min(x, window.innerWidth - 188),
-      });
-    }, 380);
-    const move = (ev: PointerEvent) => {
-      if (Math.hypot(ev.clientX - x, ev.clientY - y) > 12) {
-        moved = true;
-        window.clearTimeout(timer);
-      }
-    };
-    const up = () => {
-      window.clearTimeout(timer);
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', up);
-    };
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', up);
+      const place = placeMenu(x, y);
+      setMenu({ id: row.key, name: row.name, cash: row.cash, ...place });
+    });
   };
 
   const saveAccount = async () => {
@@ -1221,9 +1198,11 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
         )}
       </motion.section>
 
-      <motion.div className="grid place-items-center py-1" initial={{ opacity: 0, scale: 0.86 }} animate={{ opacity: 1, scale: 1 }} transition={{ ...rise, delay: 0.08 }}>
-        {slices.length > 0 ? <Donut slices={slices} /> : <span className="my-2 h-44 w-44 rounded-full border-[16px] border-dashed border-slate-300/80 dark:border-slate-700" />}
-      </motion.div>
+      {slices.length > 0 && (
+        <motion.div className="grid place-items-center py-1" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.25 }}>
+          <Donut slices={slices} />
+        </motion.div>
+      )}
 
       <section className="space-y-2">
         {ordered.length > 0 && (
@@ -1238,14 +1217,15 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
           const frame = row.frames[beat % row.frames.length];
           const open = openKey === row.key;
           return (
-            <motion.div key={row.key} initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ ...rise, delay: 0.12 + index * 0.07 }}>
+            <motion.div key={row.key} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.22, delay: Math.min(index, 5) * 0.03 }}>
               <button
                 type="button"
                 onPointerDown={(event) => holdAccount(row, event)}
                 onContextMenu={(event) => {
                   event.preventDefault();
                   setConfirmDelete(false);
-                  setMenu({ id: row.key, name: row.name, cash: row.cash, top: Math.min(event.clientY, window.innerHeight - 120), left: Math.min(event.clientX, window.innerWidth - 188) });
+                  const place = placeMenu(event.clientX, event.clientY);
+                  setMenu({ id: row.key, name: row.name, cash: row.cash, ...place });
                 }}
                 onClick={() => {
                   if (suppressClick.current) {
@@ -1254,15 +1234,15 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
                   }
                   setOpenKey(open ? null : row.key);
                 }}
-                className="relative flex w-full items-center gap-4 overflow-hidden rounded-[28px] border border-white/70 py-4 pl-5 pr-4 text-left shadow-[0_8px_32px_rgba(15,23,42,0.06)] backdrop-blur-2xl dark:border-white/10"
+                className="hold-target relative flex w-full items-center gap-3 overflow-hidden rounded-2xl border border-white/70 py-3 pl-4 pr-3 text-left shadow-[0_8px_24px_rgba(15,23,42,0.05)] backdrop-blur-xl dark:border-white/10 sm:gap-4 sm:rounded-[28px] sm:py-4 sm:pl-5 sm:pr-4"
                 style={{ background: wash(row.color) }}
               >
                 <span className="absolute inset-y-0 left-0 w-2" style={{ background: isLight(row.color) ? 'rgba(28,28,30,0.14)' : row.color }} />
-                <PlatformLogo name={row.logoName} size={36} />
+                <PlatformLogo name={row.logoName} size={32} />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-semibold" style={{ color: isLight(row.color) ? '#1C1C1E' : row.color }}>{row.name}</span>
-                  <span className="mt-1 block truncate text-[28px] font-black leading-none text-slate-900 dark:text-white">
-                    {row.value == null ? '—' : <RisingAmount value={row.value} hidden={hidden} card delay={140 + index * 70} />}
+                  <span className="mt-1 block truncate text-[22px] font-black leading-none text-slate-900 dark:text-white sm:text-[28px]">
+                    {row.value == null ? '—' : <RisingAmount value={row.value} hidden={hidden} card delay={40} />}
                   </span>
                 </span>
                 <AnimatePresence mode="wait">
@@ -1272,7 +1252,7 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -8 }}
                     transition={{ duration: 0.28 }}
-                    className={cn('shrink-0 text-base font-black tabular-nums', hidden ? 'text-slate-400' : frame.className)}
+                    className={cn('shrink-0 text-sm font-black tabular-nums sm:text-base', hidden ? 'text-slate-400' : frame.className)}
                   >
                     {mask(frame.text)}
                   </motion.span>
@@ -1371,7 +1351,7 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
             <img src="/extras/objeto.svg" alt="" className="h-9 w-9 rounded-xl" />
             <span className="min-w-0 flex-1">
               <span className="block text-sm font-semibold">Extras</span>
-              <span className="mt-1 block text-[28px] font-black leading-none"><RisingAmount value={extraWealth} hidden={hidden} card /></span>
+              <span className="mt-1 block text-[22px] font-black leading-none sm:text-[28px]"><RisingAmount value={extraWealth} hidden={hidden} card /></span>
             </span>
           </button>
         )}
@@ -1390,30 +1370,26 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
         </motion.button>
       </section>
       {adding && <QuickSplit onClose={() => setAdding(false)} onSaved={load} />}
-      {menu && createPortal(
-        <>
-          <button type="button" className="fixed inset-0 z-[60] cursor-default" aria-label="Cerrar menú" onClick={() => setMenu(null)} />
-          <div className="fixed z-[70] w-44 overflow-hidden rounded-2xl bg-white py-1 text-sm shadow-2xl ring-1 ring-black/5 dark:bg-slate-900 dark:ring-white/10" style={{ top: menu.top, left: menu.left }}>
-            <button
-              type="button"
-              onClick={() => {
-                setEditor({ id: menu.id, name: menu.name, balance: String(menu.cash) });
-                setMenu(null);
-              }}
-              className="flex w-full items-center gap-2 px-3 py-2.5 text-left font-semibold text-slate-800 hover:bg-slate-50 dark:text-slate-100 dark:hover:bg-white/5"
-            >
-              <Pencil size={15} /> Editar
-            </button>
-            <button
-              type="button"
-              onClick={() => { if (confirmDelete) void deleteAccount(); else setConfirmDelete(true); }}
-              className="flex w-full items-center gap-2 px-3 py-2.5 text-left font-semibold text-[#ea3943] hover:bg-slate-50 dark:hover:bg-white/5"
-            >
-              <Trash2 size={15} /> {confirmDelete ? 'Confirmar' : 'Eliminar'}
-            </button>
-          </div>
-        </>,
-        document.body,
+      {menu && (
+        <HoldMenu top={menu.top} left={menu.left} onClose={() => setMenu(null)}>
+          <button
+            type="button"
+            onClick={() => {
+              setEditor({ id: menu.id, name: menu.name, balance: String(menu.cash) });
+              setMenu(null);
+            }}
+            className={cn(holdItemClass, 'text-slate-800 dark:text-slate-100')}
+          >
+            <Pencil size={14} /> Editar
+          </button>
+          <button
+            type="button"
+            onClick={() => { if (confirmDelete) void deleteAccount(); else setConfirmDelete(true); }}
+            className={cn(holdItemClass, 'text-[#ea3943]')}
+          >
+            <Trash2 size={14} /> {confirmDelete ? 'Confirmar' : 'Eliminar'}
+          </button>
+        </HoldMenu>
       )}
       {piece && (
         <PieceDialog

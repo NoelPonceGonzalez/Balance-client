@@ -24,13 +24,12 @@ export function QuietLoad({ kind = 'page' }: { kind?: 'screen' | 'page' | 'rows'
       </div>
     );
   }
-  const lines = kind === 'rows' ? 6 : 4;
+  const lines = kind === 'rows' ? 4 : 3;
   return (
-    <div role="status" aria-live="polite" aria-busy="true" className="space-y-3">
+    <div role="status" aria-live="polite" aria-busy="true" className="space-y-2">
       <span className="sr-only">Cargando</span>
-      {kind === 'page' && <Bone className="h-7 w-36 rounded-full" />}
       {Array.from({ length: lines }, (_, index) => (
-        <Bone key={index} className="h-[4.25rem] w-full rounded-[1.6rem]" />
+        <Bone key={index} className="h-12 w-full rounded-2xl" />
       ))}
     </div>
   );
