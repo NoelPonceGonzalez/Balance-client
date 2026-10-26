@@ -37,6 +37,7 @@ export function Shell({
           <p className="mt-0.5 truncate text-[11px] font-medium text-slate-400">{user.name}</p>
         </div>
         <div className="ml-auto flex items-center gap-1">
+          <InstallApp compact />
           <NotificationsBell align="right" />
           <button
             type="button"
@@ -49,7 +50,6 @@ export function Shell({
         </div>
       </header>
       <main className="app-scroll min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-4 py-2 pb-36 md:px-8">
-        <InstallApp />
         {children}
       </main>
       <div className="pointer-events-none absolute inset-x-0 bottom-0 z-40">
@@ -64,14 +64,14 @@ export function Shell({
                 type="button"
                 onClick={() => onChange(item.id)}
                 className={cn(
-                  'flex shrink-0 items-center gap-2 rounded-full px-3 py-2 text-[13px] font-semibold transition min-[480px]:px-3.5',
+                  'flex shrink-0 items-center gap-1 rounded-full px-2.5 py-2 text-[11px] font-semibold transition sm:gap-2 sm:px-3.5 sm:text-[13px]',
                   active
                     ? 'bg-white/85 text-indigo-700 shadow-sm dark:bg-white/15 dark:text-white'
                     : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200',
                 )}
               >
                 <Icon size={16} strokeWidth={1.75} />
-                <span className="sr-only min-[480px]:not-sr-only">{item.label}</span>
+                <span>{item.label}</span>
               </button>
             );
           })}

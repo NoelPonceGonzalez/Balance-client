@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type Dispatch, type PointerEvent as ReactPointerEvent, type SetStateAction } from 'react';
 import { bindHold, HoldMenu, holdItemClass, placeMenu } from '@/components/HoldMenu';
 import { AnimatePresence, motion } from 'motion/react';
-import { ArrowUpDown, ChevronLeft, Eye, EyeOff, Pencil, Plus, Search, Trash2 } from 'lucide-react';
+import { ArrowUpDown, ChevronLeft, Eye, EyeOff, MoreHorizontal, Pencil, Plus, Search, Trash2 } from 'lucide-react';
+import { PendingToday } from '@/components/PendingToday';
 import { PlatformLogo } from '@/components/PlatformLogo';
 import { QuietLoad } from '@/components/QuietLoad';
 import { QuickSplit } from '@/components/QuickSplit';
@@ -429,13 +430,16 @@ function PieceDialog({
           </Field>
         )}
         {(piece.skins || piece.assetClass === 'personal_good') && (
-          <>
-            <Input label="Float" value={piece.floatText} onChange={(event) => setPiece({ ...piece, floatText: event.target.value })} placeholder="0,15 más o menos" />
-            <p className="text-xs font-medium text-slate-400">{wearHint(piece.floatText, piece.wears)}</p>
-          </>
-        )}
-        {piece.phases.length > 0 && (
-          <Input label="Puesto en el mundo" value={piece.rank} onChange={(event) => setPiece({ ...piece, rank: event.target.value })} placeholder="26, si lo sabes" />
+          <details className="rounded-2xl border border-slate-200 px-3 py-2 dark:border-white/10">
+            <summary className="cursor-pointer text-sm font-semibold text-slate-500">Detalle</summary>
+            <div className="mt-3 grid gap-3">
+              <Input label="Float" value={piece.floatText} onChange={(event) => setPiece({ ...piece, floatText: event.target.value })} placeholder="0,15 más o menos" />
+              <p className="text-xs font-medium text-slate-400">{wearHint(piece.floatText, piece.wears)}</p>
+              {piece.phases.length > 0 && (
+                <Input label="Puesto en el mundo" value={piece.rank} onChange={(event) => setPiece({ ...piece, rank: event.target.value })} placeholder="26, si lo sabes" />
+              )}
+            </div>
+          </details>
         )}
         {market && (
           <div className="grid gap-3 rounded-2xl border border-white/70 bg-white/35 p-3 dark:border-white/10 dark:bg-white/5">
@@ -1198,6 +1202,8 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
         )}
       </motion.section>
 
+      <PendingToday hidden={hidden} onChanged={() => void load()} />
+
       {slices.length > 0 && (
         <motion.div className="grid place-items-center py-1" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.25 }}>
           <Donut slices={slices} />
@@ -1218,8 +1224,9 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
           const open = openKey === row.key;
           return (
             <motion.div key={row.key} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.22, delay: Math.min(index, 5) * 0.03 }}>
-              <button
-                type="button"
+              <div
+                role="button"
+                tabIndex={0}
                 onPointerDown={(event) => holdAccount(row, event)}
                 onContextMenu={(event) => {
                   event.preventDefault();
@@ -1234,7 +1241,13 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
                   }
                   setOpenKey(open ? null : row.key);
                 }}
-                className="hold-target relative flex w-full items-center gap-3 overflow-hidden rounded-2xl border border-white/70 py-3 pl-4 pr-3 text-left shadow-[0_8px_24px_rgba(15,23,42,0.05)] backdrop-blur-xl dark:border-white/10 sm:gap-4 sm:rounded-[28px] sm:py-4 sm:pl-5 sm:pr-4"
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    setOpenKey(open ? null : row.key);
+                  }
+                }}
+                className="hold-target relative flex w-full cursor-pointer items-center gap-3 overflow-hidden rounded-2xl border border-white/70 py-3 pl-4 pr-3 text-left shadow-[0_8px_24px_rgba(15,23,42,0.05)] backdrop-blur-xl dark:border-white/10 sm:gap-4 sm:rounded-[28px] sm:py-4 sm:pl-5 sm:pr-4"
                 style={{ background: wash(row.color) }}
               >
                 <span className="absolute inset-y-0 left-0 w-2" style={{ background: isLight(row.color) ? 'rgba(28,28,30,0.14)' : row.color }} />
@@ -1257,7 +1270,21 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
                     {mask(frame.text)}
                   </motion.span>
                 </AnimatePresence>
-              </button>
+                <button
+                  type="button"
+                  aria-label="Editar o eliminar"
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setConfirmDelete(false);
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    setMenu({ id: row.key, name: row.name, cash: row.cash, ...placeMenu(rect.left + rect.width / 2, rect.top) });
+                  }}
+                  className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-slate-400"
+                >
+                  <MoreHorizontal size={16} />
+                </button>
+              </div>
               <AnimatePresence initial={false}>
                 {open && (
                   <motion.ul

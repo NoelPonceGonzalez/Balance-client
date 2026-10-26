@@ -189,10 +189,16 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
       </div>
       {error && <p className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">{error}</p>}
       <Card className="border-white/70 bg-white/45 shadow-[0_8px_32px_rgba(15,23,42,0.06)] backdrop-blur-2xl dark:border-white/10 dark:bg-white/10">
-        <div className="mb-3 flex flex-wrap gap-2">
+        <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
+          <Field label="Sitio">
+            <select className={fieldClass} aria-label="Sitio" value={filters.accountId} onChange={(event) => setFilters({ ...filters, accountId: event.target.value })}>
+              <option value="">Todos</option>
+              {accounts.map((account) => <option key={docId(account)} value={docId(account)}>{account.name}</option>)}
+            </select>
+          </Field>
           <select
             className={fieldClass}
-            aria-label="AÃ±o"
+            aria-label="Año"
             value={year}
             onChange={(event) => {
               const next = event.target.value;
@@ -200,7 +206,7 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
               setFilters({ ...filters, ...periodRange(next, next ? month : '') });
             }}
           >
-            <option value="">Todos los aÃ±os</option>
+            <option value="">Todos los años</option>
             {Array.from({ length: 8 }, (_, index) => now.getFullYear() - index).map((value) => (
               <option key={value} value={String(value)}>{value}</option>
             ))}
@@ -216,29 +222,26 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
               setFilters({ ...filters, ...periodRange(year, next) });
             }}
           >
-            <option value="">Todo el aÃ±o</option>
+            <option value="">Todo el año</option>
             {MONTHS.map((label, index) => (
               <option key={label} value={String(index + 1).padStart(2, '0')}>{label}</option>
             ))}
           </select>
         </div>
-        <div className="grid gap-3 md:grid-cols-5">
-          <Input label="Buscar" value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} placeholder="DescripciÃ³n o categorÃ­a" />
-          <Field label="Tipo">
-            <select className={fieldClass} value={filters.type} onChange={(e) => setFilters({ ...filters, type: e.target.value })}>
-              <option value="">Todos</option>
-              {Object.entries(TYPE_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-            </select>
-          </Field>
-          <Field label="Cuenta">
-            <select className={fieldClass} value={filters.accountId} onChange={(e) => setFilters({ ...filters, accountId: e.target.value })}>
-              <option value="">Todas</option>
-              {accounts.map((account) => <option key={docId(account)} value={docId(account)}>{account.name}</option>)}
-            </select>
-          </Field>
-          <Input label="Desde" type="date" value={filters.from} onChange={(e) => setFilters({ ...filters, from: e.target.value })} />
-          <Input label="Hasta" type="date" value={filters.to} onChange={(e) => setFilters({ ...filters, to: e.target.value })} />
-        </div>
+        <details className="mt-1">
+          <summary className="cursor-pointer text-xs font-semibold text-slate-400">Más filtros</summary>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <Input label="Buscar" value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} placeholder="Descripción o categoría" />
+            <Field label="Tipo">
+              <select className={fieldClass} value={filters.type} onChange={(e) => setFilters({ ...filters, type: e.target.value })}>
+                <option value="">Todos</option>
+                {Object.entries(TYPE_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+            </Field>
+            <Input label="Desde" type="date" value={filters.from} onChange={(e) => setFilters({ ...filters, from: e.target.value })} />
+            <Input label="Hasta" type="date" value={filters.to} onChange={(e) => setFilters({ ...filters, to: e.target.value })} />
+          </div>
+        </details>
       </Card>
       <ul className="overflow-hidden rounded-[28px] border border-white/70 bg-white/55 shadow-[0_8px_32px_rgba(15,23,42,0.06)] backdrop-blur-2xl dark:border-white/10 dark:bg-slate-900/55">
         {grouped.map((group) => {

@@ -11,7 +11,7 @@ function runningAsApp() {
   return window.matchMedia('(display-mode: standalone)').matches || window.matchMedia('(display-mode: fullscreen)').matches || nav.standalone === true;
 }
 
-export function InstallApp() {
+export function InstallApp({ compact = false }: { compact?: boolean } = {}) {
   const [web, setWeb] = useState(false);
   const [prompt, setPrompt] = useState<InstallPrompt | null>(null);
   const [help, setHelp] = useState(false);
@@ -45,6 +45,21 @@ export function InstallApp() {
   };
 
   const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
+
+  if (compact) {
+    return (
+      <span className="relative">
+        <button type="button" aria-label="Descargar la aplicación" onClick={() => void install()} className="rounded-full p-2 text-slate-400">
+          <Download size={18} />
+        </button>
+        {help && (
+          <p className="absolute right-0 top-full z-50 mt-2 w-56 rounded-2xl border border-slate-200 bg-white p-3 text-xs leading-5 text-slate-500 shadow-lg dark:border-white/10 dark:bg-slate-950">
+            {ios ? 'En Safari pulsa Compartir y luego Añadir a pantalla de inicio.' : 'En el menú del navegador elige Instalar aplicación o Añadir a pantalla de inicio.'}
+          </p>
+        )}
+      </span>
+    );
+  }
 
   return (
     <div className="mb-3">

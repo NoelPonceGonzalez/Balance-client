@@ -76,7 +76,7 @@ export function NotificationsBell({ align = 'left' }: { align?: 'left' | 'right'
             {items.length === 0 && <p className="px-1 py-3 text-sm font-medium text-slate-500">Cuando una inversión cruce el umbral, el aviso aparece aquí.</p>}
             {items.map((item) => (
               <article key={item.id} className={cn('rounded-2xl px-3 py-2', item.read ? 'bg-transparent' : 'bg-slate-50 dark:bg-slate-900')}>
-                <p className={cn('text-sm font-black', item.direction === 'up' ? 'text-[#16c784]' : 'text-[#ea3943]')}>{item.title}</p>
+                <p className={cn('text-sm font-black', item.direction === 'up' ? 'text-[#16c784]' : item.direction === 'due' ? 'text-slate-800 dark:text-white' : 'text-[#ea3943]')}>{item.title}</p>
                 <p className="text-xs font-medium text-slate-500">{item.body}</p>
                 <p className="mt-1 text-[11px] font-bold text-slate-400">{formatAgo(item.createdAt)}</p>
               </article>

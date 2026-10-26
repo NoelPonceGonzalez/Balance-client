@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { bindHold, HoldMenu, holdItemClass, placeMenu } from '@/components/HoldMenu';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'motion/react';
-import { Banknote, Cake, Check, ChevronLeft, Dumbbell, Gift, GripVertical, ImageIcon, Pencil, PiggyBank, Plus, RotateCcw, Trash2, Utensils, Wallet, Watch, type LucideIcon } from 'lucide-react';
+import { Banknote, Cake, Check, ChevronLeft, Dumbbell, Gift, GripVertical, ImageIcon, MoreHorizontal, Pencil, PiggyBank, Plus, RotateCcw, Trash2, Utensils, Wallet, Watch, type LucideIcon } from 'lucide-react';
 import { ModalClose, modalOverlayClass, modalPanelClass } from '@/components/Modal';
 import { findBrand } from '@/lib/brands';
 import { PlatformLogo } from '@/components/PlatformLogo';
@@ -626,7 +626,10 @@ export function Plans({ embedded = false }: { embedded?: boolean }) {
             return (
               <div
                 key={id}
-                onPointerDown={(event) => holdCard(id, event)}
+                onPointerDown={(event) => {
+                  if ((event.target as HTMLElement).closest('[data-menu]')) return;
+                  holdCard(id, event);
+                }}
                 onContextMenu={(event) => {
                   event.preventDefault();
                   setCardMenu({ id, ...placeMenu(event.clientX, event.clientY), confirm: false });
@@ -645,6 +648,20 @@ export function Plans({ embedded = false }: { embedded?: boolean }) {
                   <span className="flex min-w-0 items-center gap-2">
                     {site && <PlatformLogo name={site.platform || site.name} size={22} />}
                     <span className="min-w-0 truncate text-sm font-black">{item.plan.name}</span>
+                    <button
+                      type="button"
+                      data-menu
+                      aria-label="Editar o eliminar"
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        const rect = event.currentTarget.getBoundingClientRect();
+                        setCardMenu({ id, ...placeMenu(rect.left + rect.width / 2, rect.top), confirm: false });
+                      }}
+                      className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-slate-400"
+                    >
+                      <MoreHorizontal size={15} />
+                    </button>
                   </span>
                   <PlanCorner balance={balance} target={item.plan.targetAmount} delta={delta} beat={beat} />
                 </span>
@@ -721,7 +738,7 @@ export function Plans({ embedded = false }: { embedded?: boolean }) {
                     El saldo es {forecast.anchor.label}
                   </span>
                 )}
-                <span className="mt-1 block">Un fijo se marca solo al llegar su día. Márcalo antes y el plan avanza hasta ahí, igual que un extra, para ver el saldo. El asa de un extra lo pasa de mes.</span>
+                <span className="mt-1 block">Un fijo entra al llegar su día y confirmarlo. Un gasto entra cuando lo marcas. El asa de un gasto lo pasa de mes.</span>
               </p>
             </div>
             <div className="flex shrink-0 gap-2">
@@ -935,78 +952,27 @@ export function Plans({ embedded = false }: { embedded?: boolean }) {
                 </>
               )}
               {shaped && (
-              <details
-                key={editing || 'nuevo'}
-                className="rounded-2xl border border-slate-200 p-3 dark:border-white/10"
-                ref={(el) => {
-                  if (el && el.dataset.ready !== '1') {
-                    el.open = draft.plannedExpenses.length + draft.recurring.length + draft.intervals.length + draft.incomes.length > 0;
-                    el.dataset.ready = '1';
-                  }
-                }}
-              >
-              <summary className="cursor-pointer text-sm font-semibold text-slate-600 dark:text-slate-300">Gastos e ingresos, si hacen falta</summary>
-              <div className="mt-3 grid gap-4">
-              <ExpenseBlock
-                title="Gastos"
-                onAdd={() => setDraft({ ...draft, plannedExpenses: [...draft.plannedExpenses, { name: '', amount: '', date: draft.startDate, paid: false }] })}
-                onAddMonthly={() => setDraft({ ...draft, recurring: [...draft.recurring, { name: '', amount: '', dayOfMonth: '1', paidDates: [] }] })}
-                onAddWeekly={() => setDraft({ ...draft, intervals: [...draft.intervals, { name: '', amount: '', everyWeeks: '2', startDate: draft.startDate, paidDates: [] }] })}
-              >
+              <details className="rounded-2xl border border-slate-200 p-3 dark:border-white/10">
+              <summary className="cursor-pointer text-sm font-semibold text-slate-600 dark:text-slate-300">Apuntes</summary>
+              <div className="mt-3 grid gap-2">
                 {draft.plannedExpenses.map((item, index) => (
-                  <div key={`e-${index}`} className="space-y-2 rounded-2xl border border-slate-200 p-3 dark:border-white/10">
-                    <Input placeholder="Qué es" value={item.name} onChange={(event) => patchList(draft, setDraft, 'plannedExpenses', index, { name: event.target.value })} />
-                    <div className="grid grid-cols-2 gap-2">
-                      <Input type="number" placeholder="Importe" value={item.amount} onChange={(event) => patchList(draft, setDraft, 'plannedExpenses', index, { amount: event.target.value })} />
-                      <Input type="date" value={item.date} onChange={(event) => patchList(draft, setDraft, 'plannedExpenses', index, { date: event.target.value })} />
-                    </div>
-                    <Remove onClick={() => setDraft({ ...draft, plannedExpenses: draft.plannedExpenses.filter((_, itemIndex) => itemIndex !== index) })} />
-                  </div>
+                  <ApunteRow key={`e-${index}`} kind="Gasto" name={item.name} amount={item.amount} when={item.date} whenType="date" onName={(name) => patchList(draft, setDraft, 'plannedExpenses', index, { name })} onAmount={(amount) => patchList(draft, setDraft, 'plannedExpenses', index, { amount })} onWhen={(date) => patchList(draft, setDraft, 'plannedExpenses', index, { date })} onRemove={() => setDraft({ ...draft, plannedExpenses: draft.plannedExpenses.filter((_, itemIndex) => itemIndex !== index) })} />
                 ))}
                 {draft.recurring.map((item, index) => (
-                  <div key={`r-${index}`} className="space-y-2 rounded-2xl border border-slate-200 p-3 dark:border-white/10">
-                    <p className="text-[11px] font-semibold text-slate-400">Cada mes</p>
-                    <Input placeholder="Qué es" value={item.name} onChange={(event) => patchList(draft, setDraft, 'recurring', index, { name: event.target.value })} />
-                    <div className="grid grid-cols-2 gap-2">
-                      <Input type="number" placeholder="Importe" value={item.amount} onChange={(event) => patchList(draft, setDraft, 'recurring', index, { amount: event.target.value })} />
-                      <Input type="number" min="1" max="31" placeholder="Día" value={item.dayOfMonth} onChange={(event) => patchList(draft, setDraft, 'recurring', index, { dayOfMonth: event.target.value })} />
-                    </div>
-                    <Remove onClick={() => setDraft({ ...draft, recurring: draft.recurring.filter((_, itemIndex) => itemIndex !== index) })} />
-                  </div>
+                  <ApunteRow key={`r-${index}`} kind="Cada mes" name={item.name} amount={item.amount} when={item.dayOfMonth} whenType="day" onName={(name) => patchList(draft, setDraft, 'recurring', index, { name })} onAmount={(amount) => patchList(draft, setDraft, 'recurring', index, { amount })} onWhen={(dayOfMonth) => patchList(draft, setDraft, 'recurring', index, { dayOfMonth })} onRemove={() => setDraft({ ...draft, recurring: draft.recurring.filter((_, itemIndex) => itemIndex !== index) })} />
                 ))}
                 {draft.intervals.map((item, index) => (
-                  <div key={`w-${index}`} className="space-y-2 rounded-2xl border border-slate-200 p-3 dark:border-white/10">
-                    <p className="text-[11px] font-semibold text-slate-400">Cada varias semanas</p>
-                    <Input placeholder="Qué es" value={item.name} onChange={(event) => patchList(draft, setDraft, 'intervals', index, { name: event.target.value })} />
-                    <div className="grid grid-cols-2 gap-2">
-                      <Input type="number" placeholder="Importe" value={item.amount} onChange={(event) => patchList(draft, setDraft, 'intervals', index, { amount: event.target.value })} />
-                      <Input type="number" min="1" max="52" placeholder="Semanas" value={item.everyWeeks} onChange={(event) => patchList(draft, setDraft, 'intervals', index, { everyWeeks: event.target.value })} />
-                    </div>
-                    <Input type="date" value={item.startDate} onChange={(event) => patchList(draft, setDraft, 'intervals', index, { startDate: event.target.value })} />
-                    <Remove onClick={() => setDraft({ ...draft, intervals: draft.intervals.filter((_, itemIndex) => itemIndex !== index) })} />
-                  </div>
+                  <ApunteRow key={`w-${index}`} kind="Semanas" name={item.name} amount={item.amount} when={item.everyWeeks} whenType="weeks" extra={item.startDate} onName={(name) => patchList(draft, setDraft, 'intervals', index, { name })} onAmount={(amount) => patchList(draft, setDraft, 'intervals', index, { amount })} onWhen={(everyWeeks) => patchList(draft, setDraft, 'intervals', index, { everyWeeks })} onExtra={(startDate) => patchList(draft, setDraft, 'intervals', index, { startDate })} onRemove={() => setDraft({ ...draft, intervals: draft.intervals.filter((_, itemIndex) => itemIndex !== index) })} />
                 ))}
-              </ExpenseBlock>
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Ingresos extra</p>
-                  <button type="button" onClick={() => setDraft({ ...draft, incomes: [...draft.incomes, { name: '', amount: '', date: draft.startDate, status: 'expected', paid: false }] })} className="inline-flex items-center gap-1 text-sm font-semibold text-indigo-600"><Plus size={14} /> Añadir</button>
-                </div>
                 {draft.incomes.map((item, index) => (
-                  <div key={`i-${index}`} className="space-y-2 rounded-2xl border border-slate-200 p-3 dark:border-white/10">
-                    <Input placeholder="Qué es" value={item.name} onChange={(event) => patchList(draft, setDraft, 'incomes', index, { name: event.target.value })} />
-                    <div className="grid grid-cols-2 gap-2">
-                      <Input type="number" placeholder="Importe" value={item.amount} onChange={(event) => patchList(draft, setDraft, 'incomes', index, { amount: event.target.value })} />
-                      <Input type="date" value={item.date} onChange={(event) => patchList(draft, setDraft, 'incomes', index, { date: event.target.value })} />
-                    </div>
-                    <select className={fieldClass} value={item.status} onChange={(event) => patchList(draft, setDraft, 'incomes', index, { status: event.target.value as 'expected' | 'confirmed' })}>
-                      <option value="expected">Estimado</option>
-                      <option value="confirmed">Confirmado</option>
-                    </select>
-                    <Remove onClick={() => setDraft({ ...draft, incomes: draft.incomes.filter((_, itemIndex) => itemIndex !== index) })} />
-                  </div>
+                  <ApunteRow key={`i-${index}`} kind="Ingreso" name={item.name} amount={item.amount} when={item.date} whenType="date" status={item.status} onStatus={(status) => patchList(draft, setDraft, 'incomes', index, { status })} onName={(name) => patchList(draft, setDraft, 'incomes', index, { name })} onAmount={(amount) => patchList(draft, setDraft, 'incomes', index, { amount })} onWhen={(date) => patchList(draft, setDraft, 'incomes', index, { date })} onRemove={() => setDraft({ ...draft, incomes: draft.incomes.filter((_, itemIndex) => itemIndex !== index) })} />
                 ))}
-              </div>
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  <button type="button" onClick={() => setDraft({ ...draft, plannedExpenses: [...draft.plannedExpenses, { name: '', amount: '', date: draft.startDate, paid: false }] })} className="rounded-full border border-slate-200 px-2.5 py-1 text-[11px] font-semibold text-slate-500 dark:border-white/10">+ Gasto</button>
+                  <button type="button" onClick={() => setDraft({ ...draft, recurring: [...draft.recurring, { name: '', amount: '', dayOfMonth: '1', paidDates: [] }] })} className="rounded-full border border-slate-200 px-2.5 py-1 text-[11px] font-semibold text-slate-500 dark:border-white/10">+ Cada mes</button>
+                  <button type="button" onClick={() => setDraft({ ...draft, intervals: [...draft.intervals, { name: '', amount: '', everyWeeks: '2', startDate: draft.startDate, paidDates: [] }] })} className="rounded-full border border-slate-200 px-2.5 py-1 text-[11px] font-semibold text-slate-500 dark:border-white/10">+ Cada X sem.</button>
+                  <button type="button" onClick={() => setDraft({ ...draft, incomes: [...draft.incomes, { name: '', amount: '', date: draft.startDate, status: 'expected', paid: false }] })} className="rounded-full border border-slate-200 px-2.5 py-1 text-[11px] font-semibold text-slate-500 dark:border-white/10">+ Ingreso</button>
+                </div>
               </div>
               </details>
               )}
@@ -1263,7 +1229,7 @@ function PlanLine({ line, index, lifted, today, ahead, until, onMark, onOpenMenu
           <LineIcon label={line.label} />
           <span className="min-w-0 flex-1">
             <span className={cn('flex min-w-0 items-center gap-2 transition-colors duration-300', line.paid ? 'text-slate-900 dark:text-white' : 'text-slate-600 dark:text-slate-300')}>
-              {line.automatic && <span className="shrink-0 text-[9px] font-black uppercase tracking-wide text-slate-400">Fijo</span>}
+              <span className="shrink-0 text-[9px] font-black uppercase tracking-wide text-slate-400">{lineKind(line)}</span>
               <span className="truncate">{line.label}</span>
             </span>
             {line.absorbed && <span className="block text-[11px] font-medium text-slate-400">{line.paid ? 'Ya está en el efectivo' : 'Falta confirmarlo'}</span>}
@@ -1279,6 +1245,20 @@ function PlanLine({ line, index, lifted, today, ahead, until, onMark, onOpenMenu
       <span className={cn('shrink-0 text-[13px] tabular-nums font-semibold transition-opacity duration-300', lineClass(line), line.markKey && !line.paid && 'opacity-40')}>
         {line.amount == null ? <SoftEur value={line.balance} /> : formatSignedEur(line.amount)}
       </span>
+      {line.markKey && (
+        <button
+          type="button"
+          aria-label="Editar o eliminar"
+          className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-slate-300"
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation();
+            onOpenMenu(line, event.currentTarget.getBoundingClientRect());
+          }}
+        >
+          <MoreHorizontal size={15} />
+        </button>
+      )}
       {movable ? (
         <button
           type="button"
@@ -1314,22 +1294,49 @@ function PlanLine({ line, index, lifted, today, ahead, until, onMark, onOpenMenu
   );
 }
 
-function ExpenseBlock({ title, onAdd, onAddMonthly, onAddWeekly, children }: { title: string; onAdd: () => void; onAddMonthly: () => void; onAddWeekly: () => void; children: ReactNode }) {
-  return (
-    <div className="space-y-2">
-      <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">{title}</p>
-      <div className="flex flex-wrap gap-2">
-        <button type="button" onClick={onAdd} className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 dark:border-white/10 dark:text-slate-300">Una fecha</button>
-        <button type="button" onClick={onAddMonthly} className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 dark:border-white/10 dark:text-slate-300">Cada mes</button>
-        <button type="button" onClick={onAddWeekly} className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 dark:border-white/10 dark:text-slate-300">Cada X semanas</button>
-      </div>
-      {children}
-    </div>
-  );
+function lineKind(line: PlanMonthLine): string {
+  if (line.automatic || line.markKey?.startsWith('recurring') || line.markKey?.startsWith('interval')) return 'Fijo';
+  if (line.markKey?.startsWith('savings')) return 'Ahorro';
+  if (line.markKey?.startsWith('income') || (line.amount != null && line.amount > 0)) return 'Ingreso';
+  return 'Gasto';
 }
 
-function Remove({ onClick }: { onClick: () => void }) {
-  return <button type="button" onClick={onClick} className="text-sm font-semibold text-rose-600" aria-label="Quitar">Quitar</button>;
+function ApunteRow({ kind, name, amount, when, whenType, extra, status, onName, onAmount, onWhen, onExtra, onStatus, onRemove }: {
+  kind: string;
+  name: string;
+  amount: string;
+  when: string;
+  whenType: 'date' | 'day' | 'weeks';
+  extra?: string;
+  status?: 'expected' | 'confirmed';
+  onName: (value: string) => void;
+  onAmount: (value: string) => void;
+  onWhen: (value: string) => void;
+  onExtra?: (value: string) => void;
+  onStatus?: (value: 'expected' | 'confirmed') => void;
+  onRemove: () => void;
+}) {
+  return (
+    <div className="grid gap-1.5 rounded-xl border border-slate-200/80 px-2.5 py-2 dark:border-white/10">
+      <div className="flex items-center gap-2">
+        <span className="w-16 shrink-0 text-[10px] font-bold uppercase tracking-wide text-slate-400">{kind}</span>
+        <input value={name} onChange={(event) => onName(event.target.value)} placeholder="Qué es" className="min-w-0 flex-1 bg-transparent text-[13px] font-semibold outline-none" />
+        <button type="button" onClick={onRemove} className="text-[11px] font-semibold text-rose-600" aria-label="Quitar">Quitar</button>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <input type="number" min="0" step="any" value={amount} onChange={(event) => onAmount(event.target.value)} placeholder="Importe" className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[13px] outline-none dark:border-white/10 dark:bg-transparent" />
+        <input type={whenType === 'date' ? 'date' : 'number'} min={whenType === 'date' ? undefined : 1} max={whenType === 'day' ? 31 : whenType === 'weeks' ? 52 : undefined} value={when} onChange={(event) => onWhen(event.target.value)} placeholder={whenType === 'day' ? 'Día' : whenType === 'weeks' ? 'Semanas' : ''} className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[13px] outline-none dark:border-white/10 dark:bg-transparent" />
+      </div>
+      {whenType === 'weeks' && onExtra && (
+        <input type="date" value={extra || ''} onChange={(event) => onExtra(event.target.value)} className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[13px] outline-none dark:border-white/10 dark:bg-transparent" />
+      )}
+      {onStatus && status && (
+        <button type="button" onClick={() => onStatus(status === 'confirmed' ? 'expected' : 'confirmed')} className="w-fit text-[11px] font-semibold text-slate-400">
+          {status === 'confirmed' ? 'Confirmado' : 'Estimado'}
+        </button>
+      )}
+    </div>
+  );
 }
 
 function patchList<K extends 'recurring' | 'intervals' | 'plannedExpenses' | 'incomes'>(draft: Draft, setDraft: (draft: Draft) => void, key: K, index: number, patch: Partial<Draft[K][number]>) {

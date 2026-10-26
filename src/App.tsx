@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { FixedCheck } from '@/components/FixedCheck';
 import { QuietLoad } from '@/components/QuietLoad';
 import { Shell, type Section } from '@/components/Shell';
 import { api, ApiError } from '@/lib/api';
@@ -23,7 +22,6 @@ export default function App() {
   const [offline, setOffline] = useState(false);
   const [section, setSection] = useState<Section>('dashboard');
   const [home, setHome] = useState(0);
-  const [refresh, setRefresh] = useState(0);
   const [heroMs, setHeroMs] = useState(() => Number(localStorage.getItem('pat_hero_ms')) || 2000);
 
   const restoreSession = () => {
@@ -94,10 +92,9 @@ export default function App() {
 
   return (
     <Shell section={section} onChange={(next) => { setSection(next); if (next === 'dashboard') setHome((value) => value + 1); }} user={user}>
-      <FixedCheck onSettled={() => setRefresh((value) => value + 1)} />
-      {section === 'dashboard' && <Dashboard key={`${section}-${refresh}`} heroMs={heroMs} home={home} />}
+      {section === 'dashboard' && <Dashboard heroMs={heroMs} home={home} />}
       {section === 'market' && <Market />}
-      {section === 'plans' && <Plans key={`plans-${refresh}`} />}
+      {section === 'plans' && <Plans />}
       {section === 'movements' && <Movements />}
       {section === 'settings' && <Settings user={user} heroMs={heroMs} onHero={changeHero} onUser={setUser} onLogout={logout} />}
     </Shell>
