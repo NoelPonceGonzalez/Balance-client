@@ -231,10 +231,10 @@ function TapeRow({ item, fallback, onOpen }: { item: MarketTapeItem; fallback?: 
   const down = (item.changePct ?? 0) < 0;
   const game = item.kind === 'cs2' || item.kind === 'tf2';
   return (
-    <button type="button" onClick={onOpen} className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 border-b border-slate-100 py-3 text-left last:border-0 dark:border-slate-800 sm:grid-cols-[auto_minmax(0,1fr)_5.5rem_auto]">
+    <button type="button" onClick={onOpen} className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-3 border-b border-slate-100 py-3 text-left last:border-0 dark:border-slate-800 sm:items-center sm:grid-cols-[auto_minmax(0,1fr)_5.5rem_auto]">
       <Mark image={item.image} symbol={item.symbol} fallback={fallback} contain={game} />
       <div className="min-w-0">
-        <p className="truncate font-black">{item.name}</p>
+        <p className={cn('font-black leading-snug', game ? 'break-words' : 'truncate')}>{item.name}</p>
         <p className="truncate text-[11px] font-bold uppercase text-slate-400">{item.symbol} · {item.sourceLabel}</p>
       </div>
       <span className="hidden sm:block"><Sparkline values={item.sparkline} up={up} /></span>

@@ -42,7 +42,7 @@ export function Modal({ title, onClose, children, wide }: { title: string; onClo
         transition={{ type: 'spring', stiffness: 420, damping: 22, mass: 0.7 }}
       >
         <div className="mb-5 flex items-center justify-between gap-4">
-          <h2 id="modal-title" className="text-[17px] font-semibold tracking-tight text-slate-900 dark:text-white">{title}</h2>
+          <h2 id="modal-title" className="min-w-0 break-words text-[17px] font-semibold leading-snug tracking-tight text-slate-900 dark:text-white">{title}</h2>
           <ModalClose onClose={onClose} />
         </div>
         {children}

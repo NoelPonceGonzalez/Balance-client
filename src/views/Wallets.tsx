@@ -6,7 +6,7 @@ import { Modal } from '@/components/Modal';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { api, ApiError } from '@/lib/api';
-import { findBrand } from '@/lib/brands';
+import { findBrand, isSkinName } from '@/lib/brands';
 import { formatDay, formatEur, formatNumber, formatPct, formatSignedEur } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
@@ -131,6 +131,9 @@ function SpentMark({ label, image }: { label: string; image?: string | null }) {
   const [photo, setPhoto] = useState(Boolean(image && (image.startsWith('https://') || image.startsWith('/'))));
   if (photo && image) {
     return <img src={image} alt="" referrerPolicy="no-referrer" onError={() => setPhoto(false)} className="h-11 w-11 shrink-0 rounded-xl bg-white object-cover" />;
+  }
+  if (isSkinName(label)) {
+    return <img src="/platforms/cs2.svg" alt="" className="h-11 w-11 shrink-0 rounded-xl bg-white object-contain p-1" />;
   }
   const brand = findBrand(label);
   if (brand) {
@@ -721,13 +724,13 @@ export function Wallets({ accounts, hidden, openId, stickTop = 0, onOpen, onAdd,
               </div>
               <ul className="mt-3 space-y-2">
                 {side.items.map((item) => (
-                  <li key={item.id || item.label} className="flex items-center gap-3 rounded-2xl bg-slate-50 px-3 py-2 dark:bg-black/20">
+                  <li key={item.id || item.label} className="flex items-start gap-3 rounded-2xl bg-slate-50 px-3 py-2 dark:bg-black/20">
                     <ItemPicture src={item.image} large={current.extras} label={item.label} />
                     <button type="button" className="min-w-0 flex-1 text-left" onClick={() => item.id && onEditExtra?.(item.id)}>
-                      <span className="block truncate text-sm font-bold">{item.label}</span>
+                      <span className="block break-words text-sm font-bold leading-snug">{item.label}</span>
                       {item.detail && <span className="mt-0.5 block text-[11px] font-medium leading-4 text-slate-400">{item.detail}</span>}
                     </button>
-                    <span className="shrink-0 text-sm font-black tabular-nums">{money(item.eur, hidden)}</span>
+                    <span className="shrink-0 pt-0.5 text-sm font-black tabular-nums">{money(item.eur, hidden)}</span>
                   </li>
                 ))}
               </ul>

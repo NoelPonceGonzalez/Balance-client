@@ -136,7 +136,7 @@ export function PendingToday({ hidden, onChanged }: { hidden: boolean; onChanged
                 <Check size={13} strokeWidth={3} />
               </button>
               <span className="min-w-0 flex-1">
-                <span className={cn('block truncate text-[13px] font-semibold', item.paid ? 'text-slate-900 dark:text-white' : 'text-slate-600 dark:text-slate-300')}>{item.label}</span>
+                <span className={cn('block break-words text-[13px] font-semibold leading-snug', item.paid ? 'text-slate-900 dark:text-white' : 'text-slate-600 dark:text-slate-300')}>{item.label}</span>
                 <span className="block text-[11px] text-slate-400">{formatDay(item.day)}</span>
               </span>
               <span className={cn('shrink-0 text-[13px] font-semibold tabular-nums', item.paid ? '' : 'opacity-40', item.direction === 'in' ? 'text-[#16c784]' : 'text-[#ea3943]')}>

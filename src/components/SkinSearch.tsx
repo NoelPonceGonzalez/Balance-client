@@ -87,7 +87,7 @@ export function SkinSearch({ onPick }: { onPick: (hit: SkinHit) => void }) {
                 className="flex w-full items-center gap-3 rounded-2xl px-2 py-1.5 text-left hover:bg-slate-50 dark:hover:bg-white/5"
               >
                 {hit.image && <img src={hit.image} alt="" referrerPolicy="no-referrer" className="h-10 w-14 shrink-0 rounded-lg bg-slate-100 object-contain p-0.5 dark:bg-white/10" />}
-                <span className="min-w-0 truncate text-sm font-semibold">{hit.name}</span>
+                <span className="min-w-0 break-words text-sm font-semibold leading-snug">{hit.name}</span>
               </button>
             </li>
           ))}

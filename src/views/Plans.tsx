@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'motion/react';
 import { Banknote, Cake, Check, ChevronLeft, Dumbbell, Gift, GripVertical, ImageIcon, MoreHorizontal, Pencil, PiggyBank, Plus, RotateCcw, Trash2, Utensils, Wallet, Watch, type LucideIcon } from 'lucide-react';
 import { ModalClose, modalOverlayClass, modalPanelClass } from '@/components/Modal';
-import { findBrand } from '@/lib/brands';
+import { findBrand, isSkinName } from '@/lib/brands';
 import { PlatformLogo } from '@/components/PlatformLogo';
 import { QuietLoad } from '@/components/QuietLoad';
 import { Button } from '@/components/ui/Button';
@@ -1122,6 +1122,9 @@ function foldLabel(value: string): string {
 
 function LineIcon({ label }: { label: string }) {
   const folded = foldLabel(label);
+  if (isSkinName(label)) {
+    return <img src="/platforms/cs2.svg" alt="" className="h-9 w-9 shrink-0 rounded-xl bg-white object-contain p-1" />;
+  }
   const brand = folded.startsWith('saldo') ? undefined : findBrand(label);
   if (brand) {
     return <img src={`/brands/${brand.id}.${brand.image}`} alt="" className="h-9 w-9 shrink-0 rounded-xl bg-white object-contain p-1" />;
@@ -1173,20 +1176,21 @@ function PlanLine({ line, index, lifted, today, ahead, until, onMark, onOpenMenu
     timer.current = null;
   };
   return (
-    <div className={cn('hold-target flex items-center gap-2 px-2.5 py-2 text-[13px] transition-transform duration-200 sm:gap-3 sm:px-3 sm:text-sm', index > 0 && 'border-t border-slate-200/70 dark:border-white/10', lifted && 'scale-[0.98] opacity-40', (line.tone === 'plain' || line.tone === 'final') && 'font-semibold')}>
+    <div className={cn('hold-target flex items-start gap-2 px-2.5 py-2 text-[13px] transition-transform duration-200 sm:gap-3 sm:px-3 sm:text-sm', index > 0 && 'border-t border-slate-200/70 dark:border-white/10', lifted && 'scale-[0.98] opacity-40', (line.tone === 'plain' || line.tone === 'final') && 'font-semibold')}>
       {line.markKey ? (
-        <button type="button" aria-label={markLabel} aria-pressed={line.paid === true} disabled={line.absorbed === true} onPointerDown={(event) => event.stopPropagation()} onClick={onMark} className={cn('grid h-[22px] w-[22px] shrink-0 place-items-center rounded-full border-2 bg-white transition-colors duration-300 disabled:opacity-80 dark:bg-transparent', line.paid ? 'border-[#16c784] bg-[#16c784] text-white dark:bg-[#16c784]' : 'border-slate-300 text-transparent dark:border-slate-500')}>
+        <button type="button" aria-label={markLabel} aria-pressed={line.paid === true} disabled={line.absorbed === true} onPointerDown={(event) => event.stopPropagation()} onClick={onMark} className={cn('mt-0.5 grid h-[22px] w-[22px] shrink-0 place-items-center rounded-full border-2 bg-white transition-colors duration-300 disabled:opacity-80 dark:bg-transparent', line.paid ? 'border-[#16c784] bg-[#16c784] text-white dark:bg-[#16c784]' : 'border-slate-300 text-transparent dark:border-slate-500')}>
           <Check size={13} strokeWidth={3} className={cn('transition-transform duration-500 [transition-timing-function:cubic-bezier(0.34,1.56,0.64,1)]', line.paid ? 'scale-100 opacity-100' : 'scale-50 opacity-0')} />
         </button>
       ) : (
         <span className="w-[22px] shrink-0" />
       )}
+      <span className="min-w-0 flex-1">
       {line.markKey ? (
         <button
           ref={ref}
           type="button"
           title="Mantén para editar"
-          className="flex min-w-0 flex-1 items-center gap-2 text-left sm:gap-3"
+          className="flex w-full min-w-0 items-start gap-2 text-left sm:gap-3"
           onContextMenu={(event) => {
             event.preventDefault();
             clear();
@@ -1219,10 +1223,8 @@ function PlanLine({ line, index, lifted, today, ahead, until, onMark, onOpenMenu
         >
           <LineIcon label={line.label} />
           <span className="min-w-0 flex-1">
-            <span className={cn('flex min-w-0 items-center gap-2 transition-colors duration-300', line.paid ? 'text-slate-900 dark:text-white' : 'text-slate-600 dark:text-slate-300')}>
-              <span className="shrink-0 text-[9px] font-black uppercase tracking-wide text-slate-400">{lineKind(line)}</span>
-              <span className="truncate">{line.label}</span>
-            </span>
+            <span className={cn('block break-words leading-snug transition-colors duration-300', line.paid ? 'text-slate-900 dark:text-white' : 'text-slate-600 dark:text-slate-300')}>{line.label}</span>
+            <span className="mt-0.5 block text-[9px] font-black uppercase tracking-wide text-slate-400">{lineKind(line)}</span>
             {line.absorbed && <span className="block text-[11px] font-medium text-slate-400">Ya está en el efectivo</span>}
             {!line.absorbed && line.paid && line.amount != null && <span className="block text-[11px] font-medium text-slate-400">Queda {formatEur(line.balance)}</span>}
           </span>
@@ -1230,10 +1232,11 @@ function PlanLine({ line, index, lifted, today, ahead, until, onMark, onOpenMenu
       ) : (
         <span className="flex min-w-0 flex-1 items-center gap-3">
           <LineIcon label={line.label} />
-          <span className="min-w-0 truncate text-slate-800 dark:text-slate-100">{line.label}</span>
+          <span className="min-w-0 break-words leading-snug text-slate-800 dark:text-slate-100">{line.label}</span>
         </span>
       )}
-      <span className={cn('shrink-0 text-[13px] tabular-nums font-semibold transition-opacity duration-300', lineClass(line), line.markKey && !line.paid && 'opacity-40')}>
+      <span className="mt-1 flex items-center gap-1">
+      <span className={cn('ml-auto shrink-0 text-[13px] tabular-nums font-semibold transition-opacity duration-300', lineClass(line), line.markKey && !line.paid && 'opacity-40')}>
         {line.amount == null ? <SoftEur value={line.balance} /> : formatSignedEur(line.amount)}
       </span>
       {line.markKey && (
@@ -1281,6 +1284,8 @@ function PlanLine({ line, index, lifted, today, ahead, until, onMark, onOpenMenu
           <GripVertical size={16} />
         </button>
       ) : null}
+      </span>
+      </span>
     </div>
   );
 }

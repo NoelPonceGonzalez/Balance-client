@@ -884,7 +884,15 @@ function containsSequence(query: string[], alias: string[]): boolean {
   return false;
 }
 
+/** Unos guantes Pandora son de CS2, no la marca de joyería. */
+export function isSkinName(name: string | null | undefined): boolean {
+  const query = tokens(name || '');
+  if (query.some((part) => part === 'cs2' || part === 'glove' || part === 'gloves' || part === 'guante' || part === 'guantes')) return true;
+  return /\|/.test(name || '') || /pandora.?s box|sport gloves/i.test(name || '');
+}
+
 export function findBrand(name: string | null | undefined): BrandPreset | undefined {
+  if (isSkinName(name)) return undefined;
   const query = tokens(name || '');
   if (!query.length) return undefined;
   let best: { brand: BrandPreset; score: number } | undefined;

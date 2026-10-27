@@ -412,10 +412,16 @@ function PieceDialog({
         {piece.image && (piece.skins || piece.assetClass === 'personal_good') && (
           <div className="flex items-center gap-3 rounded-2xl bg-slate-50 px-3 py-2 dark:bg-black/20">
             <img src={piece.image} alt="" referrerPolicy="no-referrer" className="h-14 w-20 rounded-xl bg-white object-contain p-1 dark:bg-white/10" />
-            <span className="min-w-0 truncate text-sm font-bold">{piece.marketName || piece.name}</span>
+            <span className="min-w-0 break-words text-sm font-bold leading-snug">{piece.marketName || piece.name}</span>
           </div>
         )}
-        <Input label="Nombre" value={piece.name} onChange={(event) => setPiece({ ...piece, name: event.target.value })} />
+        {(piece.skins || piece.assetClass === 'personal_good') ? (
+          <Field label="Nombre">
+            <textarea rows={2} value={piece.name} onChange={(event) => setPiece({ ...piece, name: event.target.value })} className={cn(fieldClass, 'resize-none leading-snug')} />
+          </Field>
+        ) : (
+          <Input label="Nombre" value={piece.name} onChange={(event) => setPiece({ ...piece, name: event.target.value })} />
+        )}
         {piece.phases.length > 0 && (
           <Field label="Fase">
             <select
@@ -1338,13 +1344,13 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
                                   <button
                                     type="button"
                                     onClick={() => item.id && openPiece(row, item)}
-                                    className={cn('flex w-full items-center justify-between gap-3 text-left text-sm font-semibold text-slate-500', item.id && 'rounded-xl hover:bg-white/50 dark:hover:bg-white/5')}
+                                    className={cn('flex w-full items-start justify-between gap-3 text-left text-sm font-semibold text-slate-500', item.id && 'rounded-xl hover:bg-white/50 dark:hover:bg-white/5')}
                                   >
-                                    <span>
+                                    <span className="min-w-0 break-words leading-snug">
                                       {item.label}
                                       {item.detail && <span className="mt-0.5 block text-[11px] font-medium text-slate-400">{item.detail}</span>}
                                     </span>
-                                    <span className="font-black tabular-nums text-slate-800 dark:text-slate-100">
+                                    <span className="shrink-0 font-black tabular-nums text-slate-800 dark:text-slate-100">
                                       <RisingAmount value={item.eur} hidden={hidden} />
                                     </span>
                                   </button>
