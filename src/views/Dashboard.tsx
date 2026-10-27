@@ -17,6 +17,7 @@ import { cn } from '@/lib/utils';
 import type { DashboardData } from '@/lib/types';
 import { Wallets } from '@/views/Wallets';
 import { SkinSearch, wearHint, type SkinPhase } from '@/components/SkinSearch';
+import { OriginPicker } from '@/components/OriginMark';
 const HIDE_KEY = 'pat_hide_money';
 const SORT_KEY = 'pat_dash_sort';
 const CYCLE_MS = 5000;
@@ -608,6 +609,7 @@ function ExtraDialog({ draft, error, setDraft, onClose, onSave, onDelete }: { dr
         {error && <p className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">{error}</p>}
         <p className="text-xs font-medium text-slate-400">Un reloj, un PC o un anillo. Una cena no va aquí.</p>
         <Input label="Qué es" value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="Seiko Presage" />
+        <OriginPicker name={draft.name} image={draft.image} onImage={(image) => setDraft({ ...draft, image })} />
         <Input label="Imagen (enlace https)" value={draft.image} onChange={(event) => setDraft({ ...draft, image: event.target.value })} placeholder="https://..." />
         {draft.image.startsWith('https://') && <img src={draft.image} alt="" referrerPolicy="no-referrer" className="h-28 w-full rounded-2xl bg-slate-50 object-contain" />}
         <Input label="Fecha" type="date" value={draft.boughtOn} onChange={(event) => setDraft({ ...draft, boughtOn: event.target.value })} />

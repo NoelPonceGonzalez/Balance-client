@@ -2,9 +2,9 @@ import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } f
 import { bindHold, HoldMenu, holdItemClass, placeMenu } from '@/components/HoldMenu';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'motion/react';
-import { Banknote, Cake, Check, ChevronLeft, Dumbbell, Gift, GripVertical, ImageIcon, MoreHorizontal, Pencil, PiggyBank, Plus, Trash2, Utensils, Wallet, Watch, type LucideIcon } from 'lucide-react';
+import { Banknote, Check, ChevronLeft, GripVertical, ImageIcon, MoreHorizontal, Pencil, Plus, Trash2 } from 'lucide-react';
 import { ModalClose, modalOverlayClass, modalPanelClass } from '@/components/Modal';
-import { findBrand, isSkinName } from '@/lib/brands';
+import { OriginGlyph, OriginPicker } from '@/components/OriginMark';
 import { PlatformLogo } from '@/components/PlatformLogo';
 import { QuietLoad } from '@/components/QuietLoad';
 import { Button } from '@/components/ui/Button';
@@ -33,8 +33,8 @@ interface Draft {
   manualRealBalance: string;
   recurring: { id?: string; name: string; amount: string; dayOfMonth: string; paidDates: string[]; direction?: 'in' | 'out' }[];
   intervals: { id?: string; name: string; amount: string; everyWeeks: string; startDate: string; paidDates: string[]; direction?: 'in' | 'out' }[];
-  plannedExpenses: { id?: string; name: string; amount: string; date: string; paid: boolean; surprise?: boolean; automatic?: boolean }[];
-  incomes: { id?: string; name: string; amount: string; date: string; status: 'expected' | 'confirmed'; paid: boolean; surprise?: boolean; automatic?: boolean }[];
+  plannedExpenses: { id?: string; name: string; amount: string; date: string; paid: boolean; surprise?: boolean; automatic?: boolean; image?: string }[];
+  incomes: { id?: string; name: string; amount: string; date: string; status: 'expected' | 'confirmed'; paid: boolean; surprise?: boolean; automatic?: boolean; image?: string }[];
   scenarios: { name: string; monthlySavings: string }[];
 }
 
@@ -116,6 +116,7 @@ function toBody(draft: Draft) {
       paid: item.paid,
       surprise: item.surprise === true,
       automatic: item.automatic === true,
+      image: item.image || '',
     })),
     incomes: draft.incomes.filter((item) => item.name.trim() && item.amount !== '').map((item) => ({
       ...(item.id ? { id: item.id } : {}),
@@ -126,6 +127,7 @@ function toBody(draft: Draft) {
       paid: item.paid,
       surprise: item.surprise === true,
       automatic: item.automatic === true,
+      image: item.image || '',
     })),
     scenarios: draft.scenarios.filter((item) => item.name.trim()).map((item) => ({
       name: item.name,
@@ -151,8 +153,8 @@ function fromPlan(plan: PlanRow): Draft {
     manualRealBalance: plan.manualRealBalance == null ? '' : String(plan.manualRealBalance),
     recurring: (plan.recurring || []).map((item) => ({ id: item._id, name: item.name, amount: String(item.amount), dayOfMonth: String(item.dayOfMonth), paidDates: item.paidDates || [], direction: item.direction === 'in' ? 'in' as const : 'out' as const })),
     intervals: (plan.intervals || []).map((item) => ({ id: item._id, name: item.name, amount: String(item.amount), everyWeeks: String(item.everyWeeks), startDate: item.startDate.slice(0, 10), paidDates: item.paidDates || [], direction: item.direction === 'in' ? 'in' as const : 'out' as const })),
-    plannedExpenses: (plan.plannedExpenses || []).map((item) => ({ id: item._id, name: item.name, amount: String(item.amount), date: item.date.slice(0, 10), paid: item.paid === true, surprise: item.surprise === true, automatic: item.automatic === true || /^entrenador$/i.test(item.name) })),
-    incomes: (plan.incomes || []).map((item) => ({ id: item._id, name: item.name, amount: String(item.amount), date: item.date.slice(0, 10), status: item.status || 'confirmed', paid: item.paid === true, surprise: item.surprise === true, automatic: item.automatic === true })),
+    plannedExpenses: (plan.plannedExpenses || []).map((item) => ({ id: item._id, name: item.name, amount: String(item.amount), date: item.date.slice(0, 10), paid: item.paid === true, surprise: item.surprise === true, automatic: item.automatic === true || /^entrenador$/i.test(item.name), image: item.image || '' })),
+    incomes: (plan.incomes || []).map((item) => ({ id: item._id, name: item.name, amount: String(item.amount), date: item.date.slice(0, 10), status: item.status || 'confirmed', paid: item.paid === true, surprise: item.surprise === true, automatic: item.automatic === true, image: item.image || '' })),
     scenarios: (plan.scenarios || []).map((item) => ({ name: item.name, monthlySavings: String(item.monthlySavings) })),
   };
 }
@@ -249,8 +251,8 @@ export function Plans({ embedded = false }: { embedded?: boolean }) {
   const [menu, setMenu] = useState<{ line: PlanMonthLine; top: number; left: number } | null>(null);
   const [drag, setDrag] = useState<{ line: PlanMonthLine; x: number; y: number; over: string | null } | null>(null);
   const dragRef = useRef<{ line: PlanMonthLine; x: number; y: number; moved: boolean } | null>(null);
-  const [extra, setExtra] = useState<{ month: string; name: string; amount: string; date: string; direction: 'in' | 'out' } | null>(null);
-  const [keepAsk, setKeepAsk] = useState<{ name: string; amount: number; date: string } | null>(null);
+  const [extra, setExtra] = useState<{ month: string; name: string; amount: string; date: string; direction: 'in' | 'out'; image: string } | null>(null);
+  const [keepAsk, setKeepAsk] = useState<{ name: string; amount: number; date: string; image: string } | null>(null);
   const [beat, setBeat] = useState(0);
   const [cardMenu, setCardMenu] = useState<{ id: string; top: number; left: number; confirm: boolean } | null>(null);
   const [makingId, setMakingId] = useState<string | null>(null);
@@ -323,17 +325,17 @@ export function Plans({ embedded = false }: { embedded?: boolean }) {
       const source = kind === 'expense' ? plan.plannedExpenses : plan.incomes;
       const item = source.find((row) => row._id === id);
       if (!item) return;
-      setEditor({ key: line.markKey, kind, name: item.name, amount: String(item.amount), date: item.date.slice(0, 10), dayOfMonth: '1', everyWeeks: '2' });
+      setEditor({ key: line.markKey, kind, name: item.name, amount: String(item.amount), date: item.date.slice(0, 10), dayOfMonth: '1', everyWeeks: '2', image: item.image || '' });
     } else if (kind === 'savings') {
-      setEditor({ key: line.markKey, kind, name: line.label, amount: String(Math.abs(line.amount || 0)), date: id, dayOfMonth: '1', everyWeeks: '2' });
+      setEditor({ key: line.markKey, kind, name: line.label, amount: String(Math.abs(line.amount || 0)), date: id, dayOfMonth: '1', everyWeeks: '2', image: '' });
     } else if (kind === 'recurring') {
       const item = plan.recurring.find((row) => row._id === id);
       if (!item) return;
-      setEditor({ key: line.markKey, kind, name: item.name, amount: String(item.amount), date: extra || '', dayOfMonth: String(item.dayOfMonth), everyWeeks: '2' });
+      setEditor({ key: line.markKey, kind, name: item.name, amount: String(item.amount), date: extra || '', dayOfMonth: String(item.dayOfMonth), everyWeeks: '2', image: '' });
     } else if (kind === 'interval') {
       const item = (plan.intervals || []).find((row) => row._id === id);
       if (!item) return;
-      setEditor({ key: line.markKey, kind, name: item.name, amount: String(item.amount), date: item.startDate.slice(0, 10), dayOfMonth: '1', everyWeeks: String(item.everyWeeks) });
+      setEditor({ key: line.markKey, kind, name: item.name, amount: String(item.amount), date: item.startDate.slice(0, 10), dayOfMonth: '1', everyWeeks: String(item.everyWeeks), image: '' });
     }
   };
 
@@ -351,6 +353,7 @@ export function Plans({ embedded = false }: { embedded?: boolean }) {
           date: editor.date,
           dayOfMonth: Number(editor.dayOfMonth || 1),
           everyWeeks: Number(editor.everyWeeks || 1),
+          image: editor.image || '',
         }),
       });
       setEditor(null);
@@ -446,11 +449,11 @@ export function Plans({ embedded = false }: { embedded?: boolean }) {
     try {
       await api(`/api/plans/${docId(plan)}/extra`, {
         method: 'POST',
-        body: JSON.stringify({ name: extra.name.trim(), amount, date: extra.date, direction: extra.direction }),
+        body: JSON.stringify({ name: extra.name.trim(), amount, date: extra.date, direction: extra.direction, image: extra.image || '' }),
       });
       setExtra(null);
       await load();
-      if (extra.direction === 'out') setKeepAsk({ name: extra.name.trim(), amount, date: extra.date });
+      if (extra.direction === 'out') setKeepAsk({ name: extra.name.trim(), amount, date: extra.date, image: extra.image || '' });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se ha podido añadir el extra.');
     }
@@ -462,7 +465,7 @@ export function Plans({ embedded = false }: { embedded?: boolean }) {
     try {
       await api('/api/extras', {
         method: 'POST',
-        body: JSON.stringify({ place: 'objeto', name: keepAsk.name, valueEur: keepAsk.amount, costEur: keepAsk.amount, imageUrl: '', boughtOn: keepAsk.date, track: false, counts: true, notes: '' }),
+        body: JSON.stringify({ place: 'objeto', name: keepAsk.name, valueEur: keepAsk.amount, costEur: keepAsk.amount, imageUrl: keepAsk.image.startsWith('https://') ? keepAsk.image : '', boughtOn: keepAsk.date, track: false, counts: true, notes: '' }),
       });
       setKeepAsk(null);
     } catch (err) {
@@ -772,12 +775,14 @@ export function Plans({ embedded = false }: { embedded?: boolean }) {
                       onDragStart={onDragStart}
                       onDragMove={onDragMove}
                       onDragEnd={onDragEnd}
+                      image={plan ? eventImage(plan, line) : ''}
                     />
                   ))}
                   {dropping && <p className="border-t border-indigo-200 px-3 py-2 text-xs font-bold text-indigo-600">Soltar en {month.title}</p>}
                   {extra?.month === month.month ? (
                     <div className="plan-rise grid gap-2 border-t border-slate-200/70 px-3 py-3 dark:border-white/10">
                       <Input placeholder="Qué es" value={extra.name} onChange={(event) => setExtra({ ...extra, name: event.target.value })} />
+                      <OriginPicker name={extra.name} image={extra.image} onImage={(image) => setExtra({ ...extra, image })} />
                       <div className="grid grid-cols-2 gap-2">
                         <Input type="number" min="0" step="any" placeholder="Importe" value={extra.amount} onChange={(event) => setExtra({ ...extra, amount: event.target.value })} />
                         <Input type="date" min={`${month.month}-01`} max={monthEnd(month.month)} value={extra.date} onChange={(event) => setExtra({ ...extra, date: event.target.value })} />
@@ -794,7 +799,7 @@ export function Plans({ embedded = false }: { embedded?: boolean }) {
                   ) : (
                     <button
                       type="button"
-                      onClick={() => setExtra({ month: month.month, name: '', amount: '', date: dayInMonth(month.month, forecast.today || month.month + '-15'), direction: 'out' })}
+                      onClick={() => setExtra({ month: month.month, name: '', amount: '', date: dayInMonth(month.month, forecast.today || month.month + '-15'), direction: 'out', image: '' })}
                       className="flex w-full items-center gap-2 border-t border-slate-200/70 px-3 py-2.5 text-sm font-semibold text-slate-500 transition-colors hover:text-slate-800 dark:border-white/10"
                     >
                       <Plus size={15} /> Añadir extra
@@ -816,7 +821,7 @@ export function Plans({ embedded = false }: { embedded?: boolean }) {
               className="pointer-events-none fixed z-[70] flex w-52 -translate-x-1/2 -translate-y-1/2 items-center gap-2 rounded-xl bg-white px-2.5 py-2 text-[13px] shadow-lg ring-2 ring-indigo-300 dark:bg-slate-900 dark:ring-indigo-400/60"
               style={{ left: drag.x, top: drag.y }}
             >
-              <LineIcon label={drag.line.label} />
+              <LineIcon label={drag.line.label} image={plan ? eventImage(plan, drag.line) : ''} />
               <span className="min-w-0 flex-1 truncate font-semibold">{drag.line.label}</span>
               {drag.line.amount != null && <span className={cn('shrink-0 font-black tabular-nums', lineClass(drag.line))}>{formatSignedEur(drag.line.amount)}</span>}
             </div>,
@@ -946,7 +951,7 @@ export function Plans({ embedded = false }: { embedded?: boolean }) {
               <summary className="cursor-pointer text-sm font-semibold text-slate-600 dark:text-slate-300">Apuntes</summary>
               <div className="mt-3 grid gap-2">
                 {draft.plannedExpenses.map((item, index) => (
-                  <ApunteRow key={`e-${index}`} kind="Gasto" name={item.name} amount={item.amount} when={item.date} whenType="date" onName={(name) => patchList(draft, setDraft, 'plannedExpenses', index, { name })} onAmount={(amount) => patchList(draft, setDraft, 'plannedExpenses', index, { amount })} onWhen={(date) => patchList(draft, setDraft, 'plannedExpenses', index, { date })} onRemove={() => setDraft({ ...draft, plannedExpenses: draft.plannedExpenses.filter((_, itemIndex) => itemIndex !== index) })} />
+                  <ApunteRow key={`e-${index}`} kind="Gasto" name={item.name} amount={item.amount} when={item.date} whenType="date" image={item.image} onName={(name) => patchList(draft, setDraft, 'plannedExpenses', index, { name })} onAmount={(amount) => patchList(draft, setDraft, 'plannedExpenses', index, { amount })} onWhen={(date) => patchList(draft, setDraft, 'plannedExpenses', index, { date })} onImage={(image) => patchList(draft, setDraft, 'plannedExpenses', index, { image })} onRemove={() => setDraft({ ...draft, plannedExpenses: draft.plannedExpenses.filter((_, itemIndex) => itemIndex !== index) })} />
                 ))}
                 {draft.recurring.map((item, index) => (
                   <ApunteRow key={`r-${index}`} kind="Cada mes" name={item.name} amount={item.amount} when={item.dayOfMonth} whenType="day" onName={(name) => patchList(draft, setDraft, 'recurring', index, { name })} onAmount={(amount) => patchList(draft, setDraft, 'recurring', index, { amount })} onWhen={(dayOfMonth) => patchList(draft, setDraft, 'recurring', index, { dayOfMonth })} onRemove={() => setDraft({ ...draft, recurring: draft.recurring.filter((_, itemIndex) => itemIndex !== index) })} />
@@ -955,7 +960,7 @@ export function Plans({ embedded = false }: { embedded?: boolean }) {
                   <ApunteRow key={`w-${index}`} kind="Semanas" name={item.name} amount={item.amount} when={item.everyWeeks} whenType="weeks" extra={item.startDate} onName={(name) => patchList(draft, setDraft, 'intervals', index, { name })} onAmount={(amount) => patchList(draft, setDraft, 'intervals', index, { amount })} onWhen={(everyWeeks) => patchList(draft, setDraft, 'intervals', index, { everyWeeks })} onExtra={(startDate) => patchList(draft, setDraft, 'intervals', index, { startDate })} onRemove={() => setDraft({ ...draft, intervals: draft.intervals.filter((_, itemIndex) => itemIndex !== index) })} />
                 ))}
                 {draft.incomes.map((item, index) => (
-                  <ApunteRow key={`i-${index}`} kind="Ingreso" name={item.name} amount={item.amount} when={item.date} whenType="date" status={item.status} onStatus={(status) => patchList(draft, setDraft, 'incomes', index, { status })} onName={(name) => patchList(draft, setDraft, 'incomes', index, { name })} onAmount={(amount) => patchList(draft, setDraft, 'incomes', index, { amount })} onWhen={(date) => patchList(draft, setDraft, 'incomes', index, { date })} onRemove={() => setDraft({ ...draft, incomes: draft.incomes.filter((_, itemIndex) => itemIndex !== index) })} />
+                  <ApunteRow key={`i-${index}`} kind="Ingreso" name={item.name} amount={item.amount} when={item.date} whenType="date" status={item.status} image={item.image} onStatus={(status) => patchList(draft, setDraft, 'incomes', index, { status })} onName={(name) => patchList(draft, setDraft, 'incomes', index, { name })} onAmount={(amount) => patchList(draft, setDraft, 'incomes', index, { amount })} onWhen={(date) => patchList(draft, setDraft, 'incomes', index, { date })} onImage={(image) => patchList(draft, setDraft, 'incomes', index, { image })} onRemove={() => setDraft({ ...draft, incomes: draft.incomes.filter((_, itemIndex) => itemIndex !== index) })} />
                 ))}
                 <div className="flex flex-wrap gap-1.5 pt-1">
                   <button type="button" onClick={() => setDraft({ ...draft, plannedExpenses: [...draft.plannedExpenses, { name: '', amount: '', date: draft.startDate, paid: false }] })} className="rounded-full border border-slate-200 px-2.5 py-1 text-[11px] font-semibold text-slate-500 dark:border-white/10">+ Gasto</button>
@@ -980,6 +985,7 @@ export function Plans({ embedded = false }: { embedded?: boolean }) {
             </div>
             <div className="grid gap-3">
               <Input label="Nombre" value={editor.name} onChange={(event) => setEditor({ ...editor, name: event.target.value })} />
+              <OriginPicker name={editor.name} image={editor.image} onImage={(editor.kind === 'expense' || editor.kind === 'income') ? (image) => setEditor({ ...editor, image }) : undefined} />
               <Input label="Importe" type="number" min="0" step="any" value={editor.amount} onChange={(event) => setEditor({ ...editor, amount: event.target.value })} />
               {(editor.kind === 'expense' || editor.kind === 'income') && (
                 <Input label="Fecha" type="date" value={editor.date} onChange={(event) => setEditor({ ...editor, date: event.target.value })} />
@@ -1010,6 +1016,7 @@ interface EditorDraft {
   date: string;
   dayOfMonth: string;
   everyWeeks: string;
+  image: string;
 }
 
 function balanceAsOf(months: PlanMonthView[], day: string, opening: number): number {
@@ -1098,37 +1105,15 @@ function SoftEur({ value, signed = false }: { value: number; signed?: boolean })
   return <>{signed ? formatSignedEur(shown) : formatEur(shown)}</>;
 }
 
-const LINE_ICONS: { test: RegExp; icon: LucideIcon }[] = [
-  { test: /nomin|salario|sueldo|\bpaga\b/, icon: Banknote },
-  { test: /ahorro|apart/, icon: PiggyBank },
-  { test: /navidad|regalo/, icon: Gift },
-  { test: /cena|restaur|comida/, icon: Utensils },
-  { test: /entrenador|gimnas|\bgym\b/, icon: Dumbbell },
-  { test: /cumple/, icon: Cake },
-  { test: /reloj|presage/, icon: Watch },
-  { test: /saldo/, icon: Wallet },
-];
-
-function foldLabel(value: string): string {
-  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+function eventImage(plan: PlanRow, line: PlanMonthLine): string {
+  if (!line.markKey) return '';
+  const [kind, id] = line.markKey.split(':');
+  const list = kind === 'expense' ? plan.plannedExpenses : kind === 'income' ? plan.incomes : [];
+  return list?.find((item) => item._id === id)?.image || '';
 }
 
-function LineIcon({ label }: { label: string }) {
-  const folded = foldLabel(label);
-  if (isSkinName(label)) {
-    return <img src="/platforms/cs2.svg" alt="" className="h-9 w-9 shrink-0 rounded-xl bg-white object-contain p-1" />;
-  }
-  const brand = folded.startsWith('saldo') ? undefined : findBrand(label);
-  if (brand) {
-    return <img src={`/brands/${brand.id}.${brand.image}`} alt="" className="h-9 w-9 shrink-0 rounded-xl bg-white object-contain p-1" />;
-  }
-  const match = LINE_ICONS.find((item) => item.test.test(folded));
-  const Icon = match?.icon ?? Wallet;
-  return (
-    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-slate-100 text-slate-700 dark:bg-white/10 dark:text-slate-200">
-      <Icon size={18} strokeWidth={1.75} />
-    </span>
-  );
+function LineIcon({ label, image }: { label: string; image?: string }) {
+  return <OriginGlyph name={label} image={image} className="h-9 w-9" />;
 }
 
 function lastDay(month: string): number {
@@ -1145,13 +1130,14 @@ function dayInMonth(month: string, today: string): string {
   return `${month}-${String(Math.min(15, lastDay(month))).padStart(2, '0')}`;
 }
 
-function PlanLine({ line, index, lifted, today, ahead, until, onMark, onOpenMenu, onDragStart, onDragMove, onDragEnd }: {
+function PlanLine({ line, index, lifted, today, ahead, until, image, onMark, onOpenMenu, onDragStart, onDragMove, onDragEnd }: {
   line: PlanMonthLine;
   index: number;
   lifted: boolean;
   today?: string;
   ahead?: boolean;
   until?: string;
+  image?: string;
   onMark: () => void;
   onOpenMenu: (line: PlanMonthLine, rect: DOMRect) => void;
   onDragStart: (line: PlanMonthLine, x: number, y: number) => void;
@@ -1214,7 +1200,7 @@ function PlanLine({ line, index, lifted, today, ahead, until, onMark, onOpenMenu
             if (!point.current.held && Math.hypot(event.clientX - point.current.x, event.clientY - point.current.y) > 6) clear();
           }}
         >
-          <LineIcon label={line.label} />
+          <LineIcon label={line.label} image={image} />
           <span className="min-w-0 flex-1">
             <span className={cn('block break-words leading-snug transition-colors duration-300', line.paid ? 'text-slate-900 dark:text-white' : 'text-slate-600 dark:text-slate-300')}>{line.label}</span>
             <span className="mt-0.5 block text-[9px] font-black uppercase tracking-wide text-slate-400">{lineKind(line)}</span>
@@ -1224,7 +1210,7 @@ function PlanLine({ line, index, lifted, today, ahead, until, onMark, onOpenMenu
         </button>
       ) : (
         <span className="flex min-w-0 flex-1 items-center gap-3">
-          <LineIcon label={line.label} />
+          <LineIcon label={line.label} image={image} />
           <span className="min-w-0 break-words leading-snug text-slate-800 dark:text-slate-100">{line.label}</span>
         </span>
       )}
@@ -1290,7 +1276,7 @@ function lineKind(line: PlanMonthLine): string {
   return 'Gasto';
 }
 
-function ApunteRow({ kind, name, amount, when, whenType, extra, status, onName, onAmount, onWhen, onExtra, onStatus, onRemove }: {
+function ApunteRow({ kind, name, amount, when, whenType, extra, status, image, onName, onAmount, onWhen, onExtra, onStatus, onImage, onRemove }: {
   kind: string;
   name: string;
   amount: string;
@@ -1298,11 +1284,13 @@ function ApunteRow({ kind, name, amount, when, whenType, extra, status, onName, 
   whenType: 'date' | 'day' | 'weeks';
   extra?: string;
   status?: 'expected' | 'confirmed';
+  image?: string;
   onName: (value: string) => void;
   onAmount: (value: string) => void;
   onWhen: (value: string) => void;
   onExtra?: (value: string) => void;
   onStatus?: (value: 'expected' | 'confirmed') => void;
+  onImage?: (value: string) => void;
   onRemove: () => void;
 }) {
   return (
@@ -1312,6 +1300,7 @@ function ApunteRow({ kind, name, amount, when, whenType, extra, status, onName, 
         <input value={name} onChange={(event) => onName(event.target.value)} placeholder="Qué es" className="min-w-0 flex-1 bg-transparent text-[13px] font-semibold outline-none" />
         <button type="button" onClick={onRemove} className="text-[11px] font-semibold text-rose-600" aria-label="Quitar">Quitar</button>
       </div>
+      <OriginPicker name={name} image={image} onImage={onImage} />
       <div className="grid grid-cols-2 gap-2">
         <input type="number" min="0" step="any" value={amount} onChange={(event) => onAmount(event.target.value)} placeholder="Importe" className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[13px] outline-none dark:border-white/10 dark:bg-transparent" />
         <input type={whenType === 'date' ? 'date' : 'number'} min={whenType === 'date' ? undefined : 1} max={whenType === 'day' ? 31 : whenType === 'weeks' ? 52 : undefined} value={when} onChange={(event) => onWhen(event.target.value)} placeholder={whenType === 'day' ? 'Día' : whenType === 'weeks' ? 'Semanas' : ''} className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[13px] outline-none dark:border-white/10 dark:bg-transparent" />

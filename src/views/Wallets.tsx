@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
-import { Check, Dumbbell, Plus, Search, Trash2, Watch, Wallet } from 'lucide-react';
+import { Check, Plus, Search, Trash2 } from 'lucide-react';
 import { PlatformLogo } from '@/components/PlatformLogo';
 import { SpendIcon } from '@/components/SpendIcon';
 import { Modal } from '@/components/Modal';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { api, ApiError } from '@/lib/api';
-import { findBrand, isSkinName } from '@/lib/brands';
+import { OriginGlyph, OriginPicker } from '@/components/OriginMark';
 import { formatDay, formatEur, formatNumber, formatPct, formatSignedEur } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
@@ -45,6 +45,7 @@ export interface CashFlow {
   absorbed?: boolean;
   open?: boolean;
   automatic?: boolean;
+  image?: string;
 }
 
 export interface FixedRule {
@@ -76,6 +77,7 @@ interface WalletEntry {
   date: string;
   direction: 'in' | 'out';
   origin: string;
+  image?: string;
 }
 
 interface WalletRow {
@@ -101,6 +103,7 @@ interface EntryDraft {
   date: string;
   direction: 'in' | 'out';
   origin: string;
+  image: string;
   source: 'plan' | 'wallet';
   key: string;
   surprise: boolean;
@@ -128,24 +131,7 @@ function money(value: number, hidden: boolean): string {
 }
 
 function SpentMark({ label, image }: { label: string; image?: string | null }) {
-  const [photo, setPhoto] = useState(Boolean(image && (image.startsWith('https://') || image.startsWith('/'))));
-  if (photo && image) {
-    return <img src={image} alt="" referrerPolicy="no-referrer" onError={() => setPhoto(false)} className="h-11 w-11 shrink-0 rounded-xl bg-white object-cover" />;
-  }
-  if (isSkinName(label)) {
-    return <img src="/platforms/cs2.svg" alt="" className="h-11 w-11 shrink-0 rounded-xl bg-white object-contain p-1" />;
-  }
-  const brand = findBrand(label);
-  if (brand) {
-    return <img src={`/brands/${brand.id}.${brand.image}`} alt="" className="h-11 w-11 shrink-0 rounded-xl bg-white object-contain p-1" />;
-  }
-  const folded = label.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-  const Icon = /entrenador|gimnas|\bgym\b/.test(folded) ? Dumbbell : /reloj|seiko|presage/.test(folded) ? Watch : Wallet;
-  return (
-    <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-slate-100 text-slate-700 dark:bg-white/10 dark:text-slate-200">
-      <Icon size={18} strokeWidth={1.75} />
-    </span>
-  );
+  return <OriginGlyph name={label} image={image} className="h-11 w-11" />;
 }
 
 const PREVIEW = 4;
@@ -445,7 +431,7 @@ export function Wallets({ accounts, hidden, openId, stickTop = 0, onOpen, onAdd,
         absorbed: flow.absorbed === true,
         open: flow.open === true,
         automatic: flow.automatic === true,
-        image: null as string | null,
+        image: flow.image || null,
       })),
       ...(current.purchases || []).map((item) => ({
         id: `buy:${item.date}:${item.name}`,
@@ -475,7 +461,7 @@ export function Wallets({ accounts, hidden, openId, stickTop = 0, onOpen, onAdd,
         absorbed: false,
         open: false,
         automatic: false,
-        image: null as string | null,
+        image: line.image || null,
       })),
     ].sort((a, b) => a.day.localeCompare(b.day) || a.label.localeCompare(b.label));
     let balance = current.cash;
@@ -502,7 +488,7 @@ export function Wallets({ accounts, hidden, openId, stickTop = 0, onOpen, onAdd,
         : chapter?.sides || [];
   const openEntry = (direction: 'in' | 'out') => {
     if (!current) return;
-    setEntryDraft({ id: null, name: '', amount: '', date: todayKey(), direction, origin: '', source: current.planId ? 'plan' : 'wallet', key: '', surprise: true });
+    setEntryDraft({ id: null, name: '', amount: '', date: todayKey(), direction, origin: '', image: '', source: current.planId ? 'plan' : 'wallet', key: '', surprise: true });
   };
   const positionMoves = detailSides
     .filter((side) => side.group === 'crypto' || side.group === 'etf' || side.group === 'stock')
@@ -523,19 +509,19 @@ export function Wallets({ accounts, hidden, openId, stickTop = 0, onOpen, onAdd,
         if (entryDraft.key) {
           await api(`/api/plans/${current.planId}/entry`, {
             method: 'POST',
-            body: JSON.stringify({ key: entryDraft.key, name, amount, date: entryDraft.date }),
+            body: JSON.stringify({ key: entryDraft.key, name, amount, date: entryDraft.date, image: entryDraft.image }),
           });
         } else {
           await api(`/api/plans/${current.planId}/extra`, {
             method: 'POST',
-            body: JSON.stringify({ name, amount, date: entryDraft.date, direction: entryDraft.direction, paid: true }),
+            body: JSON.stringify({ name, amount, date: entryDraft.date, direction: entryDraft.direction, paid: true, image: entryDraft.image }),
           });
         }
       } else {
         const path = entryDraft.id ? `/api/wallets/${current.key}/entries/${entryDraft.id}` : `/api/wallets/${current.key}/entries`;
         await api(path, {
           method: entryDraft.id ? 'PATCH' : 'POST',
-          body: JSON.stringify({ accountName: current.name, name: entryDraft.name.trim(), amount, date: entryDraft.date, direction: entryDraft.direction, origin }),
+          body: JSON.stringify({ accountName: current.name, name: entryDraft.name.trim(), amount, date: entryDraft.date, direction: entryDraft.direction, origin, image: entryDraft.image }),
         });
       }
       const freshOut = !entryDraft.id && !entryDraft.key && entryDraft.direction === 'out';
@@ -811,6 +797,7 @@ export function Wallets({ accounts, hidden, openId, stickTop = 0, onOpen, onAdd,
                     date: row.day,
                     direction: row.amount >= 0 ? 'in' : 'out',
                     origin: row.origin,
+                    image: row.image || '',
                     source: row.source,
                     key: row.key,
                     surprise: row.surprise,
@@ -833,6 +820,7 @@ export function Wallets({ accounts, hidden, openId, stickTop = 0, onOpen, onAdd,
               <button type="button" onClick={() => setFixedDraft({ ...fixedDraft, rhythm: 'weeks' })} className={cn('flex-1 rounded-full border py-2 text-sm font-bold', fixedDraft.rhythm === 'weeks' ? 'border-slate-900 text-slate-900 dark:border-white dark:text-white' : 'border-slate-200 text-slate-400')}>Cada X semanas</button>
             </div>
             <Input label="Qué es" value={fixedDraft.name} onChange={(event) => setFixedDraft({ ...fixedDraft, name: event.target.value })} placeholder="Entrenador" />
+            <OriginPicker name={fixedDraft.name} />
             <Input label="Importe €" type="number" min="0" step="any" value={fixedDraft.amount} onChange={(event) => setFixedDraft({ ...fixedDraft, amount: event.target.value })} />
             {fixedDraft.rhythm === 'month' ? (
               <Input label="Día del mes" type="number" min="1" max="31" value={fixedDraft.dayOfMonth} onChange={(event) => setFixedDraft({ ...fixedDraft, dayOfMonth: event.target.value })} />
@@ -854,6 +842,7 @@ export function Wallets({ accounts, hidden, openId, stickTop = 0, onOpen, onAdd,
               <button type="button" onClick={() => setEntryDraft({ ...entryDraft, direction: 'in' })} className={cn('flex-1 rounded-full border py-2 text-sm font-bold', entryDraft.direction === 'in' ? 'border-[#16c784] text-[#16c784]' : 'border-slate-200 text-slate-400')}>Entra</button>
             </div>
             <Input label="Qué es" value={entryDraft.name} onChange={(event) => setEntryDraft({ ...entryDraft, name: event.target.value })} />
+            <OriginPicker name={`${entryDraft.name} ${entryDraft.origin}`} image={entryDraft.image} onImage={(image) => setEntryDraft({ ...entryDraft, image })} />
             <Input label="Importe €" type="number" min="0" step="any" value={entryDraft.amount} onChange={(event) => setEntryDraft({ ...entryDraft, amount: event.target.value })} />
             <Input label="Fecha" type="date" value={entryDraft.date} onChange={(event) => setEntryDraft({ ...entryDraft, date: event.target.value })} />
             <Input

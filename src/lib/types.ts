@@ -205,6 +205,7 @@ export interface PlanEvent {
   paid?: boolean;
   surprise?: boolean;
   automatic?: boolean;
+  image?: string;
 }
 
 export interface PlanInterval {

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Check } from 'lucide-react';
 import { api } from '@/lib/api';
 import { formatDay, formatEur } from '@/lib/format';
+import { OriginGlyph } from '@/components/OriginMark';
 import { cn } from '@/lib/utils';
 import type { PlanForecast, PlanRow } from '@/lib/types';
 
@@ -13,6 +14,7 @@ interface CheckItem {
   direction: 'in' | 'out';
   day: string;
   paid: boolean;
+  image: string;
 }
 
 interface SoonItem {
@@ -20,6 +22,12 @@ interface SoonItem {
   label: string;
   amount: number;
   day: string;
+}
+
+function eventImage(plan: PlanRow, markKey: string): string {
+  const [kind, id] = markKey.split(':');
+  const list = kind === 'expense' ? plan.plannedExpenses : kind === 'income' ? plan.incomes : [];
+  return list?.find((item) => item._id === id)?.image || '';
 }
 
 function monthDate(month: string, anchor: number): string {
@@ -71,6 +79,7 @@ export function PendingToday({ hidden, onChanged }: { hidden: boolean; onChanged
             direction: line.amount < 0 ? 'out' : 'in',
             day: line.day,
             paid: line.paid === true,
+            image: eventImage(plan, line.markKey),
           });
         }
       }
@@ -135,6 +144,7 @@ export function PendingToday({ hidden, onChanged }: { hidden: boolean; onChanged
               >
                 <Check size={13} strokeWidth={3} />
               </button>
+              <OriginGlyph name={item.label} image={item.image} className="h-8 w-8" />
               <span className="min-w-0 flex-1">
                 <span className={cn('block break-words text-[13px] font-semibold leading-snug', item.paid ? 'text-slate-900 dark:text-white' : 'text-slate-600 dark:text-slate-300')}>{item.label}</span>
                 <span className="block text-[11px] text-slate-400">{formatDay(item.day)}</span>
