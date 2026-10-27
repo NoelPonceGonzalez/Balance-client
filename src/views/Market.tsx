@@ -22,6 +22,34 @@ function matches(query: string, parts: Array<string | null | undefined>): boolea
   return parts.some((part) => fold(part || '').includes(needle));
 }
 
+function keepSkinMoves(next: MarketBoard, prev: MarketBoard | null): MarketBoard {
+  if (!prev?.cs2?.length) return next;
+  const prior = new Map(prev.cs2.map((item) => [item.key, item]));
+  return {
+    ...next,
+    cs2: (next.cs2 || []).map((item) => {
+      const old = prior.get(item.key);
+      if (!old || item.sparkline.length > 1) return item;
+      return { ...item, changePct: old.changePct, changeLabel: old.changeLabel, sparkline: old.sparkline };
+    }),
+  };
+}
+
+function applySkinMoves(
+  board: MarketBoard,
+  moves: { key: string; changePct: number | null; changeLabel: string; sparkline: number[] }[],
+): MarketBoard {
+  const byKey = new Map(moves.map((item) => [item.key, item]));
+  return {
+    ...board,
+    cs2: (board.cs2 || []).map((item) => {
+      const move = byKey.get(item.key);
+      if (!move || move.sparkline.length < 2) return item;
+      return { ...item, changePct: move.changePct, changeLabel: move.changeLabel, sparkline: move.sparkline };
+    }),
+  };
+}
+
 function Mark({ image, symbol, fallback, contain }: { image: string | null; symbol: string; fallback?: string | null; contain?: boolean }) {
   const [broken, setBroken] = useState(false);
   const [fallbackBroken, setFallbackBroken] = useState(false);
@@ -365,8 +393,13 @@ export function Market() {
   const load = () => {
     api<MarketBoard>('/api/market')
       .then((next) => {
-        setData(next);
+        setData((prev) => keepSkinMoves(next, prev));
         setError('');
+        api<{ moves: { key: string; changePct: number | null; changeLabel: string; sparkline: number[] }[] }>('/api/market/moves')
+          .then((pack) => {
+            setData((current) => (current ? applySkinMoves(current, pack.moves) : current));
+          })
+          .catch(() => undefined);
       })
       .catch((err: Error) => setError(err.message));
   };

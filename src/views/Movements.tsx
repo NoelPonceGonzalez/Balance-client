@@ -82,6 +82,7 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [duplicate, setDuplicate] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState(false);
   const [error, setError] = useState('');
   const [ready, setReady] = useState(false);
   const [openGroup, setOpenGroup] = useState<string | null>(null);
@@ -154,10 +155,25 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
       setDraft(null);
       setEditing(null);
       setDuplicate(false);
+      setConfirmRemove(false);
       await load();
     } catch (err) {
       if (err instanceof ApiError && err.code === 'duplicate') setDuplicate(true);
       else setError(err instanceof Error ? err.message : 'No se ha podido guardar.');
+    }
+  };
+
+  const remove = async () => {
+    if (!editing) return;
+    setError('');
+    try {
+      await api(`/api/movements/${editing}`, { method: 'DELETE' });
+      setDraft(null);
+      setEditing(null);
+      setConfirmRemove(false);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se ha podido eliminar.');
     }
   };
 
@@ -348,9 +364,14 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
               Actualizar el saldo de la cuenta
             </label>
             <p className="text-xs font-medium text-slate-500">Para BTC, ETH u otra moneda sin precio en euros, déjalo sin marcar. El apunte se guarda y no se inventa un importe en euros.</p>
-            <div className="flex justify-end gap-2">
-              {duplicate && <Button variant="outline" onClick={() => save(true)}>Guardar igualmente</Button>}
-              <Button onClick={() => save(false)}>Guardar</Button>
+            <div className="flex items-center justify-between gap-2">
+              {editing ? (
+                <Button variant="outline" onClick={() => { if (confirmRemove) void remove(); else setConfirmRemove(true); }}>{confirmRemove ? 'Confirmar' : 'Eliminar'}</Button>
+              ) : <span />}
+              <div className="flex gap-2">
+                {duplicate && <Button variant="outline" onClick={() => save(true)}>Guardar igualmente</Button>}
+                <Button onClick={() => save(false)}>Guardar</Button>
+              </div>
             </div>
           </div>
         </Modal>
@@ -360,6 +381,7 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
   function openEdit(row: MovementRow) {
     setEditing(docId(row));
     setDuplicate(false);
+    setConfirmRemove(false);
     setDraft({
       type: row.type,
       date: row.date,

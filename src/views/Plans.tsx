@@ -285,6 +285,7 @@ export function Plans({ embedded = false }: { embedded?: boolean }) {
   const [items, setItems] = useState<{ plan: PlanRow; forecast: PlanForecast }[]>([]);
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
+  const [monthOpen, setMonthOpen] = useState<Record<string, boolean>>({});
   const [draft, setDraft] = useState<Draft | null>(null);
   const [shaped, setShaped] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
@@ -304,6 +305,9 @@ export function Plans({ embedded = false }: { embedded?: boolean }) {
   const [ready, setReady] = useState(false);
   const [previewDay, setPreviewDay] = useState<string | null>(null);
   const suppressCard = useRef(false);
+  useEffect(() => {
+    setMonthOpen({});
+  }, [selected]);
   const desiredMark = useRef(new Map<string, boolean>());
   const marking = useRef(new Set<string>());
 
@@ -825,17 +829,24 @@ export function Plans({ embedded = false }: { embedded?: boolean }) {
             {shownMonths.map((month) => {
               const expected = forecast.series?.find((item) => item.month === month.month)?.withExpected;
               const dropping = drag != null && drag.over === month.month && drag.line.day?.slice(0, 7) !== month.month;
+              const todayMonth = (forecast.today || '').slice(0, 7);
+              const open = monthOpen[month.month] ?? month.month >= todayMonth;
+              const shown = open || extra?.month === month.month || dropping;
               return (
               <section
                 key={month.month}
                 data-drop-month={month.month}
                 className={cn('rounded-2xl transition-all duration-200', dropping && 'bg-indigo-50/90 ring-2 ring-indigo-400 dark:bg-indigo-500/15')}
               >
-                <div className="mb-2 flex items-baseline justify-between gap-3 px-1">
+                <button
+                  type="button"
+                  onClick={() => setMonthOpen((prev) => ({ ...prev, [month.month]: !shown }))}
+                  className="mb-2 flex w-full items-baseline justify-between gap-3 px-1 text-left"
+                >
                   <h4 className="text-sm font-black">{month.title}</h4>
-                  {dropping ? <span className="text-[11px] font-bold text-indigo-600 dark:text-indigo-300">Soltar aquí</span> : expected != null && <span className="text-[11px] font-semibold text-slate-400">Cierre previsto {formatEur(expected)}</span>}
-                </div>
-                <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white/70 transition-colors duration-300 dark:border-white/10 dark:bg-black/20">
+                  {dropping ? <span className="text-[11px] font-bold text-indigo-600 dark:text-indigo-300">Soltar aquí</span> : <span className="text-[11px] font-semibold text-slate-400">{shown && expected != null ? `Cierre previsto ${formatEur(expected)}` : 'Ver el mes'}</span>}
+                </button>
+                {shown && <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white/70 transition-colors duration-300 dark:border-white/10 dark:bg-black/20">
                   {month.lines.map((line, index) => (
                     <PlanLine
                       key={line.markKey || `${month.month}-${line.label}`}
@@ -880,7 +891,7 @@ export function Plans({ embedded = false }: { embedded?: boolean }) {
                       <Plus size={15} /> Añadir extra
                     </button>
                   )}
-                </div>
+                </div>}
               </section>
               );
             })}
