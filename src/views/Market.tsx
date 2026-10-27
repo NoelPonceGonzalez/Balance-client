@@ -178,7 +178,7 @@ function PriceChart({ values, up }: { values: number[]; up: boolean }) {
           strokeLinecap="round"
           initial={reduce ? false : { pathLength: 0 }}
           animate={{ pathLength: 1 }}
-          transition={{ duration: 0.75, ease: [0.22, 1, 0.36, 1] }}
+          transition={{ duration: 0.95, ease: [0.22, 1, 0.36, 1] }}
         />
         <circle cx={last.x} cy={last.y} r="5" fill={color} />
         <circle cx={last.x} cy={last.y} r="9" fill={color} opacity="0.2" />

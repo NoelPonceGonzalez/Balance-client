@@ -4,6 +4,7 @@ import { LayoutDashboard, Target, Settings, ArrowLeftRight, LineChart } from 'lu
 import { InstallApp } from '@/components/InstallApp';
 import { Mark } from '@/components/Mark';
 import { NotificationsBell } from '@/components/NotificationsBell';
+import { softSpring } from '@/lib/motion';
 import { cn } from '@/lib/utils';
 import type { User } from '@/lib/types';
 
@@ -65,10 +66,10 @@ export function Shell({
       band.animate(
         [
           { transform: `translate3d(0, ${from}px, 0)` },
-          { transform: `translate3d(0, ${-from * 0.12}px, 0)`, offset: 0.72 },
+          { transform: `translate3d(0, ${-from * 0.04}px, 0)`, offset: 0.82 },
           { transform: 'translate3d(0, 0, 0)' },
         ],
-        { duration: 620, easing: 'cubic-bezier(0.22, 1.35, 0.36, 1)' },
+        { duration: 780, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' },
       );
     };
     const onTouchStart = (event: TouchEvent) => begin(event.touches[0]?.clientY ?? 0);
@@ -135,7 +136,7 @@ export function Shell({
                   <motion.span
                     layoutId="nav-pill"
                     className="absolute inset-0 rounded-2xl bg-white shadow-sm dark:bg-white/15 sm:rounded-full"
-                    transition={{ type: 'spring', stiffness: 460, damping: 24, mass: 0.65 }}
+                    transition={softSpring}
                   />
                 )}
                 <Icon size={16} strokeWidth={1.75} className="relative" />

@@ -1,6 +1,7 @@
 import { useEffect, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { motion } from 'motion/react';
+import { glide } from '@/lib/motion';
 import { cn } from '@/lib/utils';
 
 export const modalOverlayClass =
@@ -37,9 +38,9 @@ export function Modal({ title, onClose, children, wide }: { title: string; onClo
         onClick={(event) => event.stopPropagation()}
         role="dialog"
         aria-labelledby="modal-title"
-        initial={{ opacity: 0, scale: 0.9, y: 18 }}
+        initial={{ opacity: 0, scale: 0.98, y: 10 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
-        transition={{ type: 'spring', stiffness: 420, damping: 22, mass: 0.7 }}
+        transition={glide}
       >
         <div className="mb-5 flex items-center justify-between gap-4">
           <h2 id="modal-title" className="min-w-0 break-words text-[17px] font-semibold leading-snug tracking-tight text-slate-900 dark:text-white">{title}</h2>

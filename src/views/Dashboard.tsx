@@ -18,6 +18,7 @@ import type { DashboardData } from '@/lib/types';
 import { Wallets } from '@/views/Wallets';
 import { SkinSearch, wearHint, type SkinPhase } from '@/components/SkinSearch';
 import { OriginPicker } from '@/components/OriginMark';
+import { glide, softSpring } from '@/lib/motion';
 const HIDE_KEY = 'pat_hide_money';
 const SORT_KEY = 'pat_dash_sort';
 const CYCLE_MS = 5000;
@@ -190,7 +191,7 @@ function RisingAmount({ value, hidden, signed = false, card = false, delay = 0 }
   return <>{text}</>;
 }
 
-const rise = { duration: 0.28, ease: [0.22, 1, 0.36, 1] as const };
+const rise = glide;
 
 function Donut({ slices }: { slices: { key: string; eur: number; color: string }[] }) {
   const progress = useRise(1, true, 700, 40);
@@ -1250,7 +1251,7 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       {pin}
-      <motion.section initial={prefersStill() ? false : { opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={prefersStill() ? { duration: 0 } : rise}>
+      <motion.section initial={prefersStill() ? false : { opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={prefersStill() ? { duration: 0 } : rise}>
         <p className="text-[11px] font-semibold text-slate-400">{formatDay(data.today)}</p>
         <button
           type="button"
@@ -1293,7 +1294,7 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
           const frame = prefersStill() ? row.frames[0] : row.frames[beat % row.frames.length];
           const open = openKey === row.key;
           return (
-            <motion.div key={row.key} initial={prefersStill() ? false : { opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: prefersStill() ? 0 : 0.22, delay: prefersStill() ? 0 : Math.min(index, 5) * 0.03 }}>
+            <motion.div key={row.key} initial={prefersStill() ? false : { opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={prefersStill() ? { duration: 0 } : { ...glide, delay: Math.min(index, 5) * 0.04 }}>
               <div
                 role="button"
                 tabIndex={0}
@@ -1346,7 +1347,7 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
                       initial={{ opacity: 0, y: 8 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -8 }}
-                      transition={{ type: 'spring', stiffness: 420, damping: 22, mass: 0.7 }}
+                      transition={glide}
                       className={cn('shrink-0 text-sm font-black tabular-nums sm:text-base', hidden ? 'text-slate-400' : frame.className)}
                     >
                       {mask(frame.text)}
@@ -1374,7 +1375,7 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
                     initial={{ opacity: 0, height: 0 }}
                     animate={{ opacity: 1, height: 'auto' }}
                     exit={{ opacity: 0, height: 0 }}
-                    transition={{ type: 'spring', stiffness: 420, damping: 22, mass: 0.7 }}
+                    transition={glide}
                     className="mt-2 space-y-1 overflow-hidden rounded-[28px] border border-white/70 bg-white/45 px-4 py-3 shadow-[0_8px_32px_rgba(15,23,42,0.06)] backdrop-blur-2xl dark:border-white/10 dark:bg-white/10"
                   >
                     {row.sides.length === 0 && <li className="text-xs font-semibold text-slate-400">Sin desglose todavía.</li>}
@@ -1470,8 +1471,8 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
           onClick={() => setAdding(true)}
           initial={prefersStill() ? false : { opacity: 0, y: 18 }}
           animate={{ opacity: 1, y: 0 }}
-          whileTap={{ scaleX: 1.03, scaleY: 0.94 }}
-          transition={prefersStill() ? { type: 'spring', stiffness: 520, damping: 18, mass: 0.55 } : { type: 'spring', stiffness: 380, damping: 22, mass: 0.7, delay: 0.08 }}
+          whileTap={{ scale: 0.985 }}
+          transition={prefersStill() ? softSpring : { ...glide, delay: 0.06 }}
           className="motion-squish flex w-full items-center gap-3 rounded-[28px] border border-dashed border-slate-300/90 bg-white/40 px-5 py-3.5 text-left text-slate-600 backdrop-blur-xl hover:bg-white/70 dark:border-white/15 dark:bg-white/5 dark:text-slate-300"
         >
           <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-slate-300/80 dark:border-white/15">

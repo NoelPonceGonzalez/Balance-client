@@ -3,6 +3,7 @@ import { motion } from 'motion/react';
 import { QuietLoad } from '@/components/QuietLoad';
 import { Shell, type Section } from '@/components/Shell';
 import { api, ApiError } from '@/lib/api';
+import { glide } from '@/lib/motion';
 import type { User } from '@/lib/types';
 import { Dashboard } from '@/views/Dashboard';
 import { LoginView } from '@/views/Login';
@@ -95,9 +96,9 @@ export default function App() {
     <Shell section={section} onChange={(next) => { setSection(next); if (next === 'dashboard') setHome((value) => value + 1); }} user={user}>
       <motion.div
         key={section}
-        initial={window.matchMedia('(prefers-reduced-motion: reduce)').matches ? false : { opacity: 0, scale: 0.975, y: 12 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        transition={{ type: 'spring', stiffness: 380, damping: 24, mass: 0.72 }}
+        initial={window.matchMedia('(prefers-reduced-motion: reduce)').matches ? false : { opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={glide}
       >
         {section === 'dashboard' && <Dashboard heroMs={heroMs} home={home} />}
         {section === 'market' && <Market />}
