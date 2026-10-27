@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } f
 import { bindHold, HoldMenu, holdItemClass, placeMenu } from '@/components/HoldMenu';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'motion/react';
-import { Banknote, Cake, Check, ChevronLeft, Dumbbell, Gift, GripVertical, ImageIcon, MoreHorizontal, Pencil, PiggyBank, Plus, RotateCcw, Trash2, Utensils, Wallet, Watch, type LucideIcon } from 'lucide-react';
+import { Banknote, Cake, Check, ChevronLeft, Dumbbell, Gift, GripVertical, ImageIcon, MoreHorizontal, Pencil, PiggyBank, Plus, Trash2, Utensils, Wallet, Watch, type LucideIcon } from 'lucide-react';
 import { ModalClose, modalOverlayClass, modalPanelClass } from '@/components/Modal';
 import { findBrand, isSkinName } from '@/lib/brands';
 import { PlatformLogo } from '@/components/PlatformLogo';
@@ -204,6 +204,20 @@ function barWidth(balance: number, target: number): number {
   return Math.max(0, Math.min(100, (balance / target) * 100));
 }
 
+function monthPace(extraMonths: number | null | undefined): { text: string; className: string } {
+  if (extraMonths == null) return { text: 'Sin mes de más', className: 'text-slate-400' };
+  if (extraMonths > 0) {
+    const months = extraMonths === 1 ? 'un mes de más' : `${extraMonths} meses de más`;
+    return { text: `Vas mal · ${months}`, className: 'text-[#ea3943]' };
+  }
+  if (extraMonths < 0) {
+    const ahead = -extraMonths;
+    const months = ahead === 1 ? 'un mes antes' : `${ahead} meses antes`;
+    return { text: `Vas mejor · ${months}`, className: 'text-[#16c784]' };
+  }
+  return { text: 'Vas mejor · sin mes de más', className: 'text-[#16c784]' };
+}
+
 function surprisePace(plan: PlanRow): { ahead: number; behind: number } {
   const cleared = new Set(plan.surpriseCleared || []);
   let net = 0;
@@ -298,7 +312,6 @@ export function Plans({ embedded = false }: { embedded?: boolean }) {
   const lookingAhead = Boolean(forecast?.today && previewDay && previewDay > forecast.today);
   const shownMonths = lookingAhead && reachedDay ? walkMonths(months, reachedDay, openingBalance) : months;
   const shownBalance = lookingAhead && reachedDay ? walkedBalance(months, reachedDay, openingBalance) : todayBalance;
-  const pace = plan ? surprisePace(plan) : { ahead: 0, behind: 0 };
   const linked = accounts.filter((account) => (plan?.linkedAccountIds || []).map(String).includes(String(account._id)) && !account.archived);
   const payday = accounts.find((account) => String(account._id) === String(plan?.salaryAccountId) && !account.archived) || (linked.length === 1 ? linked[0] : undefined);
   const liquidity = linked[0];
@@ -468,17 +481,6 @@ export function Plans({ embedded = false }: { embedded?: boolean }) {
     }
   };
 
-  const resetPace = async () => {
-    if (!plan) return;
-    setError('');
-    try {
-      await api(`/api/plans/${docId(plan)}/pace-reset`, { method: 'POST', body: '{}' });
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se ha podido restablecer.');
-    }
-  };
-
   const holdCard = (id: string, event: ReactPointerEvent) => {
     bindHold(event, (x, y) => {
       suppressCard.current = true;
@@ -596,16 +598,7 @@ export function Plans({ embedded = false }: { embedded?: boolean }) {
             <div className="h-1.5 overflow-hidden rounded-full bg-slate-900/10 dark:bg-white/15">
               <div className="h-full rounded-full bg-slate-900/75 transition-[width] duration-700 ease-out dark:bg-white" style={{ width: `${barWidth(shownBalance, plan.targetAmount)}%` }} />
             </div>
-            <div className="mt-2 flex items-start justify-between gap-2 text-xs font-bold">
-              <p className="min-w-0 flex-1 leading-snug">
-                <span className={pace.ahead > 0.5 ? 'text-[#16c784]' : 'text-slate-400'}>{formatEur(pace.ahead)} por delante</span>
-                <span className="text-slate-300"> · </span>
-                <span className={pace.behind > 0.5 ? 'text-[#ea3943]' : 'text-slate-400'}>{formatEur(pace.behind)} por detrás</span>
-              </p>
-              <button type="button" onClick={() => void resetPace()} className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-slate-400 transition-colors hover:bg-white/70 hover:text-slate-700 dark:hover:bg-white/10" aria-label="Restablecer a cero" title="Restablecer a cero">
-                <RotateCcw size={14} />
-              </button>
-            </div>
+            <p className={cn('mt-2 text-xs font-bold leading-snug', monthPace(forecast?.extraMonths).className)}>{monthPace(forecast?.extraMonths).text}</p>
           </div>
         </div>
       )}

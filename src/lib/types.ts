@@ -269,6 +269,7 @@ export interface PlanForecast {
   compliancePct: number | null;
   onTrack: boolean;
   estimatedDate: string | null;
+  extraMonths?: number | null;
   extraMonthlyToRecover: number | null;
   gapAtTarget: number;
   series: { month: string; planned: number; withExpected: number }[];
