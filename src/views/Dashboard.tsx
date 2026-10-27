@@ -87,6 +87,14 @@ function isMarketClass(assetClass: string): boolean {
   return assetClass === 'crypto' || assetClass === 'etf' || assetClass === 'stock';
 }
 
+function withWorldRank(name: string, rank: string): string {
+  const base = name.replace(/\s+#\s*\d{1,5}\s*$/g, '').trim();
+  const digits = rank.trim();
+  if (!digits) return base;
+  const next = `${base} #${digits}`;
+  return next.length <= 80 ? next : base;
+}
+
 const PIECE_CLASSES = [
   { id: 'crypto', label: 'Cripto' },
   { id: 'etf', label: 'ETF' },
@@ -348,6 +356,10 @@ function PieceDialog({
   const [searchNote, setSearchNote] = useState('');
   const [searching, setSearching] = useState(false);
   const [showAllHits, setShowAllHits] = useState(false);
+  const [rankNote, setRankNote] = useState('');
+  const rankLock = useRef(piece.rank.trim() !== '');
+  const rankValue = useRef(piece.rank);
+  rankValue.current = piece.rank;
   const market = !piece.skins && isMarketClass(piece.assetClass);
   const spent = piece.id ? piece.extraSpent : piece.cost;
   const manualPrice = piece.receiveMode === 'manual' && Number(spent) > 0 && Number(piece.quantity) > 0 ? Number(spent) / Number(piece.quantity) : null;
@@ -383,6 +395,44 @@ function PieceDialog({
       window.clearTimeout(timer);
     };
   }, [query]);
+  useEffect(() => {
+    const skins = piece.skins || piece.assetClass === 'personal_good';
+    const floatText = piece.floatText.trim().replace(',', '.');
+    if (!skins || !/^\d+\.\d{5,}$/.test(floatText)) {
+      setRankNote('');
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      const paint = piece.phasePaint == null ? '' : String(piece.phasePaint);
+      const query = `label=${encodeURIComponent(piece.name)}&market=${encodeURIComponent(piece.marketName)}&float=${encodeURIComponent(floatText)}&paint=${encodeURIComponent(paint)}`;
+      api<{ rank: number | null }>(`/api/market/rank?${query}`)
+        .then((data) => {
+          if (cancelled) return;
+          if (data.rank != null && !rankLock.current) {
+            setPiece((current) => (current ? { ...current, rank: String(data.rank) } : current));
+            setRankNote(`Este float es el #${data.rank}. Cámbialo si no es el tuyo.`);
+            return;
+          }
+          if (data.rank != null && String(data.rank) === rankValue.current.trim()) {
+            setRankNote(`Este float es el #${data.rank}.`);
+            return;
+          }
+          if (data.rank != null) {
+            setRankNote(`Este float es el #${data.rank}. El número de abajo es el que se guarda.`);
+            return;
+          }
+          setRankNote(rankValue.current.trim() ? 'Puedes cambiar el puesto. Se guarda el número que dejes.' : 'Con este float no sale un puesto. Escríbelo si lo sabes.');
+        })
+        .catch(() => {
+          if (!cancelled) setRankNote(rankValue.current.trim() ? 'Puedes cambiar el puesto. Se guarda el número que dejes.' : '');
+        });
+    }, 400);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [piece.assetClass, piece.floatText, piece.marketName, piece.name, piece.phasePaint, piece.skins, setPiece]);
   const clearPreview = (next: PieceDraft): PieceDraft => ({ ...next, preview: null });
   return (
     <Modal title={piece.id ? piece.name : `Añadir en ${piece.accountName}`} onClose={() => setPiece(null)}>
@@ -436,16 +486,12 @@ function PieceDialog({
           </Field>
         )}
         {(piece.skins || piece.assetClass === 'personal_good') && (
-          <details className="rounded-2xl border border-slate-200 px-3 py-2 dark:border-white/10">
-            <summary className="cursor-pointer text-sm font-semibold text-slate-500">Detalle</summary>
-            <div className="mt-3 grid gap-3">
-              <Input label="Float" value={piece.floatText} onChange={(event) => setPiece({ ...piece, floatText: event.target.value })} placeholder="0,15 más o menos" />
-              <p className="text-xs font-medium text-slate-400">{wearHint(piece.floatText, piece.wears)}</p>
-              {piece.phases.length > 0 && (
-                <Input label="Puesto en el mundo" value={piece.rank} onChange={(event) => setPiece({ ...piece, rank: event.target.value })} placeholder="26, si lo sabes" />
-              )}
-            </div>
-          </details>
+          <div className="grid gap-3">
+            <Input label="Float" value={piece.floatText} onChange={(event) => { rankLock.current = false; setPiece({ ...piece, floatText: event.target.value }); }} placeholder="0,007877453230" />
+            <p className="text-xs font-medium text-slate-400">{wearHint(piece.floatText, piece.wears)}</p>
+            <Input label="Puesto en el mundo" value={piece.rank} onChange={(event) => { rankLock.current = true; setPiece({ ...piece, rank: event.target.value }); }} placeholder="26" />
+            {rankNote && <p className="text-xs font-medium text-slate-400">{rankNote}</p>}
+          </div>
         )}
         {market && (
           <div className="grid gap-3 rounded-2xl border border-white/70 bg-white/35 p-3 dark:border-white/10 dark:bg-white/5">
@@ -803,7 +849,7 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
       image: item?.image || null,
       phases: [],
       phasePaint: null,
-      rank: ((item?.label || '').match(/#\s*(\d{1,4})/) || [])[1] || '',
+      rank: ((item?.label || '').match(/#\s*(\d{1,5})/) || [])[1] || '',
       boughtAt: item ? '' : localStamp(),
       receiveMode: 'market',
       quoteSource: item?.quoteSource === 'yahoo' || item?.quoteSource === 'coingecko' ? item.quoteSource : '',
@@ -888,7 +934,7 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
       setPieceError('Elige la fase. Si no, el precio mezcla Ruby con Phase 1.');
       return;
     }
-    if (piece.rank.trim() && !/^\d{1,4}$/.test(piece.rank.trim())) {
+    if (piece.rank.trim() && !/^\d{1,5}$/.test(piece.rank.trim())) {
       setPieceError('El puesto es un número, como 26.');
       return;
     }
@@ -901,9 +947,7 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
     }
     const linked = Boolean(piece.marketName);
     const unit = total == null || linked ? null : total / quantity;
-    const displayName = piece.name.trim();
-    const withRank = `${displayName} #${piece.rank.trim()}`;
-    const ranked = linked && piece.rank.trim() && !/#\s*\d+/.test(displayName) && withRank.length <= 80 ? withRank : displayName;
+    const ranked = skins ? withWorldRank(piece.name.trim(), piece.rank) : piece.name.trim();
     const skinQuote = linked ? { quoteSource: 'csfloat', quoteId: piece.marketName } : {};
     try {
       const saved = piece.id
@@ -1120,7 +1164,21 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
             })), extraWallet(data.extras)]}
             onSaved={load}
             onKeep={(name, amount) => setKeepAsk({ name, amount })}
-            onEditExtra={openExtra}
+            onEditExtra={(id) => {
+              if (data.extras.some((item) => item.id === id)) {
+                openExtra(id);
+                return;
+              }
+              for (const row of ordered) {
+                for (const side of row.sides) {
+                  const item = side.items.find((part) => part.id === id);
+                  if (item) {
+                    openPiece(row, item);
+                    return;
+                  }
+                }
+              }
+            }}
             onAdd={(key) => {
               if (key === 'extras') {
                 setExtraError('');
