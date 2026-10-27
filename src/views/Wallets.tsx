@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Check, Plus, Search, Trash2 } from 'lucide-react';
+import { Check, ChevronLeft, ChevronRight, Plus, Search, Trash2 } from 'lucide-react';
 import { PlatformLogo } from '@/components/PlatformLogo';
 import { SpendIcon } from '@/components/SpendIcon';
 import { Modal } from '@/components/Modal';
@@ -134,8 +134,6 @@ function SpentMark({ label, image }: { label: string; image?: string | null }) {
   return <OriginGlyph name={label} image={image} className="h-11 w-11" />;
 }
 
-const PREVIEW = 4;
-
 interface Activity {
   id: string;
   day: string;
@@ -161,10 +159,10 @@ function fold(value: string): string {
   return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 }
 
-function matchesActivity(label: string, amount: number, query: string): boolean {
+function matchesActivity(label: string, note: string, amount: number, query: string): boolean {
   const text = fold(query.trim());
   if (!text) return true;
-  if (fold(label).includes(text)) return true;
+  if (fold(label).includes(text) || fold(note).includes(text)) return true;
   const numeric = text.replace(/€/g, '').replace(/\s/g, '').replace(/\./g, '').replace(',', '.');
   if (!/^\d+(\.\d+)?$/.test(numeric)) return false;
   const abs = Math.abs(amount);
@@ -263,30 +261,28 @@ function SectionChart({ accountKey, group, points, title, card = false }: { acco
   );
 }
 
-function ActivityList({ rows, hidden }: { rows: Activity[]; hidden: boolean }) {
-  const [open, setOpen] = useState(false);
+function ActivityList({ rows, hidden, mode }: { rows: Activity[]; hidden: boolean; mode: 'peek' | 'all' }) {
   const [query, setQuery] = useState('');
-  const searching = query.trim().length > 0;
-  const matched = rows.filter((row) => matchesActivity(row.label, row.amount, query));
-  const shown = open || searching ? matched : rows.slice(0, PREVIEW);
-  const faded = !open && !searching && rows.length > PREVIEW;
+  const matched = rows.filter((row) => matchesActivity(row.label, row.note, row.amount, query));
+  const shown = mode === 'all' ? matched : rows;
+  const faded = mode === 'peek' && rows.length > 6;
   const className = 'flex w-full items-center gap-3 border-t border-slate-200/70 py-2.5 text-left first:border-t-0 dark:border-white/10';
   return (
     <div>
-      {(open || rows.length <= PREVIEW) && (
+      {mode === 'all' && (
         <label className="mb-2 flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 dark:border-white/10 dark:bg-black/20">
           <Search size={15} className="shrink-0 text-slate-400" />
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Nombre o importe"
+            placeholder="Nombre, fecha o importe"
             className="w-full bg-transparent text-sm font-semibold outline-none placeholder:text-slate-400"
           />
         </label>
       )}
       <div className="relative">
-        <ul className={faded ? 'max-h-52 overflow-hidden' : undefined}>
-          {shown.length === 0 && <li className="py-2 text-sm font-medium text-slate-400">{rows.length === 0 ? 'Todavía no hay movimientos.' : 'Ningún movimiento coincide.'}</li>}
+        <ul className={faded ? 'max-h-[28rem] overflow-hidden' : undefined}>
+          {shown.length === 0 && <li className="py-2 text-sm font-medium text-slate-400">{rows.length === 0 ? 'Todavía no hay transacciones.' : 'Ninguna transacción coincide.'}</li>}
           {shown.map((row) => {
             const body = (
               <>
@@ -326,14 +322,19 @@ function ActivityList({ rows, hidden }: { rows: Activity[]; hidden: boolean }) {
           })}
         </ul>
         {faded && (
-          <button type="button" onClick={() => setOpen(true)} className="absolute inset-x-0 bottom-0 flex h-20 items-end justify-center bg-gradient-to-t from-white via-white/90 to-transparent pb-1 text-sm font-black text-slate-500 dark:from-slate-950 dark:via-slate-950/90">
-            Ver todas
-          </button>
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-x-0 bottom-0 h-36"
+            style={{
+              backdropFilter: 'blur(7px)',
+              WebkitBackdropFilter: 'blur(7px)',
+              maskImage: 'linear-gradient(to top, black 15%, transparent)',
+              WebkitMaskImage: 'linear-gradient(to top, black 15%, transparent)',
+            }}
+          />
         )}
+        {faded && <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-white via-white/80 to-transparent dark:from-slate-950 dark:via-slate-950/80" />}
       </div>
-      {open && rows.length > PREVIEW && (
-        <button type="button" onClick={() => { setOpen(false); setQuery(''); }} className="mt-2 text-sm font-bold text-slate-400">Ver menos</button>
-      )}
     </div>
   );
 }
@@ -373,6 +374,8 @@ export function Wallets({ accounts, hidden, openId, stickTop = 0, onOpen, onAdd,
   const [fixedDraft, setFixedDraft] = useState<FixedDraft | null>(null);
   const [place, setPlace] = useState<'efectivo' | 'cartera'>('efectivo');
   const [focus, setFocus] = useState<string | null>(null);
+  const [ledger, setLedger] = useState<null | 'cash' | 'moves'>(null);
+  const [detail, setDetail] = useState<{ label: string; note: string; amount: number; image?: string | null } | null>(null);
 
   const load = async () => {
     const data = await api<{ wallets: WalletRow[] }>('/api/wallets');
@@ -410,6 +413,8 @@ export function Wallets({ accounts, hidden, openId, stickTop = 0, onOpen, onAdd,
   useEffect(() => {
     setPlace('efectivo');
     setFocus(null);
+    setLedger(null);
+    setDetail(null);
   }, [openId]);
 
   const current = accounts.find((account) => account.key === openId) || null;
@@ -494,6 +499,61 @@ export function Wallets({ accounts, hidden, openId, stickTop = 0, onOpen, onAdd,
     .filter((side) => side.group === 'crypto' || side.group === 'etf' || side.group === 'stock')
     .flatMap((side) => side.items.flatMap((item) => (item.moves || []).map((move) => ({ ...move, label: item.label, image: item.image }))))
     .sort((a, b) => b.at.localeCompare(a.at) || a.label.localeCompare(b.label));
+  const cashRows: Activity[] = statement.map((row) => {
+    const note = row.absorbed ? `${formatDay(row.day)} · ${row.open ? 'Falta confirmarlo' : 'ya en el efectivo'}` : `${formatDay(row.day)} · queda ${money(row.balance, hidden)}`;
+    return {
+      id: row.id,
+      day: row.day,
+      label: row.label,
+      note,
+      amount: row.amount,
+      image: row.image,
+      checked: row.source === 'plan' && !row.automatic && !row.open,
+      onToggle: row.source === 'plan' && !row.automatic && /^(expense|income|savings|recurring|interval):/.test(row.key)
+        ? () => void togglePlan(row.key, row.open === true)
+        : undefined,
+      onOpen: () => {
+        if (row.source === 'wallet' || row.key) {
+          setEntryDraft({
+            id: row.source === 'wallet' ? row.id : null,
+            name: row.name,
+            amount: String(Math.abs(row.amount)),
+            date: row.day,
+            direction: row.amount >= 0 ? 'in' : 'out',
+            origin: row.origin,
+            image: row.image || '',
+            source: row.source,
+            key: row.key,
+            surprise: row.surprise,
+          });
+          return;
+        }
+        setDetail({ label: row.label, note, amount: row.amount, image: row.image });
+      },
+    };
+  });
+  const moveRows: Activity[] = (positionMoves.length > 0
+    ? positionMoves.map((move) => ({
+      id: `${move.label}:${move.at}:${move.spentEur}`,
+      day: move.at.slice(0, 10),
+      label: move.label,
+      note: `${formatDay(move.at)} · ${formatNumber(move.quantity, 8)}`,
+      amount: -move.spentEur,
+      image: move.image,
+    }))
+    : detailSides.flatMap((side) => side.items).filter((item) => item.costEur != null && item.costEur > 0).map((item) => ({
+      id: item.id || item.label,
+      day: '',
+      label: item.label,
+      note: 'Lo metido',
+      amount: -(item.costEur || 0),
+      image: item.image,
+    }))
+  ).map((row) => ({
+    ...row,
+    onOpen: () => setDetail({ label: row.label, note: row.note, amount: row.amount, image: row.image }),
+  }));
+  const ledgerRows = ledger === 'cash' ? cashRows : moveRows;
 
   const saveEntry = async () => {
     if (!entryDraft || !current) return;
@@ -629,7 +689,18 @@ export function Wallets({ accounts, hidden, openId, stickTop = 0, onOpen, onAdd,
           ))}
         </div>
       )}
-      {current && (
+      {current && ledger && (
+        <section className="rounded-[24px] border border-white/70 bg-white/80 p-4 dark:border-white/10 dark:bg-white/10">
+          <button type="button" onClick={() => setLedger(null)} className="inline-flex items-center gap-1 text-sm font-bold text-slate-500">
+            <ChevronLeft size={16} /> Volver
+          </button>
+          <h2 className="mt-3 text-xl font-black">Transacciones</h2>
+          <div className="mt-3">
+            <ActivityList mode="all" hidden={hidden} rows={ledgerRows} />
+          </div>
+        </section>
+      )}
+      {current && !ledger && (
         <div className="space-y-3">
           {hasCash && (
             <div className="sticky z-20 -mx-4 flex flex-wrap items-center gap-2 bg-[var(--app-bg)] px-4 py-2 md:-mx-8 md:px-8" style={{ top: stickTop }}>
@@ -743,67 +814,26 @@ export function Wallets({ accounts, hidden, openId, stickTop = 0, onOpen, onAdd,
               )}
             </section>
           ))}
-          {detailSides.some((side) => side.group === 'crypto' || side.group === 'etf' || side.group === 'stock') && (
+          {detailSides.some((side) => side.group === 'crypto' || side.group === 'etf' || side.group === 'stock') && moveRows.length > 0 && (
             <section className="rounded-[24px] border border-white/70 bg-white/80 p-4 dark:border-white/10 dark:bg-white/10">
-              <p className="text-[11px] font-black uppercase tracking-widest text-slate-400">Extracto</p>
-              <h3 className="mt-1 text-base font-black">Lo que entra y lo que sale</h3>
+              <button type="button" onClick={() => setLedger('moves')} className="flex w-full items-center justify-between gap-3 text-left">
+                <h3 className="text-base font-black">Transacciones</h3>
+                <ChevronRight size={18} className="shrink-0 text-slate-400" />
+              </button>
               <p className="mt-1 text-xs font-medium text-slate-400">{positionMoves.length > 0 ? 'Las compras de este apartado.' : 'No hay cada compra por separado. Esto es lo que llevas metido.'}</p>
               <div className="mt-3">
-                <ActivityList
-                  hidden={hidden}
-                  rows={positionMoves.length > 0
-                    ? positionMoves.map((move) => ({
-                      id: `${move.label}:${move.at}:${move.spentEur}`,
-                      day: move.at.slice(0, 10),
-                      label: move.label,
-                      note: `${formatDay(move.at)} · ${formatNumber(move.quantity, 8)}`,
-                      amount: -move.spentEur,
-                      image: move.image,
-                    }))
-                    : detailSides.flatMap((side) => side.items).filter((item) => item.costEur != null && item.costEur > 0).map((item) => ({
-                      id: item.id || item.label,
-                      day: '',
-                      label: item.label,
-                      note: 'Lo metido',
-                      amount: -(item.costEur || 0),
-                      image: item.image,
-                    }))}
-                />
+                <ActivityList mode="peek" hidden={hidden} rows={moveRows} />
               </div>
             </section>
           )}
           {onEfectivo && cashSide && !current.extras && <section className="rounded-[24px] border border-white/70 bg-white/80 p-4 dark:border-white/10 dark:bg-white/10">
-            <p className="text-[11px] font-black uppercase tracking-widest text-slate-400">Extracto</p>
-            <h3 className="mt-1 text-base font-black">Lo que entra y lo que sale</h3>
+            <button type="button" onClick={() => setLedger('cash')} className="flex w-full items-center justify-between gap-3 text-left">
+              <h3 className="text-base font-black">Transacciones</h3>
+              <ChevronRight size={18} className="shrink-0 text-slate-400" />
+            </button>
             <p className="mt-1 text-xs font-medium text-slate-400">Una entrada va en verde y una salida en rojo. Lo que ya está en el efectivo no se vuelve a restar.</p>
             <div className="mt-3">
-              <ActivityList
-                hidden={hidden}
-                rows={statement.map((row) => ({
-                  id: row.id,
-                  day: row.day,
-                  label: row.label,
-                  note: row.absorbed ? `${formatDay(row.day)} · ${row.open ? 'Falta confirmarlo' : 'ya en el efectivo'}` : `${formatDay(row.day)} · queda ${money(row.balance, hidden)}`,
-                  amount: row.amount,
-                  image: row.image,
-                  checked: row.source === 'plan' && !row.automatic && !row.open,
-                  onToggle: row.source === 'plan' && !row.automatic && /^(expense|income|savings|recurring|interval):/.test(row.key)
-                    ? () => void togglePlan(row.key, row.open === true)
-                    : undefined,
-                  onOpen: row.source === 'wallet' || row.key ? () => setEntryDraft({
-                    id: row.source === 'wallet' ? row.id : null,
-                    name: row.name,
-                    amount: String(Math.abs(row.amount)),
-                    date: row.day,
-                    direction: row.amount >= 0 ? 'in' : 'out',
-                    origin: row.origin,
-                    image: row.image || '',
-                    source: row.source,
-                    key: row.key,
-                    surprise: row.surprise,
-                  }) : undefined,
-                }))}
-              />
+              <ActivityList mode="peek" hidden={hidden} rows={cashRows} />
             </div>
           </section>}
         </div>
@@ -834,8 +864,21 @@ export function Wallets({ accounts, hidden, openId, stickTop = 0, onOpen, onAdd,
           </div>
         </Modal>
       )}
+      {detail && (
+        <Modal title={detail.label} onClose={() => setDetail(null)}>
+          <div className="flex items-center gap-3">
+            <SpentMark label={detail.label} image={detail.image} />
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-slate-500">{detail.note}</p>
+              <p className={cn('mt-1 text-2xl font-black tabular-nums', detail.amount > 0 ? 'text-[#16c784]' : detail.amount < 0 ? 'text-[#ea3943]' : 'text-slate-400')}>
+                {hidden ? '*****' : formatSignedEur(detail.amount)}
+              </p>
+            </div>
+          </div>
+        </Modal>
+      )}
       {entryDraft && current && (
-        <Modal title={entryDraft.id ? entryDraft.name : entryDraft.direction === 'in' ? 'Extra' : 'Gasto'} onClose={() => setEntryDraft(null)}>
+        <Modal title={entryDraft.name || (entryDraft.direction === 'in' ? 'Extra' : 'Gasto')} onClose={() => setEntryDraft(null)}>
           <div className="grid gap-3">
             <div className="flex gap-2">
               <button type="button" onClick={() => setEntryDraft({ ...entryDraft, direction: 'out' })} className={cn('flex-1 rounded-full border py-2 text-sm font-bold', entryDraft.direction === 'out' ? 'border-[#ea3943] text-[#ea3943]' : 'border-slate-200 text-slate-400')}>Sale</button>
