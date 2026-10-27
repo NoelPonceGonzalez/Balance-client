@@ -151,23 +151,21 @@ function QuoteRow({ item, onOpen, onChanged }: { item: MarketItem; onOpen: () =>
   const up = (item.changePct ?? 0) >= 0;
   return (
     <article className="border-b border-slate-100 py-4 last:border-0 dark:border-slate-800">
-      <button type="button" onClick={onOpen} className="flex w-full flex-wrap items-center gap-x-4 gap-y-3 text-left">
-        <div className="flex min-w-[10rem] flex-1 items-center gap-3">
-          <Mark image={item.image} symbol={item.symbol} />
-          <div className="min-w-0">
-            <p className="truncate font-black">{item.name}</p>
-            <p className="truncate text-xs font-bold uppercase text-slate-400">{item.symbol} · {item.accountName}</p>
-          </div>
+      <button type="button" onClick={onOpen} className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 text-left sm:grid-cols-[auto_minmax(0,1fr)_5.5rem_auto]">
+        <Mark image={item.image} symbol={item.symbol} />
+        <div className="min-w-0">
+          <p className="truncate font-black">{item.name}</p>
+          <p className="truncate text-[11px] font-bold uppercase text-slate-400">{item.symbol} · {item.accountName}</p>
         </div>
-        <Sparkline values={item.sparkline} up={up && item.changePct !== 0} />
-        <div className="min-w-[7rem]">
-          <p className="font-black">{formatPrice(item.priceEur)}</p>
-          <p className="text-xs font-medium text-slate-500">{item.quantity > 0 ? `${formatNumber(item.quantity, 8)} · ${formatEur(item.valueEur)}` : 'Sin cantidad'}</p>
+        <span className="hidden sm:block"><Sparkline values={item.sparkline} up={up && item.changePct !== 0} /></span>
+        <div className="text-right">
+          <p className="font-black tabular-nums">{formatPrice(item.priceEur)}</p>
+          <p className="text-[11px] font-medium text-slate-500">{item.quantity > 0 ? `${formatNumber(item.quantity, 8)} · ${formatEur(item.valueEur)}` : 'Sin cantidad'}</p>
+          <p className={cn('text-[11px] font-black tabular-nums', item.changePct == null ? 'text-slate-400' : up ? 'text-[#16c784]' : 'text-[#ea3943]')}>
+            {item.changePct == null ? '—' : formatPct(item.changePct)}
+            <span className="ml-1 font-bold opacity-80">{item.changeLabel}</span>
+          </p>
         </div>
-        <span className={cn('rounded-xl px-2.5 py-1 text-sm font-black', item.changePct == null ? 'bg-slate-100 text-slate-500' : up ? 'bg-[#16c784]/15 text-[#16c784]' : 'bg-[#ea3943]/15 text-[#ea3943]')}>
-          {item.changePct == null ? '—' : formatPct(item.changePct)}
-          <span className="ml-1 text-[10px] font-bold opacity-80">{item.changeLabel}</span>
-        </span>
       </button>
       <div className="mt-2 flex flex-wrap items-center gap-3">
         <AlertForm item={item} onSaved={onChanged} />
@@ -193,22 +191,22 @@ function TapeRow({ item, fallback, onOpen }: { item: MarketTapeItem; fallback?: 
   const down = (item.changePct ?? 0) < 0;
   const game = item.kind === 'cs2' || item.kind === 'tf2';
   return (
-    <button type="button" onClick={onOpen} className="flex w-full flex-wrap items-center gap-x-4 gap-y-3 border-b border-slate-100 py-4 text-left last:border-0 dark:border-slate-800">
-      <div className="flex min-w-[10rem] flex-1 items-center gap-3">
-        <Mark image={item.image} symbol={item.symbol} fallback={fallback} contain={game} />
-        <div className="min-w-0">
-          <p className="truncate font-black">{item.name}</p>
-          <p className="truncate text-xs font-bold uppercase text-slate-400">{item.symbol} · {item.sourceLabel}</p>
-        </div>
+    <button type="button" onClick={onOpen} className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 border-b border-slate-100 py-3 text-left last:border-0 dark:border-slate-800 sm:grid-cols-[auto_minmax(0,1fr)_5.5rem_auto]">
+      <Mark image={item.image} symbol={item.symbol} fallback={fallback} contain={game} />
+      <div className="min-w-0">
+        <p className="truncate font-black">{item.name}</p>
+        <p className="truncate text-[11px] font-bold uppercase text-slate-400">{item.symbol} · {item.sourceLabel}</p>
       </div>
-      <Sparkline values={item.sparkline} up={up} />
-      <p className="min-w-[7rem] font-black">{formatPrice(item.priceEur)}</p>
-      <span className={cn('rounded-xl px-2.5 py-1 text-sm font-black', !up && !down ? 'bg-slate-100 text-slate-500 dark:bg-slate-800' : up ? 'bg-[#16c784]/15 text-[#16c784]' : 'bg-[#ea3943]/15 text-[#ea3943]')}>
-        {item.changePct == null ? '—' : formatPct(item.changePct)}
-        {item.changePct != null && <span className="ml-1 text-[10px] font-bold opacity-80">{item.changeLabel}</span>}
-      </span>
-      {item.error && <p className="basis-full text-xs font-medium text-amber-600">{item.error} Se mantiene el último precio real.</p>}
-      {item.stale && !item.error && <p className="basis-full text-xs font-medium text-amber-600">Última lectura {formatAgo(item.fetchedAt)}.</p>}
+      <span className="hidden sm:block"><Sparkline values={item.sparkline} up={up} /></span>
+      <div className="text-right">
+        <p className="font-black tabular-nums">{formatPrice(item.priceEur)}</p>
+        <p className={cn('text-[11px] font-black tabular-nums', !up && !down ? 'text-slate-400' : up ? 'text-[#16c784]' : 'text-[#ea3943]')}>
+          {item.changePct == null ? '—' : formatPct(item.changePct)}
+          {item.changePct != null && <span className="ml-1 font-bold opacity-80">{item.changeLabel}</span>}
+        </p>
+      </div>
+      {item.error && <p className="col-span-full text-xs font-medium text-amber-600">{item.error} Se mantiene el último precio real.</p>}
+      {item.stale && !item.error && <p className="col-span-full text-xs font-medium text-amber-600">Última lectura {formatAgo(item.fetchedAt)}.</p>}
     </button>
   );
 }
@@ -264,7 +262,7 @@ function StoryDialog({ item, onClose }: { item: { kind: string; key: string; nam
   return (
     <Modal title={item.name} onClose={onClose} wide>
       <div className="flex flex-wrap items-end justify-between gap-3">
-        <p className="text-3xl font-black">{item.priceEur == null ? '—' : formatPrice(item.priceEur)}</p>
+        <p className="text-2xl font-black tabular-nums sm:text-3xl">{item.priceEur == null ? '—' : formatPrice(item.priceEur)}</p>
         <span className={cn('rounded-xl px-3 py-1.5 text-sm font-black', !up && !down ? 'bg-slate-100 text-slate-500' : up ? 'bg-[#16c784]/15 text-[#16c784]' : 'bg-[#ea3943]/15 text-[#ea3943]')}>
           {change == null ? '—' : formatPct(change)}
           {change != null && <span className="ml-1 text-[10px] font-bold opacity-80">{label}</span>}
@@ -348,7 +346,7 @@ export function Market() {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="text-xs font-black uppercase tracking-widest text-indigo-500">Cotizaciones</p>
-          <h1 className="text-3xl font-black tracking-tight">Mercado</h1>
+          <h1 className="text-2xl font-black tracking-tight sm:text-3xl">Mercado</h1>
         </div>
         <p className="flex items-center gap-2 text-xs font-bold text-slate-500">
           <i className={cn('h-2 w-2 rounded-full', fresh ? 'bg-[#16c784]' : 'bg-amber-500')} />
@@ -371,7 +369,7 @@ export function Market() {
           }
         />
       </div>
-      <div className="flex gap-2 overflow-x-auto pb-1">
+      <div className="flex touch-[pan-x_pan-y] gap-2 overflow-x-auto pb-1">
         <button type="button" onClick={() => setMarket('all')} className={cn('shrink-0 rounded-full px-3 py-1.5 text-sm font-bold', market === 'all' ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900' : 'bg-white text-slate-500 dark:bg-white/10')}>Todos</button>
         {sections.map((section) => (
           <button key={section.id} type="button" onClick={() => setMarket(section.id)} className={cn('inline-flex shrink-0 items-center gap-2 rounded-full py-1 pl-1 pr-3 text-sm font-bold', market === section.id ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900' : 'bg-white text-slate-600 dark:bg-white/10 dark:text-slate-200')}>

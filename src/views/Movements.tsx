@@ -50,7 +50,7 @@ function moveTone(row: MovementRow): string {
 }
 
 function moveTitle(row: MovementRow): string {
-  const title = (row.description || '').split('Â·')[0]?.trim();
+  const title = (row.description || '').split('·')[0]?.trim();
   return title || TYPE_LABEL[row.type] || row.type;
 }
 
@@ -134,7 +134,7 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
   }, [sorted]);
 
   const accountOf = (id?: string | null) => accounts.find((account) => docId(account) === id);
-  const nameOf = (id?: string | null) => accountOf(id)?.name || 'â€”';
+  const nameOf = (id?: string | null) => accountOf(id)?.name || '—';
 
   const save = async (confirmDuplicate = false) => {
     if (!draft) return;
@@ -179,7 +179,7 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
     <div className={embedded ? 'space-y-4' : 'mx-auto max-w-3xl space-y-5'}>
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h2 className={embedded ? 'text-lg font-black' : 'text-3xl font-black tracking-tight'}>Movimientos</h2>
+          <h2 className={embedded ? 'text-lg font-black' : 'text-2xl font-black tracking-tight sm:text-3xl'}>Movimientos</h2>
           <p className="mt-1 max-w-2xl text-sm font-medium text-slate-500">Compras, retiros, intereses y conversiones. Si no hay cambio a euros, el apunte se guarda en su moneda y no entra en el patrimonio en euros.</p>
         </div>
         <div className="flex gap-2">
@@ -212,7 +212,7 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
             ))}
           </select>
           <select
-            className={fieldClass}
+            className={cn(fieldClass, 'col-span-2 sm:col-span-1')}
             aria-label="Mes"
             value={month}
             disabled={!year}
@@ -256,12 +256,12 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-bold">{moveTitle(row)}</span>
                   <span className="block truncate text-[11px] font-medium text-slate-400">
-                    {many ? `${MONTHS[Number(row.date.slice(5, 7)) - 1]} ${row.date.slice(0, 4)} Â· ${group.rows.length} apuntes` : `${formatDay(row.date)} Â· ${TYPE_LABEL[row.type] || row.type}`}
-                    {` Â· ${nameOf(row.accountId)}`}
+                    {many ? `${MONTHS[Number(row.date.slice(5, 7)) - 1]} ${row.date.slice(0, 4)} · ${group.rows.length} apuntes` : `${formatDay(row.date)} · ${TYPE_LABEL[row.type] || row.type}`}
+                    {` · ${nameOf(row.accountId)}`}
                   </span>
                 </span>
                 <span className={cn('shrink-0 text-right text-sm font-black tabular-nums', moveTone(row))}>
-                  {total > 0 ? '+' : total < 0 ? 'âˆ’' : ''}{formatMove(total, row.currency)}
+                  {total > 0 ? '+' : total < 0 ? '−' : ''}{formatMove(total, row.currency)}
                 </span>
               </button>
               {many && open && (
@@ -269,8 +269,8 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
                   {group.rows.map((item) => (
                     <li key={docId(item)}>
                       <button type="button" onClick={() => openEdit(item)} className="flex w-full items-center justify-between gap-3 px-4 py-2 text-left">
-                        <span className="text-[11px] font-medium text-slate-500">{formatDay(item.date)} Â· {(item.description.split('Â·')[1] || '').trim()}</span>
-                        <span className={cn('text-xs font-black tabular-nums', moveTone(item))}>{moveSign(item) < 0 ? 'âˆ’' : '+'}{formatMove(item.amount, item.currency)}</span>
+                        <span className="text-[11px] font-medium text-slate-500">{formatDay(item.date)} · {(item.description.split('·')[1] || '').trim()}</span>
+                        <span className={cn('text-xs font-black tabular-nums', moveTone(item))}>{moveSign(item) < 0 ? '−' : '+'}{formatMove(item.amount, item.currency)}</span>
                       </button>
                     </li>
                   ))}
@@ -336,18 +336,18 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
                   </select>
                 </Field>
               )}
-              <Field label="CategorÃ­a">
+              <Field label="Categoría">
                 <input list="categories" className={fieldClass} value={draft.category} onChange={(e) => setDraft({ ...draft, category: e.target.value })} />
                 <datalist id="categories">{CATEGORIES.map((item) => <option key={item} value={item} />)}</datalist>
               </Field>
-              <Input label="ComisiÃ³n informativa" type="number" step="any" value={draft.fee} onChange={(e) => setDraft({ ...draft, fee: e.target.value })} placeholder="No se resta otra vez" />
+              <Input label="Comisión informativa" type="number" step="any" value={draft.fee} onChange={(e) => setDraft({ ...draft, fee: e.target.value })} placeholder="No se resta otra vez" />
             </div>
-            <Input label="DescripciÃ³n" value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} />
+            <Input label="Descripción" value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} />
             <label className="flex items-center gap-2 text-sm font-medium">
               <input type="checkbox" checked={draft.applyToBalances} onChange={(e) => setDraft({ ...draft, applyToBalances: e.target.checked })} />
               Actualizar el saldo de la cuenta
             </label>
-            <p className="text-xs font-medium text-slate-500">Para BTC, ETH u otra moneda sin precio en euros, dÃ©jalo sin marcar. El apunte se guarda y no se inventa un importe en euros.</p>
+            <p className="text-xs font-medium text-slate-500">Para BTC, ETH u otra moneda sin precio en euros, déjalo sin marcar. El apunte se guarda y no se inventa un importe en euros.</p>
             <div className="flex justify-end gap-2">
               {duplicate && <Button variant="outline" onClick={() => save(true)}>Guardar igualmente</Button>}
               <Button onClick={() => save(false)}>Guardar</Button>

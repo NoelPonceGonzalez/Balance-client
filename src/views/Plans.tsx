@@ -180,7 +180,9 @@ function PlanCorner({ balance, target, delta, beat }: { balance: number; target:
   if (delta != null && Math.abs(delta) > 0.5) {
     frames.push({ text: formatSignedEur(delta), className: delta > 0 ? 'text-[#16c784]' : 'text-[#ea3943]' });
   }
-  const frame = frames[beat % frames.length];
+  const still = window.matchMedia('(max-width: 767px)').matches || window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const frame = still ? frames[0] : frames[beat % frames.length];
+  if (still) return <span className={cn('shrink-0 text-xs font-black tabular-nums', frame.className)}>{frame.text}</span>;
   return (
     <AnimatePresence mode="wait">
       <motion.span
@@ -251,6 +253,7 @@ export function Plans({ embedded = false }: { embedded?: boolean }) {
   };
 
   useEffect(() => {
+    if (window.matchMedia('(max-width: 767px)').matches || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
     const timer = window.setInterval(() => setBeat((value) => value + 1), 5000);
     return () => window.clearInterval(timer);
   }, []);
@@ -581,7 +584,7 @@ export function Plans({ embedded = false }: { embedded?: boolean }) {
       {plan && (
         <div className="sticky top-0 z-30 -mx-4 bg-gradient-to-b from-[color-mix(in_srgb,var(--app-bg)_42%,transparent)] via-[color-mix(in_srgb,var(--app-bg)_18%,transparent)] to-transparent px-4 pb-8 pt-1 backdrop-blur-2xl md:-mx-8 md:px-8">
           <div className="mx-auto max-w-3xl">
-            <div className="mb-2 flex items-baseline justify-between gap-3 text-xs font-bold">
+            <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-xs font-bold">
               <span className="inline-flex items-center gap-2 text-slate-500">
                 <button type="button" onClick={() => setSelected(null)} className="grid h-7 w-7 place-items-center rounded-full text-slate-500 transition-colors hover:bg-white/80" aria-label="Todos los planes"><ChevronLeft size={16} /></button>
                 {liquidity && <PlatformLogo name={liquidity.platform || liquidity.name} size={22} />}
@@ -599,8 +602,8 @@ export function Plans({ embedded = false }: { embedded?: boolean }) {
             <div className="h-1.5 overflow-hidden rounded-full bg-slate-900/10 dark:bg-white/15">
               <div className="h-full rounded-full bg-slate-900/75 transition-[width] duration-700 ease-out dark:bg-white" style={{ width: `${barWidth(shownBalance, plan.targetAmount)}%` }} />
             </div>
-            <div className="mt-2 flex items-center justify-between gap-3 text-xs font-bold">
-              <p className="min-w-0">
+            <div className="mt-2 flex items-start justify-between gap-2 text-xs font-bold">
+              <p className="min-w-0 flex-1 leading-snug">
                 <span className={pace.ahead > 0.5 ? 'text-[#16c784]' : 'text-slate-400'}>{formatEur(pace.ahead)} por delante</span>
                 <span className="text-slate-300"> · </span>
                 <span className={pace.behind > 0.5 ? 'text-[#ea3943]' : 'text-slate-400'}>{formatEur(pace.behind)} por detrás</span>
@@ -666,7 +669,7 @@ export function Plans({ embedded = false }: { embedded?: boolean }) {
                   <PlanCorner balance={balance} target={item.plan.targetAmount} delta={delta} beat={beat} />
                 </span>
                 <span className="mt-2 block text-[11px] font-semibold text-slate-400">{kindLabel(item.plan)}</span>
-                <span className="mt-1 block text-[22px] font-black leading-none tabular-nums sm:text-[28px]"><SoftEur value={balance} /></span>
+                <span className="mt-1 block whitespace-nowrap text-[clamp(1.35rem,6.2vw,1.85rem)] font-black leading-none tabular-nums sm:text-[28px]"><SoftEur value={balance} /></span>
                 <span className="mt-3 block h-1.5 overflow-hidden rounded-full bg-slate-200/80 dark:bg-white/10">
                   <span className="block h-full rounded-full bg-slate-800 transition-[width] duration-700 dark:bg-white" style={{ width: `${barWidth(balance, item.plan.targetAmount)}%` }} />
                 </span>
@@ -1097,6 +1100,11 @@ function SoftEur({ value, signed = false }: { value: number; signed?: boolean })
   useEffect(() => {
     const start = from.current;
     if (start === value) return;
+    if (window.matchMedia('(max-width: 767px)').matches || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      from.current = value;
+      setShown(value);
+      return;
+    }
     const began = performance.now();
     let frame = 0;
     const tick = (now: number) => {

@@ -456,6 +456,7 @@ export function Wallets({ accounts, hidden, openId, stickTop = 0, onOpen, onAdd,
         surprise: false,
         absorbed: true,
         open: false,
+        automatic: false,
         image: item.image || null,
       })),
       ...lines.map((line) => ({
@@ -470,6 +471,7 @@ export function Wallets({ accounts, hidden, openId, stickTop = 0, onOpen, onAdd,
         surprise: true,
         absorbed: false,
         open: false,
+        automatic: false,
         image: null as string | null,
       })),
     ].sort((a, b) => a.day.localeCompare(b.day) || a.label.localeCompare(b.label));
@@ -630,7 +632,7 @@ export function Wallets({ accounts, hidden, openId, stickTop = 0, onOpen, onAdd,
                 {account.image ? <img src={account.image} alt="" className="h-[22px] w-[22px] rounded-lg object-cover" /> : <PlatformLogo name={account.logoName} size={22} />}
                 <span className="min-w-0 truncate text-sm font-black">{account.name}</span>
               </span>
-              <span className="mt-2 block text-[22px] font-black leading-none tabular-nums sm:text-[26px]">{account.value == null ? '—' : money(account.value, hidden)}</span>
+              <span className="mt-2 block whitespace-nowrap text-[clamp(1.35rem,6.2vw,1.85rem)] font-black leading-none tabular-nums sm:text-[26px]">{account.value == null ? '—' : money(account.value, hidden)}</span>
               <span className="mt-2 block text-[11px] font-semibold text-slate-400">
                 {(account.sides || []).map((side) => side.title).join(' · ') || 'Sin desglose'}
               </span>

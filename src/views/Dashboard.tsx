@@ -137,11 +137,11 @@ function wash(hex: string): string {
 }
 
 function prefersStill(): boolean {
-  return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches || window.matchMedia('(max-width: 767px)').matches;
 }
 
 function useRise(target: number, play: boolean, duration = 1100, delay = 0) {
-  const [value, setValue] = useState(() => (play ? 0 : target));
+  const [value, setValue] = useState(() => (play && !prefersStill() ? 0 : target));
   useEffect(() => {
     if (!play || prefersStill()) {
       setValue(target);
@@ -162,20 +162,19 @@ function useRise(target: number, play: boolean, duration = 1100, delay = 0) {
   return value;
 }
 
-function formatRisingEur(value: number, target: number, card: boolean): string {
-  const digits = card && Number.isInteger(target) ? 0 : 2;
+function formatRisingEur(value: number): string {
   return new Intl.NumberFormat('es-ES', {
     style: 'currency',
     currency: 'EUR',
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   }).format(value);
 }
 
 function RisingAmount({ value, hidden, signed = false, card = false, delay = 0 }: { value: number; hidden: boolean; signed?: boolean; card?: boolean; delay?: number }) {
   const shown = useRise(Math.abs(value), !hidden, 680, delay);
   if (hidden) return <>*****</>;
-  const text = formatRisingEur(shown, Math.abs(value), card);
+  const text = formatRisingEur(shown);
   if (!signed) return <>{text}</>;
   if (value > 0) return <>+{text}</>;
   if (value < 0) return <>−{text}</>;
@@ -703,6 +702,7 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
   }, [view, openWallet, hidden, data]);
 
   useEffect(() => {
+    if (prefersStill()) return;
     const timer = window.setInterval(() => setBeat((value) => value + 1), CYCLE_MS);
     return () => window.clearInterval(timer);
   }, []);
@@ -1053,9 +1053,9 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
           <h2 className="min-w-0 truncate text-base font-black">{openAccount.name}</h2>
         </div>
       )}
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 items-center gap-1">
-          <p className={cn('truncate text-[26px] font-black leading-none tabular-nums sm:text-[32px]', hidden || (view === 'cartera' && openAccount) ? 'text-slate-900 dark:text-white' : totalClass)}>
+          <p className={cn('min-w-0 whitespace-nowrap text-[clamp(1.45rem,7.2vw,2rem)] font-black leading-none tabular-nums', hidden || (view === 'cartera' && openAccount) ? 'text-slate-900 dark:text-white' : totalClass)}>
             {barValue == null ? '—' : <RisingAmount value={barValue} hidden={hidden} card />}
           </p>
           <button
@@ -1180,7 +1180,7 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       {pin}
-      <motion.section initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={rise}>
+      <motion.section initial={prefersStill() ? false : { opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={prefersStill() ? { duration: 0 } : rise}>
         <p className="text-[11px] font-semibold text-slate-400">{formatDay(data.today)}</p>
         <button
           type="button"
@@ -1220,10 +1220,10 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
           </div>
         )}
         {ordered.map((row, index) => {
-          const frame = row.frames[beat % row.frames.length];
+          const frame = prefersStill() ? row.frames[0] : row.frames[beat % row.frames.length];
           const open = openKey === row.key;
           return (
-            <motion.div key={row.key} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.22, delay: Math.min(index, 5) * 0.03 }}>
+            <motion.div key={row.key} initial={prefersStill() ? false : { opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: prefersStill() ? 0 : 0.22, delay: prefersStill() ? 0 : Math.min(index, 5) * 0.03 }}>
               <div
                 role="button"
                 tabIndex={0}
@@ -1253,23 +1253,36 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
                 <span className="absolute inset-y-0 left-0 w-2" style={{ background: isLight(row.color) ? 'rgba(28,28,30,0.14)' : row.color }} />
                 <PlatformLogo name={row.logoName} size={32} />
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-semibold" style={{ color: isLight(row.color) ? '#1C1C1E' : row.color }}>{row.name}</span>
-                  <span className="mt-1 block truncate text-[22px] font-black leading-none text-slate-900 dark:text-white sm:text-[28px]">
+                  <span className="flex items-center gap-2">
+                    <span className="min-w-0 truncate text-sm font-semibold" style={{ color: isLight(row.color) ? '#1C1C1E' : row.color }}>{row.name}</span>
+                    {prefersStill() && (
+                      <span className={cn('ml-auto shrink-0 text-[11px] font-black tabular-nums sm:hidden', hidden ? 'text-slate-400' : frame.className)}>
+                        {mask(frame.text)}
+                      </span>
+                    )}
+                  </span>
+                  <span className="mt-0.5 block whitespace-nowrap text-[clamp(1rem,5.2vw,1.75rem)] font-black leading-none tabular-nums text-slate-900 dark:text-white sm:text-[28px]">
                     {row.value == null ? '—' : <RisingAmount value={row.value} hidden={hidden} card delay={40} />}
                   </span>
                 </span>
-                <AnimatePresence mode="wait">
-                  <motion.span
-                    key={hidden ? 'hidden' : frame.text}
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -8 }}
-                    transition={{ duration: 0.28 }}
-                    className={cn('shrink-0 text-sm font-black tabular-nums sm:text-base', hidden ? 'text-slate-400' : frame.className)}
-                  >
+                {prefersStill() ? (
+                  <span className={cn('hidden shrink-0 text-right text-xs font-black tabular-nums leading-tight sm:inline sm:text-base', hidden ? 'text-slate-400' : frame.className)}>
                     {mask(frame.text)}
-                  </motion.span>
-                </AnimatePresence>
+                  </span>
+                ) : (
+                  <AnimatePresence mode="wait">
+                    <motion.span
+                      key={hidden ? 'hidden' : frame.text}
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -8 }}
+                      transition={{ duration: 0.28 }}
+                      className={cn('shrink-0 text-sm font-black tabular-nums sm:text-base', hidden ? 'text-slate-400' : frame.className)}
+                    >
+                      {mask(frame.text)}
+                    </motion.span>
+                  </AnimatePresence>
+                )}
                 <button
                   type="button"
                   aria-label="Editar o eliminar"
@@ -1378,16 +1391,16 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
             <img src="/extras/objeto.svg" alt="" className="h-9 w-9 rounded-xl" />
             <span className="min-w-0 flex-1">
               <span className="block text-sm font-semibold">Extras</span>
-              <span className="mt-1 block text-[22px] font-black leading-none sm:text-[28px]"><RisingAmount value={extraWealth} hidden={hidden} card /></span>
+              <span className="mt-0.5 block whitespace-nowrap text-[clamp(1.05rem,4.8vw,1.35rem)] font-black leading-none tabular-nums sm:text-[28px]"><RisingAmount value={extraWealth} hidden={hidden} card /></span>
             </span>
           </button>
         )}
         <motion.button
           type="button"
           onClick={() => setAdding(true)}
-          initial={{ opacity: 0, y: 18 }}
+          initial={prefersStill() ? false : { opacity: 0, y: 18 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ ...rise, delay: 0.12 + ordered.length * 0.07 }}
+          transition={prefersStill() ? { duration: 0 } : { ...rise, delay: 0.12 + ordered.length * 0.07 }}
           className="flex w-full items-center gap-3 rounded-[28px] border border-dashed border-slate-300/90 bg-white/40 px-5 py-3.5 text-left text-slate-600 backdrop-blur-xl hover:bg-white/70 dark:border-white/15 dark:bg-white/5 dark:text-slate-300"
         >
           <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-slate-300/80 dark:border-white/15">

@@ -58,7 +58,7 @@ export function Settings({
 
   return (
     <div className="mx-auto max-w-3xl space-y-4">
-      <h1 className="text-3xl font-black tracking-tight">Ajustes</h1>
+      <h1 className="text-2xl font-black tracking-tight sm:text-3xl">Ajustes</h1>
       {error && <p className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">{error}</p>}
       {message && <p className="rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700">{message}</p>}
       <Card className="space-y-3">

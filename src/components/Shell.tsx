@@ -7,10 +7,10 @@ import { cn } from '@/lib/utils';
 import type { User } from '@/lib/types';
 
 const ITEMS = [
-  { id: 'dashboard', label: 'Resumen', icon: LayoutDashboard },
-  { id: 'market', label: 'Mercado', icon: LineChart },
-  { id: 'plans', label: 'Planes', icon: Target },
-  { id: 'movements', label: 'Movimientos', icon: ArrowLeftRight },
+  { id: 'dashboard', label: 'Resumen', short: 'Resumen', icon: LayoutDashboard },
+  { id: 'market', label: 'Mercado', short: 'Mercado', icon: LineChart },
+  { id: 'plans', label: 'Planes', short: 'Planes', icon: Target },
+  { id: 'movements', label: 'Movimientos', short: 'Movs', icon: ArrowLeftRight },
 ] as const;
 
 export type Section = (typeof ITEMS)[number]['id'] | 'settings';
@@ -28,7 +28,7 @@ export function Shell({
 }) {
   return (
     <div className="relative flex h-dvh flex-col overflow-hidden bg-[var(--app-bg)] text-[var(--app-text)]">
-      <header className="flex shrink-0 items-center gap-3 px-4 py-3 md:px-8">
+      <header className="flex shrink-0 items-center gap-3 px-4 pb-2 pt-[max(0.75rem,env(safe-area-inset-top))] md:px-8">
         <span className="grid h-9 w-9 place-items-center rounded-xl bg-indigo-600 text-white">
           <Mark size={22} />
         </span>
@@ -49,12 +49,12 @@ export function Shell({
           </button>
         </div>
       </header>
-      <main className="app-scroll min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-4 py-2 pb-36 md:px-8">
+      <main className="app-scroll min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-4 py-2 md:px-8">
         {children}
       </main>
       <div className="pointer-events-none absolute inset-x-0 bottom-0 z-40">
         <div className="pointer-events-auto flex justify-center px-3 pb-[max(1rem,env(safe-area-inset-bottom))] pt-2">
-        <nav className="flex max-w-full items-center gap-0.5 overflow-x-auto rounded-full border border-white/70 bg-white/55 p-1.5 shadow-[0_8px_32px_rgba(15,23,42,0.08)] backdrop-blur-2xl dark:border-white/15 dark:bg-slate-950/50">
+        <nav className="grid w-full max-w-md grid-cols-4 rounded-3xl border border-white/70 bg-white/70 p-1 shadow-[0_8px_32px_rgba(15,23,42,0.08)] backdrop-blur-2xl dark:border-white/15 dark:bg-slate-950/55 sm:flex sm:w-auto sm:max-w-none sm:rounded-full sm:p-1.5">
           {ITEMS.map((item) => {
             const Icon = item.icon;
             const active = section === item.id;
@@ -64,14 +64,15 @@ export function Shell({
                 type="button"
                 onClick={() => onChange(item.id)}
                 className={cn(
-                  'flex shrink-0 items-center gap-1 rounded-full px-2.5 py-2 text-[11px] font-semibold transition sm:gap-2 sm:px-3.5 sm:text-[13px]',
+                  'flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-2xl px-1 py-1.5 text-[10px] font-semibold leading-none transition sm:flex-row sm:gap-2 sm:rounded-full sm:px-3.5 sm:py-2 sm:text-[13px]',
                   active
-                    ? 'bg-white/85 text-indigo-700 shadow-sm dark:bg-white/15 dark:text-white'
+                    ? 'bg-white text-indigo-700 shadow-sm dark:bg-white/15 dark:text-white'
                     : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200',
                 )}
               >
                 <Icon size={16} strokeWidth={1.75} />
-                <span>{item.label}</span>
+                <span className="truncate sm:hidden">{item.short}</span>
+                <span className="hidden sm:inline">{item.label}</span>
               </button>
             );
           })}
