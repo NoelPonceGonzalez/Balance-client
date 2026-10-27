@@ -238,6 +238,48 @@ function lineClass(line: PlanMonthLine): string {
   return 'text-slate-900 dark:text-white';
 }
 
+function toggleDate(dates: string[] | undefined, day: string, paid: boolean): string[] {
+  const next = new Set(dates || []);
+  if (paid) next.add(day);
+  else next.delete(day);
+  return [...next];
+}
+
+function patchPlanPaid(plan: PlanRow, key: string, paid: boolean): PlanRow {
+  const [kind, id, date] = key.split(':');
+  if (kind === 'expense') {
+    return { ...plan, plannedExpenses: plan.plannedExpenses.map((item) => (item._id === id ? { ...item, paid } : item)) };
+  }
+  if (kind === 'income') {
+    return { ...plan, incomes: (plan.incomes || []).map((item) => (item._id === id ? { ...item, paid } : item)) };
+  }
+  if (kind === 'recurring') {
+    return { ...plan, recurring: plan.recurring.map((item) => (item._id === id ? { ...item, paidDates: toggleDate(item.paidDates, date, paid) } : item)) };
+  }
+  if (kind === 'interval') {
+    return { ...plan, intervals: (plan.intervals || []).map((item) => (item._id === id ? { ...item, paidDates: toggleDate(item.paidDates, date, paid) } : item)) };
+  }
+  return plan;
+}
+
+/** El círculo cambia al momento. El saldo de esa línea y las de después se mueven con el mismo importe. */
+function shiftMonths(months: PlanMonthView[], key: string, paid: boolean): PlanMonthView[] {
+  let delta = 0;
+  let armed = false;
+  return months.map((month) => ({
+    ...month,
+    lines: month.lines.map((line) => {
+      if (!armed && line.markKey === key && !line.absorbed) {
+        armed = true;
+        delta = line.paid === paid ? 0 : paid ? (line.amount || 0) : -(line.amount || 0);
+        return { ...line, paid, balance: line.balance + delta };
+      }
+      if (!armed || !delta) return line;
+      return { ...line, balance: line.balance + delta };
+    }),
+  }));
+}
+
 export function Plans({ embedded = false }: { embedded?: boolean }) {
   const [items, setItems] = useState<{ plan: PlanRow; forecast: PlanForecast }[]>([]);
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
@@ -261,6 +303,8 @@ export function Plans({ embedded = false }: { embedded?: boolean }) {
   const [ready, setReady] = useState(false);
   const [previewDay, setPreviewDay] = useState<string | null>(null);
   const suppressCard = useRef(false);
+  const desiredMark = useRef(new Map<string, boolean>());
+  const marking = useRef(new Set<string>());
 
   const load = async () => {
     const planData = await api<{ plans: { plan: PlanRow; forecast: PlanForecast }[] }>('/api/plans');
@@ -475,12 +519,42 @@ export function Plans({ embedded = false }: { embedded?: boolean }) {
 
   const mark = async (key: string, paid: boolean) => {
     if (!plan) return;
+    const planId = docId(plan);
+    const currentPaid = desiredMark.current.has(key) ? desiredMark.current.get(key)! : paid;
+    const nextPaid = !currentPaid;
+    desiredMark.current.set(key, nextPaid);
     setError('');
+    setItems((rows) => rows.map((item) => {
+      if (docId(item.plan) !== planId) return item;
+      return {
+        plan: patchPlanPaid(item.plan, key, nextPaid),
+        forecast: { ...item.forecast, months: shiftMonths(item.forecast.months || [], key, nextPaid) },
+      };
+    }));
+    if (marking.current.has(key)) return;
+    marking.current.add(key);
     try {
-      await api(`/api/plans/${docId(plan)}/mark`, { method: 'POST', body: JSON.stringify({ key, paid: !paid }) });
-      await load();
+      let saved: { plan: PlanRow; forecast: PlanForecast } | null = null;
+      while (desiredMark.current.has(key)) {
+        const target = desiredMark.current.get(key)!;
+        saved = await api<{ plan: PlanRow; forecast: PlanForecast }>(`/api/plans/${planId}/mark`, {
+          method: 'POST',
+          body: JSON.stringify({ key, paid: target }),
+        });
+        if (desiredMark.current.get(key) === target) {
+          desiredMark.current.delete(key);
+          break;
+        }
+      }
+      if (saved && !desiredMark.current.has(key)) {
+        setItems((rows) => rows.map((item) => (docId(item.plan) === planId ? saved! : item)));
+      }
     } catch (err) {
+      desiredMark.current.delete(key);
       setError(err instanceof Error ? err.message : 'No se ha podido marcar el gasto.');
+      await load();
+    } finally {
+      marking.current.delete(key);
     }
   };
 
@@ -1157,8 +1231,8 @@ function PlanLine({ line, index, lifted, today, ahead, until, image, onMark, onO
   return (
     <div className={cn('hold-target flex items-start gap-2 px-2.5 py-2 text-[13px] transition-transform duration-200 sm:gap-3 sm:px-3 sm:text-sm', index > 0 && 'border-t border-slate-200/70 dark:border-white/10', lifted && 'scale-[0.98] opacity-40', (line.tone === 'plain' || line.tone === 'final') && 'font-semibold')}>
       {line.markKey ? (
-        <button type="button" aria-label={markLabel} aria-pressed={line.paid === true} disabled={line.absorbed === true} onPointerDown={(event) => event.stopPropagation()} onClick={onMark} className={cn('mt-0.5 grid h-[22px] w-[22px] shrink-0 place-items-center rounded-full border-2 bg-white transition-colors duration-300 disabled:opacity-80 dark:bg-transparent', line.paid ? 'border-[#16c784] bg-[#16c784] text-white dark:bg-[#16c784]' : 'border-slate-300 text-transparent dark:border-slate-500')}>
-          <Check size={13} strokeWidth={3} className={cn('transition-transform duration-500 [transition-timing-function:cubic-bezier(0.34,1.56,0.64,1)]', line.paid ? 'scale-100 opacity-100' : 'scale-50 opacity-0')} />
+        <button type="button" aria-label={markLabel} aria-pressed={line.paid === true} disabled={line.absorbed === true} onPointerDown={(event) => event.stopPropagation()} onClick={onMark} className={cn('mt-0.5 grid h-[22px] w-[22px] shrink-0 place-items-center rounded-full border-2 bg-white transition-colors duration-150 disabled:opacity-80 dark:bg-transparent', line.paid ? 'border-[#16c784] bg-[#16c784] text-white dark:bg-[#16c784]' : 'border-slate-300 text-transparent dark:border-slate-500')}>
+          <Check size={13} strokeWidth={3} className={cn('transition-transform duration-150 [transition-timing-function:cubic-bezier(0.34,1.56,0.64,1)]', line.paid ? 'scale-100 opacity-100' : 'scale-50 opacity-0')} />
         </button>
       ) : (
         <span className="w-[22px] shrink-0" />
