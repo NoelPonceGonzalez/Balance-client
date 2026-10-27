@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Search, X } from 'lucide-react';
+import { motion } from 'motion/react';
 import { Modal } from '@/components/Modal';
 import { QuietLoad } from '@/components/QuietLoad';
 import { Sparkline } from '@/components/Sparkline';
@@ -125,6 +126,17 @@ function AlertForm({ item, onSaved }: { item: MarketItem; onSaved: () => void })
   );
 }
 
+const STORY_SPANS = [
+  { days: 7, label: '7 días' },
+  { days: 30, label: '1 mes' },
+  { days: 90, label: '3 meses' },
+  { days: 365, label: '1 año' },
+] as const;
+
+function canSpan(kind: string) {
+  return kind === 'crypto' || kind === 'etf' || kind === 'stock' || kind === 'gold';
+}
+
 function PriceChart({ values, up }: { values: number[]; up: boolean }) {
   const clean = values.filter((value) => Number.isFinite(value));
   if (clean.length < 2) return <p className="text-sm font-medium text-slate-400">Todavía no hay suficientes precios para la gráfica.</p>;
@@ -132,18 +144,46 @@ function PriceChart({ values, up }: { values: number[]; up: boolean }) {
   const max = Math.max(...clean);
   const span = max - min || 1;
   const width = 640;
-  const height = 180;
-  const path = clean
-    .map((value, index) => {
-      const x = (index / (clean.length - 1)) * width;
-      const y = height - ((value - min) / span) * (height - 16) - 8;
-      return `${index === 0 ? 'M' : 'L'}${x.toFixed(1)} ${y.toFixed(1)}`;
-    })
-    .join(' ');
+  const height = 220;
+  const points = clean.map((value, index) => {
+    const x = (index / (clean.length - 1)) * width;
+    const y = height - ((value - min) / span) * (height - 24) - 12;
+    return { x, y };
+  });
+  const path = points.map((point, index) => `${index === 0 ? 'M' : 'L'}${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(' ');
+  const area = `${path} L${width} ${height} L0 ${height} Z`;
+  const last = points[points.length - 1];
+  const color = up ? '#16c784' : '#ea3943';
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   return (
-    <svg viewBox={`0 0 ${width} ${height}`} className="h-44 w-full" role="img" aria-label="Gráfica del precio">
-      <path d={path} fill="none" stroke={up ? '#16c784' : '#ea3943'} strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" />
-    </svg>
+    <div>
+      <div className="mb-1 flex justify-between text-[11px] font-bold tabular-nums text-slate-400">
+        <span>Máx {formatPrice(max)}</span>
+        <span>Mín {formatPrice(min)}</span>
+      </div>
+      <svg viewBox={`0 0 ${width} ${height}`} className="h-52 w-full overflow-visible" role="img" aria-label="Gráfica del precio">
+        <defs>
+          <linearGradient id="price-area" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={color} stopOpacity="0.28" />
+            <stop offset="100%" stopColor={color} stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        <motion.path d={area} fill="url(#price-area)" initial={reduce ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.45 }} />
+        <motion.path
+          d={path}
+          fill="none"
+          stroke={color}
+          strokeWidth="3.5"
+          strokeLinejoin="round"
+          strokeLinecap="round"
+          initial={reduce ? false : { pathLength: 0 }}
+          animate={{ pathLength: 1 }}
+          transition={{ duration: 0.75, ease: [0.22, 1, 0.36, 1] }}
+        />
+        <circle cx={last.x} cy={last.y} r="5" fill={color} />
+        <circle cx={last.x} cy={last.y} r="9" fill={color} opacity="0.2" />
+      </svg>
+    </div>
   );
 }
 
@@ -240,25 +280,31 @@ function PendingRow({ item, onChanged }: { item: MarketPending; onChanged: () =>
   );
 }
 
-function StoryDialog({ item, onClose }: { item: { kind: string; key: string; name: string; priceEur: number | null; changePct: number | null; changeLabel: string; sparkline: number[] }; onClose: () => void }) {
+function StoryDialog({ item, onClose }: { item: { kind: string; key: string; name: string; symbol: string; priceEur: number | null; changePct: number | null; changeLabel: string; sparkline: number[] }; onClose: () => void }) {
   const [story, setStory] = useState<MarketStory | null>(null);
   const [failed, setFailed] = useState('');
+  const [days, setDays] = useState(30);
+  const [loadedDays, setLoadedDays] = useState(30);
+  const spans = canSpan(item.kind);
   useEffect(() => {
+    if (!item.key) return;
     let cancelled = false;
-    const params = new URLSearchParams({ kind: item.kind, key: item.key, name: item.name });
+    const params = new URLSearchParams({ kind: item.kind, key: item.key, name: item.name, symbol: item.symbol });
+    if (spans) params.set('days', String(days));
     api<MarketStory>(`/api/market/story?${params}`)
-      .then((next) => { if (!cancelled) setStory(next); })
+      .then((next) => { if (!cancelled) { setStory(next); setLoadedDays(days); setFailed(''); } })
       .catch((err: Error) => { if (!cancelled) setFailed(err.message); });
     return () => { cancelled = true; };
-  }, [item.kind, item.key, item.name]);
-  const series = story && story.series.length >= 2 ? story.series.map((point) => point.eur) : item.sparkline;
-  const keepTape = item.kind !== 'cs2' && item.changePct != null;
-  const change = keepTape ? item.changePct : story && story.series.length >= 2 ? story.changePct : item.changePct;
-  const label = keepTape ? item.changeLabel : story && story.series.length >= 2 ? story.changeLabel : item.changeLabel;
+  }, [item.kind, item.key, item.name, item.symbol, days, spans]);
+  const drawn = story && story.series.length >= 2 ? story.series.map((point) => point.eur) : [];
+  const matched = Boolean(story && story.series.length >= 2);
+  const change = matched ? story?.changePct : item.changePct;
+  const label = matched ? story?.changeLabel : item.changeLabel;
   const up = (change ?? 0) > 0;
   const down = (change ?? 0) < 0;
-  const started = story?.series[0]?.at;
-  const ended = story?.series[story.series.length - 1]?.at;
+  const started = matched ? story?.series[0]?.at : undefined;
+  const ended = matched ? story?.series[story.series.length - 1]?.at : undefined;
+  const waiting = Boolean(item.key) && !story && !failed;
   return (
     <Modal title={item.name} onClose={onClose} wide>
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -268,8 +314,23 @@ function StoryDialog({ item, onClose }: { item: { kind: string; key: string; nam
           {change != null && <span className="ml-1 text-[10px] font-bold opacity-80">{label}</span>}
         </span>
       </div>
+      {spans && (
+        <div className="mt-4 flex gap-2">
+          {STORY_SPANS.map((span) => (
+            <button
+              key={span.days}
+              type="button"
+              onClick={() => setDays(span.days)}
+              className={cn('rounded-full px-3 py-1.5 text-sm font-bold', days === span.days ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900' : 'bg-slate-100 text-slate-500 dark:bg-white/10')}
+            >
+              {span.label}
+            </button>
+          ))}
+        </div>
+      )}
       <div className="mt-4">
-        {!story && !failed ? <QuietLoad kind="chart" /> : <PriceChart values={series} up={up || (!down && (change ?? 0) >= 0)} />}
+        {waiting && drawn.length < 2 ? <QuietLoad kind="chart" /> : <PriceChart key={`${loadedDays}:${drawn.length}`} values={drawn} up={up || (!down && (change ?? 0) >= 0)} />}
+        {spans && days !== loadedDays && <p className="mt-1 text-[11px] font-bold text-slate-400">Cargando este tramo…</p>}
         {started && ended && <p className="mt-1 flex justify-between text-[11px] font-bold text-slate-400"><span>{formatDay(started.slice(0, 10))}</span><span>{formatDay(ended.slice(0, 10))}</span></p>}
       </div>
       {story && story.floats.length > 0 && (
@@ -288,7 +349,7 @@ function StoryDialog({ item, onClose }: { item: { kind: string; key: string; nam
           </ul>
         </div>
       )}
-      <p className="mt-3 text-xs font-medium text-slate-400">{failed || story?.note || 'El verde es subida y el rojo es bajada.'}</p>
+      <p className="mt-3 text-xs font-medium text-slate-400">{failed || (!item.key ? 'Este valor no está enlazado a un mercado, así que no hay histórico.' : story?.note) || 'El verde es subida y el rojo es bajada. El porcentaje es el de la gráfica, del primer punto al último.'}</p>
     </Modal>
   );
 }
@@ -298,7 +359,7 @@ export function Market() {
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
   const [market, setMarket] = useState('all');
-  const [open, setOpen] = useState<{ kind: string; key: string; name: string; priceEur: number | null; changePct: number | null; changeLabel: string; sparkline: number[] } | null>(null);
+  const [open, setOpen] = useState<{ kind: string; key: string; name: string; symbol: string; priceEur: number | null; changePct: number | null; changeLabel: string; sparkline: number[] } | null>(null);
   const [, setTick] = useState(0);
 
   const load = () => {
@@ -378,11 +439,11 @@ export function Market() {
           </button>
         ))}
       </div>
-      <p className="text-sm font-medium text-slate-500">Cada mercado va con su icono. El verde es subida y el rojo es bajada. Cripto sale de CoinGecko, ETF, acciones y oro de bolsa, y CS2 y TF2 de Steam. Tus skins van las primeras en CS2.</p>
+      <p className="text-sm font-medium text-slate-500">Pulsa una cotización para ver cómo ha ido. El porcentaje de la gráfica es el de ese tramo. En la lista, el verde y el rojo son el día o la sesión.</p>
       {data.warning && <p className="rounded-2xl bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">{data.warning}</p>}
       {empty && <p className="rounded-2xl bg-slate-100 px-4 py-6 text-sm font-medium text-slate-500 dark:bg-slate-900">El mercado no ha respondido todavía. Cuando haya un precio real, se queda aunque la fuente falle después.</p>}
       {noMatch && <p className="rounded-2xl bg-slate-100 px-4 py-6 text-sm font-medium text-slate-500 dark:bg-slate-900">Ninguna cotización coincide con «{needle}».</p>}
-      {visible.map((section) => <TapeSection key={section.id} title={section.title} icon={section.icon} items={section.items} onOpen={(item) => setOpen({ kind: item.kind, key: item.key, name: item.name, priceEur: item.priceEur, changePct: item.changePct, changeLabel: item.changeLabel, sparkline: item.sparkline })} />)}
+      {visible.map((section) => <TapeSection key={section.id} title={section.title} icon={section.icon} items={section.items} onOpen={(item) => setOpen({ kind: item.kind, key: item.key, name: item.name, symbol: item.symbol, priceEur: item.priceEur, changePct: item.changePct, changeLabel: item.changeLabel, sparkline: item.sparkline })} />)}
       {market === 'all' && investments.length > 0 && (
         <section className="space-y-2">
           <h2 className="text-lg font-black">Tus inversiones</h2>
@@ -392,7 +453,7 @@ export function Market() {
                 key={item.holdingId}
                 item={item}
                 onChanged={load}
-                onOpen={() => item.quoteKey && setOpen({ kind: item.assetClass, key: item.quoteKey, name: item.name, priceEur: item.priceEur, changePct: item.changePct, changeLabel: item.changeLabel, sparkline: item.sparkline })}
+                onOpen={() => setOpen({ kind: item.assetClass, key: item.quoteKey || '', name: item.name, symbol: item.symbol, priceEur: item.priceEur, changePct: item.changePct, changeLabel: item.changeLabel, sparkline: item.sparkline })}
               />
             ))}
           </Card>

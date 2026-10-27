@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { motion } from 'motion/react';
 import { cn } from '@/lib/utils';
 
@@ -22,7 +23,14 @@ export function ModalClose({ onClose }: { onClose: () => void }) {
 }
 
 export function Modal({ title, onClose, children, wide }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
-  return (
+  useEffect(() => {
+    const scroller = document.querySelector('.app-scroll');
+    if (!(scroller instanceof HTMLElement)) return;
+    const previous = scroller.style.overflow;
+    scroller.style.overflow = 'hidden';
+    return () => { scroller.style.overflow = previous; };
+  }, []);
+  return createPortal(
     <div className={modalOverlayClass} onClick={onClose}>
       <motion.div
         className={cn(modalPanelClass, 'motion-squish', wide ? 'max-w-3xl' : 'max-w-xl')}
@@ -39,6 +47,7 @@ export function Modal({ title, onClose, children, wide }: { title: string; onClo
         </div>
         {children}
       </motion.div>
-    </div>
+    </div>,
+    document.body,
   );
 }
