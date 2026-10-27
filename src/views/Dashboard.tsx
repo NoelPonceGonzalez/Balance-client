@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type Dispatch, type PointerEvent as ReactPointerEvent, type SetStateAction } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type PointerEvent as ReactPointerEvent, type ReactNode, type SetStateAction } from 'react';
 import { bindHold, HoldMenu, holdItemClass, placeMenu } from '@/components/HoldMenu';
 import { AnimatePresence, motion } from 'motion/react';
 import { ArrowUpDown, ChevronLeft, Eye, EyeOff, MoreHorizontal, Pencil, Plus, Search, Trash2 } from 'lucide-react';
@@ -147,6 +147,54 @@ function wash(hex: string): string {
 
 function prefersStill(): boolean {
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches || window.matchMedia('(max-width: 767px)').matches;
+}
+
+function AccountFold({ open, children }: { open: boolean; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const ready = useRef(false);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (!ready.current || prefersStill()) {
+      ready.current = true;
+      el.style.transition = '';
+      el.style.height = open ? 'auto' : '0px';
+      return;
+    }
+    const from = el.getBoundingClientRect().height;
+    el.getAnimations().forEach((item) => item.cancel());
+    el.style.height = 'auto';
+    const to = open ? el.scrollHeight : 0;
+    el.style.height = `${from}px`;
+    if (Math.abs(from - to) < 1) {
+      el.style.height = open ? 'auto' : '0px';
+      return;
+    }
+    const animation = el.animate(
+      [{ height: `${from}px` }, { height: `${to}px` }],
+      { duration: 280, easing: 'cubic-bezier(0.32, 0.72, 0, 1)', fill: 'forwards' },
+    );
+    let alive = true;
+    const finish = () => {
+      if (!alive) return;
+      alive = false;
+      animation.onfinish = null;
+      animation.cancel();
+      el.style.height = open ? 'auto' : '0px';
+    };
+    animation.onfinish = finish;
+    animation.finished.then(finish).catch(() => {});
+    return () => {
+      alive = false;
+      animation.onfinish = null;
+      animation.cancel();
+    };
+  }, [open]);
+  return (
+    <div ref={ref} className={cn('overflow-hidden', !open && 'pointer-events-none')} inert={!open}>
+      {children}
+    </div>
+  );
 }
 
 function useRise(target: number, play: boolean, duration = 1100, delay = 0) {
@@ -1366,15 +1414,8 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
                   <MoreHorizontal size={16} />
                 </button>
               </div>
-              <AnimatePresence initial={false}>
-                {open && (
-                  <motion.ul
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    transition={glide}
-                    className="mt-2 space-y-1 overflow-hidden rounded-[28px] border border-white/70 bg-white/45 px-4 py-3 shadow-[0_8px_32px_rgba(15,23,42,0.06)] backdrop-blur-2xl dark:border-white/10 dark:bg-white/10"
-                  >
+              <AccountFold open={open}>
+                <ul className="mt-2 space-y-1 rounded-[28px] border border-white/70 bg-white/45 px-4 py-3 shadow-[0_8px_32px_rgba(15,23,42,0.06)] backdrop-blur-2xl dark:border-white/10 dark:bg-white/10">
                     {row.sides.length === 0 && <li className="text-xs font-semibold text-slate-400">Sin desglose todavía.</li>}
                     {row.sides.map((side) => (
                       <li key={side.group} className="border-t border-slate-200/80 pt-2 first:border-t-0 first:pt-0 dark:border-white/10">
@@ -1448,9 +1489,8 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
                         </button>
                       </li>
                     )}
-                  </motion.ul>
-                )}
-              </AnimatePresence>
+                  </ul>
+              </AccountFold>
             </motion.div>
           );
         })}
