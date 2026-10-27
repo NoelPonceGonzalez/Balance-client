@@ -457,12 +457,6 @@ export function Plans({ embedded = false }: { embedded?: boolean }) {
     }
   };
 
-  const pinPoint = (line: PlanMonthLine) => {
-    if (!line.automatic || !line.day || !forecast?.today || line.day <= forecast.today) return;
-    if (previewDay === line.day) setPreviewDay(earlierFixedDay(months, forecast.today, line.day));
-    else setPreviewDay(line.day);
-  };
-
   const mark = async (key: string, paid: boolean) => {
     if (!plan) return;
     setError('');
@@ -741,7 +735,7 @@ export function Plans({ embedded = false }: { embedded?: boolean }) {
                     El saldo es {forecast.anchor.label}
                   </span>
                 )}
-                <span className="mt-1 block">Un fijo entra al llegar su día y confirmarlo. Un gasto entra cuando lo marcas. El asa de un gasto lo pasa de mes.</span>
+                <span className="mt-1 block">Marcar suma o resta ese importe, aunque el día no haya llegado. Quitar la marca lo devuelve. Lo que ya está en el efectivo no se mueve otra vez.</span>
               </p>
             </div>
             <div className="flex shrink-0 gap-2">
@@ -780,7 +774,7 @@ export function Plans({ embedded = false }: { embedded?: boolean }) {
                       today={forecast.today}
                       ahead={lookingAhead}
                       until={lookingAhead ? previewDay || undefined : undefined}
-                      onMark={() => { if (line.automatic) pinPoint(line); else void mark(line.markKey as string, line.paid === true); }}
+                      onMark={() => { if (line.absorbed || !line.markKey) return; void mark(line.markKey, line.paid === true); }}
                       onOpenMenu={openMenu}
                       onDragStart={onDragStart}
                       onDragMove={onDragMove}
@@ -1045,8 +1039,9 @@ function reachDay(months: PlanMonthView[], today: string, previewDay: string | n
 }
 
 function countsToward(line: PlanMonthLine, until: string): boolean {
-  if (line.absorbed || line.amount == null || !line.day || line.day > until) return false;
-  return line.automatic === true || line.paid === true;
+  if (line.absorbed || line.amount == null || !line.day) return false;
+  if (line.paid === true) return true;
+  return line.automatic === true && line.day <= until;
 }
 
 /** Saldo al llegar a `until`: fijos hasta ese día y extras que ya están marcados. */
@@ -1075,17 +1070,6 @@ function walkMonths(months: PlanMonthView[], until: string, opening: number): Pl
       return { ...line, paid: line.automatic ? inside : line.paid === true, balance };
     }),
   }));
-}
-
-function earlierFixedDay(months: PlanMonthView[], today: string, day: string): string | null {
-  let previous: string | null = null;
-  for (const month of months) {
-    for (const line of month.lines) {
-      if (!line.automatic || !line.day || line.day <= today || line.day >= day) continue;
-      if (!previous || line.day > previous) previous = line.day;
-    }
-  }
-  return previous;
 }
 
 function shortDay(iso: string): string {
@@ -1183,8 +1167,7 @@ function PlanLine({ line, index, lifted, today, ahead, until, onMark, onOpenMenu
   const gripDrag = useRef(false);
   const ref = useRef<HTMLButtonElement>(null);
   const movable = line.markKey?.startsWith('expense:') || line.markKey?.startsWith('income:') || false;
-  const arrived = Boolean(line.automatic && line.day && today && line.day <= today);
-  const markLabel = line.automatic ? (arrived ? (line.paid ? 'Ya ha entrado' : 'Falta confirmarlo') : line.paid ? 'Quitar este punto' : 'Ver el saldo al llegar aquí') : line.paid ? 'Quitar marca' : 'Marcar';
+  const markLabel = line.absorbed ? 'Ya está en el efectivo' : line.paid ? 'Quitar marca' : 'Marcar';
   const clear = () => {
     if (timer.current != null) window.clearTimeout(timer.current);
     timer.current = null;
@@ -1192,7 +1175,7 @@ function PlanLine({ line, index, lifted, today, ahead, until, onMark, onOpenMenu
   return (
     <div className={cn('hold-target flex items-center gap-2 px-2.5 py-2 text-[13px] transition-transform duration-200 sm:gap-3 sm:px-3 sm:text-sm', index > 0 && 'border-t border-slate-200/70 dark:border-white/10', lifted && 'scale-[0.98] opacity-40', (line.tone === 'plain' || line.tone === 'final') && 'font-semibold')}>
       {line.markKey ? (
-        <button type="button" aria-label={markLabel} aria-pressed={line.paid === true} onPointerDown={(event) => event.stopPropagation()} onClick={onMark} className={cn('grid h-[22px] w-[22px] shrink-0 place-items-center rounded-full border-2 bg-white transition-all duration-300 dark:bg-transparent', line.paid ? 'border-[#16c784] bg-[#16c784] text-white dark:bg-[#16c784]' : 'border-slate-300 text-transparent dark:border-slate-500')}>
+        <button type="button" aria-label={markLabel} aria-pressed={line.paid === true} disabled={line.absorbed === true} onPointerDown={(event) => event.stopPropagation()} onClick={onMark} className={cn('grid h-[22px] w-[22px] shrink-0 place-items-center rounded-full border-2 bg-white transition-all duration-300 disabled:opacity-80 dark:bg-transparent', line.paid ? 'border-[#16c784] bg-[#16c784] text-white dark:bg-[#16c784]' : 'border-slate-300 text-transparent dark:border-slate-500')}>
           <Check size={13} strokeWidth={3} className={cn('transition-all duration-300', line.paid ? 'scale-100 opacity-100' : 'scale-75 opacity-0')} />
         </button>
       ) : (
@@ -1240,8 +1223,8 @@ function PlanLine({ line, index, lifted, today, ahead, until, onMark, onOpenMenu
               <span className="shrink-0 text-[9px] font-black uppercase tracking-wide text-slate-400">{lineKind(line)}</span>
               <span className="truncate">{line.label}</span>
             </span>
-            {line.absorbed && <span className="block text-[11px] font-medium text-slate-400">{line.paid ? 'Ya está en el efectivo' : 'Falta confirmarlo'}</span>}
-            {ahead && until && !line.absorbed && line.amount != null && line.paid && line.day && line.day <= until && <span className="block text-[11px] font-medium text-slate-400">Queda {formatEur(line.balance)}</span>}
+            {line.absorbed && <span className="block text-[11px] font-medium text-slate-400">Ya está en el efectivo</span>}
+            {!line.absorbed && line.paid && line.amount != null && <span className="block text-[11px] font-medium text-slate-400">Queda {formatEur(line.balance)}</span>}
           </span>
         </button>
       ) : (
