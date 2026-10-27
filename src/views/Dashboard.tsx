@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState, type Dispatch, type PointerEvent 
 import { bindHold, HoldMenu, holdItemClass, placeMenu } from '@/components/HoldMenu';
 import { AnimatePresence, motion } from 'motion/react';
 import { ArrowUpDown, ChevronLeft, Eye, EyeOff, MoreHorizontal, Pencil, Plus, Search, Trash2 } from 'lucide-react';
-import { PendingToday } from '@/components/PendingToday';
 import { PlatformLogo } from '@/components/PlatformLogo';
 import { QuietLoad } from '@/components/QuietLoad';
 import { QuickSplit } from '@/components/QuickSplit';
@@ -1272,8 +1271,6 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
           </p>
         )}
       </motion.section>
-
-      <PendingToday hidden={hidden} onChanged={() => void load()} />
 
       {slices.length > 0 && (
         <motion.div className="grid place-items-center py-1" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.25 }}>
