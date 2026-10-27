@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
+import { motion } from 'motion/react';
 import { LayoutDashboard, Target, Settings, ArrowLeftRight, LineChart } from 'lucide-react';
 import { InstallApp } from '@/components/InstallApp';
 import { Mark } from '@/components/Mark';
@@ -26,6 +27,64 @@ export function Shell({
   user: User;
   children: ReactNode;
 }) {
+  const scrollRef = useRef<HTMLElement>(null);
+  const bandRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const scroller = scrollRef.current;
+    const band = bandRef.current;
+    if (!scroller || !band) return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    let startY = 0;
+    let pulling = false;
+    let pull = 0;
+    const atTop = () => scroller.scrollTop <= 0;
+    const atBottom = () => scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 1;
+    const begin = (y: number) => {
+      startY = y;
+      pulling = false;
+      pull = 0;
+    };
+    const move = (y: number, event: Event) => {
+      const delta = y - startY;
+      const outward = (atTop() && delta > 10) || (atBottom() && delta < -10);
+      if (!pulling && !outward) return;
+      if (!((atTop() && delta > 0) || (atBottom() && delta < 0))) return;
+      pulling = true;
+      pull = delta * 0.38 / (1 + Math.abs(delta) / 240);
+      const squash = Math.min(0.028, Math.abs(pull) / 1100);
+      band.style.transform = `translate3d(0, ${pull}px, 0) scale(${1 + squash * 0.35}, ${1 - squash})`;
+      if (event.cancelable) event.preventDefault();
+    };
+    const release = () => {
+      if (!pulling) return;
+      const from = pull;
+      pulling = false;
+      pull = 0;
+      band.style.transform = '';
+      band.animate(
+        [
+          { transform: `translate3d(0, ${from}px, 0)` },
+          { transform: `translate3d(0, ${-from * 0.12}px, 0)`, offset: 0.72 },
+          { transform: 'translate3d(0, 0, 0)' },
+        ],
+        { duration: 620, easing: 'cubic-bezier(0.22, 1.35, 0.36, 1)' },
+      );
+    };
+    const onTouchStart = (event: TouchEvent) => begin(event.touches[0]?.clientY ?? 0);
+    const onTouchMove = (event: TouchEvent) => move(event.touches[0]?.clientY ?? startY, event);
+    scroller.addEventListener('touchstart', onTouchStart, { passive: true });
+    scroller.addEventListener('touchmove', onTouchMove, { passive: false });
+    scroller.addEventListener('touchend', release);
+    scroller.addEventListener('touchcancel', release);
+    return () => {
+      scroller.removeEventListener('touchstart', onTouchStart);
+      scroller.removeEventListener('touchmove', onTouchMove);
+      scroller.removeEventListener('touchend', release);
+      scroller.removeEventListener('touchcancel', release);
+    };
+  }, []);
+
   return (
     <div className="relative flex h-dvh flex-col overflow-hidden bg-[var(--app-bg)] text-[var(--app-text)]">
       <header className="flex shrink-0 items-center gap-3 px-4 pb-2 pt-[max(0.75rem,env(safe-area-inset-top))] md:px-8">
@@ -49,8 +108,10 @@ export function Shell({
           </button>
         </div>
       </header>
-      <main className="app-scroll min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-4 py-2 md:px-8">
-        {children}
+      <main ref={scrollRef} className="app-scroll min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-4 py-2 md:px-8">
+        <div ref={bandRef} className="origin-center will-change-transform">
+          {children}
+        </div>
       </main>
       <div className="pointer-events-none absolute inset-x-0 bottom-0 z-40">
         <div className="pointer-events-auto flex justify-center px-3 pb-[max(1rem,env(safe-area-inset-bottom))] pt-2">
@@ -64,15 +125,22 @@ export function Shell({
                 type="button"
                 onClick={() => onChange(item.id)}
                 className={cn(
-                  'flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-2xl px-1 py-1.5 text-[10px] font-semibold leading-none transition sm:flex-row sm:gap-2 sm:rounded-full sm:px-3.5 sm:py-2 sm:text-[13px]',
+                  'relative flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-2xl px-1 py-1.5 text-[10px] font-semibold leading-none sm:flex-row sm:gap-2 sm:rounded-full sm:px-3.5 sm:py-2 sm:text-[13px]',
                   active
-                    ? 'bg-white text-indigo-700 shadow-sm dark:bg-white/15 dark:text-white'
+                    ? 'text-indigo-700 dark:text-white'
                     : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200',
                 )}
               >
-                <Icon size={16} strokeWidth={1.75} />
-                <span className="truncate sm:hidden">{item.short}</span>
-                <span className="hidden sm:inline">{item.label}</span>
+                {active && (
+                  <motion.span
+                    layoutId="nav-pill"
+                    className="absolute inset-0 rounded-2xl bg-white shadow-sm dark:bg-white/15 sm:rounded-full"
+                    transition={{ type: 'spring', stiffness: 460, damping: 24, mass: 0.65 }}
+                  />
+                )}
+                <Icon size={16} strokeWidth={1.75} className="relative" />
+                <span className="relative truncate sm:hidden">{item.short}</span>
+                <span className="relative hidden sm:inline">{item.label}</span>
               </button>
             );
           })}

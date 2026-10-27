@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { motion } from 'motion/react';
 import { QuietLoad } from '@/components/QuietLoad';
 import { Shell, type Section } from '@/components/Shell';
 import { api, ApiError } from '@/lib/api';
@@ -92,11 +93,18 @@ export default function App() {
 
   return (
     <Shell section={section} onChange={(next) => { setSection(next); if (next === 'dashboard') setHome((value) => value + 1); }} user={user}>
-      {section === 'dashboard' && <Dashboard heroMs={heroMs} home={home} />}
-      {section === 'market' && <Market />}
-      {section === 'plans' && <Plans />}
-      {section === 'movements' && <Movements />}
-      {section === 'settings' && <Settings user={user} heroMs={heroMs} onHero={changeHero} onUser={setUser} onLogout={logout} />}
+      <motion.div
+        key={section}
+        initial={window.matchMedia('(prefers-reduced-motion: reduce)').matches ? false : { opacity: 0, scale: 0.975, y: 12 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        transition={{ type: 'spring', stiffness: 380, damping: 24, mass: 0.72 }}
+      >
+        {section === 'dashboard' && <Dashboard heroMs={heroMs} home={home} />}
+        {section === 'market' && <Market />}
+        {section === 'plans' && <Plans />}
+        {section === 'movements' && <Movements />}
+        {section === 'settings' && <Settings user={user} heroMs={heroMs} onHero={changeHero} onUser={setUser} onLogout={logout} />}
+      </motion.div>
     </Shell>
   );
 }

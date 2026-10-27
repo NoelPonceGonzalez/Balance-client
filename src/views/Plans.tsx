@@ -190,7 +190,7 @@ function PlanCorner({ balance, target, delta, beat }: { balance: number; target:
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: -8 }}
-        transition={{ duration: 0.28 }}
+        transition={{ type: 'spring', stiffness: 460, damping: 18, mass: 0.6 }}
         className={cn('shrink-0 text-sm font-black tabular-nums', frame.className)}
       >
         {frame.text}
@@ -1175,8 +1175,8 @@ function PlanLine({ line, index, lifted, today, ahead, until, onMark, onOpenMenu
   return (
     <div className={cn('hold-target flex items-center gap-2 px-2.5 py-2 text-[13px] transition-transform duration-200 sm:gap-3 sm:px-3 sm:text-sm', index > 0 && 'border-t border-slate-200/70 dark:border-white/10', lifted && 'scale-[0.98] opacity-40', (line.tone === 'plain' || line.tone === 'final') && 'font-semibold')}>
       {line.markKey ? (
-        <button type="button" aria-label={markLabel} aria-pressed={line.paid === true} disabled={line.absorbed === true} onPointerDown={(event) => event.stopPropagation()} onClick={onMark} className={cn('grid h-[22px] w-[22px] shrink-0 place-items-center rounded-full border-2 bg-white transition-all duration-300 disabled:opacity-80 dark:bg-transparent', line.paid ? 'border-[#16c784] bg-[#16c784] text-white dark:bg-[#16c784]' : 'border-slate-300 text-transparent dark:border-slate-500')}>
-          <Check size={13} strokeWidth={3} className={cn('transition-all duration-300', line.paid ? 'scale-100 opacity-100' : 'scale-75 opacity-0')} />
+        <button type="button" aria-label={markLabel} aria-pressed={line.paid === true} disabled={line.absorbed === true} onPointerDown={(event) => event.stopPropagation()} onClick={onMark} className={cn('grid h-[22px] w-[22px] shrink-0 place-items-center rounded-full border-2 bg-white transition-colors duration-300 disabled:opacity-80 dark:bg-transparent', line.paid ? 'border-[#16c784] bg-[#16c784] text-white dark:bg-[#16c784]' : 'border-slate-300 text-transparent dark:border-slate-500')}>
+          <Check size={13} strokeWidth={3} className={cn('transition-transform duration-500 [transition-timing-function:cubic-bezier(0.34,1.56,0.64,1)]', line.paid ? 'scale-100 opacity-100' : 'scale-50 opacity-0')} />
         </button>
       ) : (
         <span className="w-[22px] shrink-0" />

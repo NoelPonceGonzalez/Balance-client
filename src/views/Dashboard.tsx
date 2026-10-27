@@ -1276,7 +1276,7 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
                       initial={{ opacity: 0, y: 8 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -8 }}
-                      transition={{ duration: 0.28 }}
+                      transition={{ type: 'spring', stiffness: 420, damping: 22, mass: 0.7 }}
                       className={cn('shrink-0 text-sm font-black tabular-nums sm:text-base', hidden ? 'text-slate-400' : frame.className)}
                     >
                       {mask(frame.text)}
@@ -1304,7 +1304,7 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
                     initial={{ opacity: 0, height: 0 }}
                     animate={{ opacity: 1, height: 'auto' }}
                     exit={{ opacity: 0, height: 0 }}
-                    transition={{ duration: 0.28 }}
+                    transition={{ type: 'spring', stiffness: 420, damping: 22, mass: 0.7 }}
                     className="mt-2 space-y-1 overflow-hidden rounded-[28px] border border-white/70 bg-white/45 px-4 py-3 shadow-[0_8px_32px_rgba(15,23,42,0.06)] backdrop-blur-2xl dark:border-white/10 dark:bg-white/10"
                   >
                     {row.sides.length === 0 && <li className="text-xs font-semibold text-slate-400">Sin desglose todavía.</li>}
@@ -1400,8 +1400,9 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
           onClick={() => setAdding(true)}
           initial={prefersStill() ? false : { opacity: 0, y: 18 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={prefersStill() ? { duration: 0 } : { ...rise, delay: 0.12 + ordered.length * 0.07 }}
-          className="flex w-full items-center gap-3 rounded-[28px] border border-dashed border-slate-300/90 bg-white/40 px-5 py-3.5 text-left text-slate-600 backdrop-blur-xl hover:bg-white/70 dark:border-white/15 dark:bg-white/5 dark:text-slate-300"
+          whileTap={{ scaleX: 1.03, scaleY: 0.94 }}
+          transition={prefersStill() ? { type: 'spring', stiffness: 520, damping: 18, mass: 0.55 } : { type: 'spring', stiffness: 380, damping: 22, mass: 0.7, delay: 0.08 }}
+          className="motion-squish flex w-full items-center gap-3 rounded-[28px] border border-dashed border-slate-300/90 bg-white/40 px-5 py-3.5 text-left text-slate-600 backdrop-blur-xl hover:bg-white/70 dark:border-white/15 dark:bg-white/5 dark:text-slate-300"
         >
           <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-slate-300/80 dark:border-white/15">
             <Plus size={15} />

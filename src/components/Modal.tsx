@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { motion } from 'motion/react';
 import { cn } from '@/lib/utils';
 
 export const modalOverlayClass =
@@ -23,18 +24,21 @@ export function ModalClose({ onClose }: { onClose: () => void }) {
 export function Modal({ title, onClose, children, wide }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
   return (
     <div className={modalOverlayClass} onClick={onClose}>
-      <div
-        className={cn(modalPanelClass, wide ? 'max-w-3xl' : 'max-w-xl')}
+      <motion.div
+        className={cn(modalPanelClass, 'motion-squish', wide ? 'max-w-3xl' : 'max-w-xl')}
         onClick={(event) => event.stopPropagation()}
         role="dialog"
         aria-labelledby="modal-title"
+        initial={{ opacity: 0, scale: 0.9, y: 18 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        transition={{ type: 'spring', stiffness: 420, damping: 22, mass: 0.7 }}
       >
         <div className="mb-5 flex items-center justify-between gap-4">
           <h2 id="modal-title" className="text-[17px] font-semibold tracking-tight text-slate-900 dark:text-white">{title}</h2>
           <ModalClose onClose={onClose} />
         </div>
         {children}
-      </div>
+      </motion.div>
     </div>
   );
 }

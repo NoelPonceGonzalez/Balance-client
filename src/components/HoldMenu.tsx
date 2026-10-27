@@ -34,7 +34,7 @@ export function bindHold(event: ReactPointerEvent, open: (x: number, y: number) 
     target.classList.remove('hold-pop');
     void target.offsetWidth;
     target.classList.add('hold-pop');
-    window.setTimeout(() => target.classList.remove('hold-pop'), 240);
+    window.setTimeout(() => target.classList.remove('hold-pop'), 480);
     if (navigator.vibrate) navigator.vibrate(10);
     open(x, y);
   }, 420);

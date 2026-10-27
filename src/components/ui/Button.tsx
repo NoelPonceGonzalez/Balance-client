@@ -24,8 +24,9 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     return (
       <motion.button
         ref={ref}
-        whileTap={{ scale: 0.98 }}
-        className={cn('inline-flex items-center justify-center gap-2 font-bold disabled:pointer-events-none disabled:opacity-50', variants[variant], sizes[size], className)}
+        whileTap={{ scaleX: 1.05, scaleY: 0.9 }}
+        transition={{ type: 'spring', stiffness: 560, damping: 16, mass: 0.55 }}
+        className={cn('motion-squish inline-flex items-center justify-center gap-2 font-bold disabled:pointer-events-none disabled:opacity-50', variants[variant], sizes[size], className)}
         {...(props as object)}
       />
     );
