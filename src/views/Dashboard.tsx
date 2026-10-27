@@ -1043,6 +1043,10 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
     ? (data ? { name: 'Extras', value: extraWallet(data.extras).value, logoName: 'Extras' } : null)
     : ordered.find((row) => row.key === openWallet) || null;
   const barValue = view === 'cartera' && openAccount ? openAccount.value : shownWorth;
+  const chooseView = (next: 'general' | 'cartera') => {
+    setView(next);
+    setOpenWallet(null);
+  };
   const toggleHidden = () => {
     setHidden((value) => {
       const next = !value;
@@ -1076,7 +1080,7 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
             {hidden ? <EyeOff size={16} /> : <Eye size={16} />}
           </button>
         </div>
-        <ViewSwitch value={view} onChange={setView} />
+        <ViewSwitch value={view} onChange={chooseView} />
       </div>
     </div>
   );
@@ -1395,7 +1399,7 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
           );
         })}
         {countExtras && extraWealth > 0 && (
-          <button type="button" onClick={() => { setView('cartera'); }} className="flex w-full items-center gap-4 rounded-[28px] border border-white/70 bg-white/50 px-5 py-4 text-left dark:border-white/10 dark:bg-white/5">
+          <button type="button" onClick={() => chooseView('cartera')} className="flex w-full items-center gap-4 rounded-[28px] border border-white/70 bg-white/50 px-5 py-4 text-left dark:border-white/10 dark:bg-white/5">
             <img src="/extras/objeto.svg" alt="" className="h-9 w-9 rounded-xl" />
             <span className="min-w-0 flex-1">
               <span className="block text-sm font-semibold">Extras</span>
