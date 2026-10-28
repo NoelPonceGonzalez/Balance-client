@@ -32,6 +32,12 @@ export function wearFromFloat(value: number): string | null {
   return 'Battle-Scarred';
 }
 
+export function wearName(floatText: string): string {
+  const value = Number(floatText.trim().replace(',', '.'));
+  const wear = wearFromFloat(value);
+  return wear ? WEAR_LABEL[wear] || wear : '';
+}
+
 export function wearHint(floatText: string, wears: string[]): string {
   const text = floatText.trim().replace(',', '.');
   if (!text) return 'Un float aproximado basta, por ejemplo 0,15.';

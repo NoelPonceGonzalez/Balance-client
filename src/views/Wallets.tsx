@@ -156,7 +156,7 @@ interface Activity {
   onOpen?: () => void;
 }
 
-interface LinePoint {
+export interface LinePoint {
   day: string;
   eur: number;
 }
@@ -286,7 +286,7 @@ function accentFor(label: string): string {
   return ACCENT_PALETTE[hash % ACCENT_PALETTE.length];
 }
 
-function CashChart({ points, now, hidden, base = null, label, showPct = false, beside = false, tall = false, plain = false, quiet = false, tone, beforePlot, onValue, onDay, emptyText = 'La gráfica aparece con el primer movimiento.' }: { points: LinePoint[]; now: number; hidden: boolean; base?: number | null; label?: string; showPct?: boolean; beside?: boolean; tall?: boolean; plain?: boolean; quiet?: boolean; tone?: 'ink' | string; beforePlot?: ReactNode; onValue?: (eur: number) => void; onDay?: (day: string | null) => void; emptyText?: string }) {
+export function CashChart({ points, now, hidden, base = null, label, showPct = false, beside = false, tall = false, plain = false, quiet = false, tone, beforePlot, onValue, onDay, emptyText = 'La gráfica aparece con el primer movimiento.' }: { points: LinePoint[]; now: number; hidden: boolean; base?: number | null; label?: string; showPct?: boolean; beside?: boolean; tall?: boolean; plain?: boolean; quiet?: boolean; tone?: 'ink' | string; beforePlot?: ReactNode; onValue?: (eur: number) => void; onDay?: (day: string | null) => void; emptyText?: string }) {
   const fillId = `fill-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
   const pastId = `${fillId}-past`;
   const futureId = `${fillId}-future`;

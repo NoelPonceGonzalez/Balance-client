@@ -16,8 +16,8 @@ import { accountProducts, KIND_LABEL, kindClass, kindFromClass, partSection, typ
 import { cn } from '@/lib/utils';
 import type { DashboardData } from '@/lib/types';
 import { useHideChrome } from '@/components/Shell';
-import { Wallets } from '@/views/Wallets';
-import { SkinSearch, wearHint, type SkinPhase } from '@/components/SkinSearch';
+import { CashChart, Wallets, type LinePoint } from '@/views/Wallets';
+import { SkinSearch, wearName, type SkinPhase } from '@/components/SkinSearch';
 import { OriginPicker } from '@/components/OriginMark';
 import { glide, jelly, quickOut, softSpring, SPRING_EASE } from '@/lib/motion';
 const HIDE_KEY = 'pat_hide_money';
@@ -454,6 +454,42 @@ function QuoteMark({ hit }: { hit: QuoteHit }) {
   );
 }
 
+function seriesGroup(assetClass: string): string {
+  if (assetClass === 'crypto') return 'crypto';
+  if (assetClass === 'etf' || assetClass === 'stock') return 'valores';
+  if (assetClass === 'personal_good') return 'personal_good';
+  return 'all';
+}
+
+function useHoldingSeries(accountId: string, holdingId: string, assetClass: string): LinePoint[] | null {
+  const [points, setPoints] = useState<LinePoint[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const group = seriesGroup(assetClass);
+    api<{ points: LinePoint[] }>(`/api/wallets/series?accountId=${encodeURIComponent(accountId)}&group=${encodeURIComponent(group)}&holdingId=${encodeURIComponent(holdingId)}`)
+      .then((data) => { if (!cancelled) setPoints(data.points || []); })
+      .catch(() => { if (!cancelled) setPoints([]); });
+    return () => { cancelled = true; };
+  }, [accountId, holdingId, assetClass]);
+  return points;
+}
+
+function PieceLine({ accountId, holdingId, assetClass, now }: { accountId: string; holdingId: string; assetClass: string; now: number }) {
+  const points = useHoldingSeries(accountId, holdingId, assetClass);
+  const [live, setLive] = useState<number | null>(null);
+  const [day, setDay] = useState<string | null>(null);
+  if (!points || points.length < 2) return null;
+  return (
+    <div>
+      <div className="flex items-baseline justify-between gap-3">
+        <p className="text-[28px] font-black leading-none tracking-tight tabular-nums">{formatEur(live ?? now)}</p>
+        {day && <p className="text-[13px] font-semibold text-slate-400">{formatDay(day)}</p>}
+      </div>
+      <CashChart points={points} now={now} hidden={false} quiet tone="ink" onValue={setLive} onDay={setDay} emptyText="" />
+    </div>
+  );
+}
+
 function PieceDialog({
   piece,
   pieceError,
@@ -552,12 +588,34 @@ function PieceDialog({
     };
   }, [piece.assetClass, piece.floatText, piece.marketName, piece.name, piece.phasePaint, piece.skins, setPiece]);
   const clearPreview = (next: PieceDraft): PieceDraft => ({ ...next, preview: null });
+  const skins = piece.skins || piece.assetClass === 'personal_good';
+  const editing = Boolean(piece.id);
+  const wear = skins ? wearName(piece.floatText) : '';
+  useEffect(() => {
+    if (!skins || piece.image || piece.name.trim().length < 2) return;
+    let cancelled = false;
+    const name = piece.name.replace(/\s+#\s*\d{1,5}\s*$/g, '').trim();
+    api<{ results: { name: string; image: string | null }[] }>(`/api/market/skins?q=${encodeURIComponent(name)}`)
+      .then((data) => {
+        const hits = data.results || [];
+        const fold = (value: string) => value.toLowerCase().replace(/\s*\|\s*/g, ' ').replace(/\s+/g, ' ').trim();
+        const hit = hits.find((item) => fold(item.name) === fold(name)) || hits[0];
+        if (!cancelled && hit?.image) setPiece((current) => (current && !current.image ? { ...current, image: hit.image } : current));
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [piece.image, piece.name, setPiece, skins]);
   return (
-    <Modal title={piece.id ? piece.name : `Añadir en ${piece.accountName}`} onClose={() => setPiece(null)}>
-      {piece.sectionLabel && <p className="-mt-2 mb-3 text-xs font-bold uppercase tracking-widest text-slate-400">{piece.sectionLabel}</p>}
+    <Modal title={piece.name.trim() || `Añadir en ${piece.accountName}`} onClose={() => setPiece(null)}>
       <div className="grid gap-4">
         {pieceError && <p className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">{pieceError}</p>}
-        {!piece.skins && piece.kinds.length > 1 && (
+        {piece.image && (
+          <div className="grid place-items-center">
+            <img src={piece.image} alt="" referrerPolicy="no-referrer" className="h-40 w-56 object-contain" />
+          </div>
+        )}
+        {editing && piece.id && <PieceLine accountId={piece.accountId} holdingId={piece.id} assetClass={piece.assetClass} now={Number(piece.value) || 0} />}
+        {!editing && !skins && piece.kinds.length > 1 && (
           <Field label="Tipo">
             <select
               className={fieldClass}
@@ -571,7 +629,7 @@ function PieceDialog({
             </select>
           </Field>
         )}
-        {(piece.skins || piece.assetClass === 'personal_good') && (
+        {!editing && skins && (
           <SkinSearch
             onPick={(hit) => setPiece({
               ...piece,
@@ -586,20 +644,10 @@ function PieceDialog({
             })}
           />
         )}
-        {piece.image && (piece.skins || piece.assetClass === 'personal_good') && (
-          <div className="flex items-center gap-3 rounded-2xl bg-slate-50 px-3 py-2 dark:bg-black/20">
-            <img src={piece.image} alt="" referrerPolicy="no-referrer" className="h-14 w-20 rounded-xl bg-white object-contain p-1 dark:bg-white/10" />
-            <span className="min-w-0 break-words text-sm font-bold leading-snug">{piece.marketName || piece.name}</span>
-          </div>
-        )}
-        {(piece.skins || piece.assetClass === 'personal_good') ? (
-          <Field label="Nombre">
-            <textarea rows={2} value={piece.name} onChange={(event) => setPiece({ ...piece, name: event.target.value })} className={cn(fieldClass, 'resize-none leading-snug')} />
-          </Field>
-        ) : (
+        {!editing && !skins && !market && (
           <Input label="Nombre" value={piece.name} onChange={(event) => setPiece({ ...piece, name: event.target.value })} />
         )}
-        {piece.phases.length > 0 && (
+        {skins && piece.phases.length > 0 && (
           <Field label="Fase">
             <select
               className={fieldClass}
@@ -611,26 +659,16 @@ function PieceDialog({
             </select>
           </Field>
         )}
-        {(piece.skins || piece.assetClass === 'personal_good') && (
+        {skins && (
           <div className="grid gap-3">
-            <Input label="Float" value={piece.floatText} onChange={(event) => { rankLock.current = false; setPiece({ ...piece, floatText: event.target.value }); }} placeholder="0,007877453230" />
-            <p className="text-xs font-medium text-slate-400">{wearHint(piece.floatText, piece.wears)}</p>
-            <Input label="Puesto en el mundo" value={piece.rank} onChange={(event) => { rankLock.current = true; setPiece({ ...piece, rank: event.target.value }); }} placeholder="26" />
-            {rankNote && <p className="text-xs font-medium text-slate-400">{rankNote}</p>}
-            <Input label="Fecha y hora" type="datetime-local" value={piece.boughtAt} onChange={(event) => setPiece(clearPreview({ ...piece, boughtAt: event.target.value }))} />
-            <div className="flex gap-2">
-              <button type="button" onClick={() => setPiece(clearPreview({ ...piece, receiveMode: 'market' }))} className={cn('flex-1 rounded-full border py-2 text-sm font-bold', piece.receiveMode === 'market' ? 'border-slate-900 text-slate-900 dark:border-white dark:text-white' : 'border-slate-200 text-slate-400')}>Calcular lo que valía</button>
-              <button type="button" onClick={() => setPiece(clearPreview({ ...piece, receiveMode: 'manual' }))} className={cn('flex-1 rounded-full border py-2 text-sm font-bold', piece.receiveMode === 'manual' ? 'border-slate-900 text-slate-900 dark:border-white dark:text-white' : 'border-slate-200 text-slate-400')}>Lo escribo yo</button>
+            <div className="grid grid-cols-2 gap-3">
+              <Input label="Float" value={piece.floatText} onChange={(event) => { rankLock.current = false; setPiece({ ...piece, floatText: event.target.value }); }} placeholder="0,16" />
+              <Input label="Puesto" value={piece.rank} onChange={(event) => { rankLock.current = true; setPiece({ ...piece, rank: event.target.value }); }} placeholder="26" />
             </div>
-            {piece.preview && (
-              <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
-                A esa hora valía {formatPrice(piece.preview.priceEur)}.
-                <span className="mt-1 block text-xs font-medium text-slate-400">{piece.preview.note}</span>
-              </p>
-            )}
+            {(wear || rankNote) && <p className="text-xs font-medium text-slate-400">{[wear, rankNote].filter(Boolean).join(' · ')}</p>}
           </div>
         )}
-        {market && (
+        {market && !editing && (
           <div className="grid gap-3 rounded-2xl border border-white/70 bg-white/35 p-3 dark:border-white/10 dark:bg-white/5">
             <p className="text-[13px] font-medium text-slate-600 dark:text-slate-300">{piece.id ? 'Otra compra' : 'Compra'}</p>
             <label className="flex items-center gap-2 rounded-xl border border-slate-200/90 bg-white/90 px-3 py-2 dark:border-white/10 dark:bg-white/5">
@@ -706,27 +744,20 @@ function PieceDialog({
             )}
           </div>
         )}
-        {!market && !piece.skins && piece.assetClass !== 'personal_good' && !totalOnly(piece.kind) && (
+        {((market && editing) || (!market && !skins && !totalOnly(piece.kind))) && (
           <Input label="Cantidad" type="number" min="0" step="any" value={piece.quantity} onChange={(event) => setPiece({ ...piece, quantity: event.target.value })} />
         )}
-        {(!market || piece.id) && (
+        {(!market || editing) && (
           <Input label="Me costó €" type="number" min="0" step="any" value={piece.cost} onChange={(event) => setPiece({ ...piece, cost: event.target.value })} />
         )}
-        <Input
-          label="Vale ahora €"
-          type="number"
-          min="0"
-          step="any"
-          value={piece.followMarket ? '' : piece.value}
-          disabled={piece.followMarket}
-          placeholder={piece.marketName ? 'El float busca el precio' : piece.followMarket ? 'Sigue la cotización' : piece.assetClass === 'crypto' ? 'Vacío en Bitcoin, Ethereum o Solana usa la cotización' : ''}
-          onChange={(event) => setPiece({ ...piece, value: event.target.value })}
-        />
-        <Button onClick={onSave}>Guardar</Button>
-        {piece.id && (
-          <Button variant="danger" onClick={onDelete}>
-            {pieceDelete ? 'Confirmar eliminación' : 'Eliminar'}
-          </Button>
+        {!market && !piece.quoteId && !piece.marketName && (
+          <Input label="Vale ahora €" type="number" min="0" step="any" value={piece.value} onChange={(event) => setPiece({ ...piece, value: event.target.value })} />
+        )}
+        <Button variant="secondary" onClick={onSave}>Guardar</Button>
+        {editing && (
+          <button type="button" onClick={onDelete} className="py-1 text-sm font-semibold text-slate-400">
+            {pieceDelete ? 'Confirmar' : 'Borrar'}
+          </button>
         )}
       </div>
     </Modal>
