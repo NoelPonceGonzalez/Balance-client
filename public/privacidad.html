@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Privacidad · Balance</title>
+    <meta name="description" content="Qué datos guarda Balance y cómo se borran." />
+    <style>
+      :root { color-scheme: light dark; }
+      body { margin: 0; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background: #f2f2f7; color: #1c1c1e; }
+      main { max-width: 40rem; margin: 0 auto; padding: 2.5rem 1.25rem 4rem; }
+      h1 { font-size: 1.8rem; letter-spacing: -0.03em; margin: 0 0 0.4rem; }
+      h2 { font-size: 1.05rem; margin: 1.6rem 0 0.4rem; }
+      p, li { line-height: 1.55; color: #3a3a3c; }
+      a { color: inherit; }
+      @media (prefers-color-scheme: dark) {
+        body { background: #000; color: #f5f5f7; }
+        p, li { color: #d1d1d6; }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Privacidad</h1>
+      <p>Balance guarda los datos de tu cuenta para enseñarte tu dinero. No se venden ni se ceden para publicidad.</p>
+      <h2>Qué se guarda</h2>
+      <ul>
+        <li>Nombre, usuario y correo, para entrar y recuperar la contraseña.</li>
+        <li>La contraseña solo como un hash. No se puede leer ni se incluye en la copia.</li>
+        <li>Cuentas, saldos, piezas, movimientos, planes, extras y el histórico que tú apuntas.</li>
+        <li>Cotizaciones públicas de mercado para valorar lo que sigues. Esas consultas no identifican tu cartera fuera de Balance.</li>
+      </ul>
+      <h2>Cómo viaja</h2>
+      <p>La sesión y los datos van por HTTPS. La sesión es un token que caduca y se invalida al cambiar la contraseña o al borrar la cuenta.</p>
+      <h2>Tu copia y el borrado</h2>
+      <p>En Ajustes puedes descargar una copia en JSON. También puedes borrar la cuenta: se eliminan el usuario, las cuentas, las piezas, los movimientos, los planes, los extras y el histórico. La cotización pública de mercado no es tuya y se queda.</p>
+      <p>Para pedir la copia o el borrado si no puedes entrar, escribe a <a href="mailto:noel.ponce.gonzalez@gmail.com">noel.ponce.gonzalez@gmail.com</a>.</p>
+      <p><a href="/">Volver a Balance</a></p>
+    </main>
+  </body>
+</html>
