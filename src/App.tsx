@@ -55,7 +55,22 @@ export default function App() {
   };
 
   useEffect(() => {
+    localStorage.removeItem('pat_login_id');
     restoreSession();
+  }, []);
+
+  useEffect(() => {
+    const enterHome = () => {
+      if (document.visibilityState !== 'visible') return;
+      setSection('dashboard');
+      setHome((value) => value + 1);
+    };
+    document.addEventListener('visibilitychange', enterHome);
+    window.addEventListener('pageshow', enterHome);
+    return () => {
+      document.removeEventListener('visibilitychange', enterHome);
+      window.removeEventListener('pageshow', enterHome);
+    };
   }, []);
 
   useEffect(() => {
@@ -91,7 +106,7 @@ export default function App() {
       </div>
     );
   }
-  if (!user) return <LoginView onLogin={(next) => { setOffline(false); setUser(next); }} />;
+  if (!user) return <LoginView onLogin={(next) => { setOffline(false); setSection('dashboard'); setHome((value) => value + 1); setUser(next); }} />;
 
   return (
     <Shell section={section} onChange={(next) => { setSection(next); if (next === 'dashboard') setHome((value) => value + 1); }} user={user} onSettled={() => setBooks((value) => value + 1)}>

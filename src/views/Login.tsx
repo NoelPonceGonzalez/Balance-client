@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Lock, Eye, EyeOff } from 'lucide-react';
 import { InstallApp } from '@/components/InstallApp';
 import { Mark } from '@/components/Mark';
@@ -9,19 +9,23 @@ import { api, ApiError } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import type { User as AppUser } from '@/lib/types';
 
-const REMEMBERED = 'pat_login_id';
-
 export function LoginView({ onLogin }: { onLogin: (user: AppUser, token: string) => void }) {
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [name, setName] = useState('');
   const [username, setUsername] = useState('');
-  const [login, setLogin] = useState(() => localStorage.getItem(REMEMBERED) || '');
+  const [login, setLogin] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [loginReady, setLoginReady] = useState(false);
+  const [passwordReady, setPasswordReady] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [recover, setRecover] = useState(false);
+
+  useEffect(() => {
+    localStorage.removeItem('pat_login_id');
+  }, []);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -35,7 +39,7 @@ export function LoginView({ onLogin }: { onLogin: (user: AppUser, token: string)
       const body = mode === 'login' ? { login: login.trim(), password } : { name, username: username.trim(), email, password };
       const data = await api<{ token: string; user: AppUser }>(path, { method: 'POST', body: JSON.stringify(body) });
       localStorage.setItem('pat_token', data.token);
-      localStorage.setItem(REMEMBERED, mode === 'login' ? login.trim() : username.trim());
+      localStorage.removeItem('pat_login_id');
       onLogin(data.user, data.token);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se ha podido entrar.');
@@ -85,7 +89,7 @@ export function LoginView({ onLogin }: { onLogin: (user: AppUser, token: string)
             </button>
           </div>
         ) : (
-        <form onSubmit={submit} className="space-y-5">
+        <form onSubmit={submit} className="space-y-5" autoComplete="off">
           {mode === 'register' && (
             <>
               <Input label="Nombre" value={name} onChange={(e) => setName(e.target.value)} required autoComplete="name" placeholder="Cómo quieres que aparezca" />
@@ -96,11 +100,16 @@ export function LoginView({ onLogin }: { onLogin: (user: AppUser, token: string)
           {mode === 'login' && (
             <Input
               label="Correo o usuario"
+              name="pat-login"
               value={login}
               onChange={(e) => setLogin(e.target.value)}
               required
-              autoComplete="username"
+              autoComplete="off"
+              autoCapitalize="none"
               spellCheck={false}
+              readOnly={!loginReady}
+              onPointerDown={() => setLoginReady(true)}
+              onFocus={() => setLoginReady(true)}
               placeholder="Usuario o correo"
             />
           )}
@@ -111,7 +120,11 @@ export function LoginView({ onLogin }: { onLogin: (user: AppUser, token: string)
             onChange={(e) => setPassword(e.target.value)}
             required
             minLength={8}
-            autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+            name={mode === 'login' ? 'pat-secret' : undefined}
+            autoComplete={mode === 'login' ? 'off' : 'new-password'}
+            readOnly={mode === 'login' && !passwordReady}
+            onPointerDown={() => setPasswordReady(true)}
+            onFocus={() => setPasswordReady(true)}
             icon={<Lock size={16} />}
             placeholder="Mínimo 8 caracteres"
             trailing={
