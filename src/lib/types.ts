@@ -48,7 +48,8 @@ export interface DashboardData {
     valueEur: number | null;
     updatedAt: string | null;
     stale: boolean;
-    parts?: { label: string; eur: number; group?: string; costEur?: number | null; detail?: string; image?: string | null; id?: string | null; quantity?: number; followMarket?: boolean; moves?: { at: string; spentEur: number; quantity: number }[] }[];
+    sections?: string[];
+    parts?: { label: string; eur: number; group?: string; section?: string; costEur?: number | null; detail?: string; image?: string | null; id?: string | null; quantity?: number; followMarket?: boolean; moves?: { at: string; spentEur: number; quantity: number }[] }[];
     planId?: string | null;
     flows?: { day: string; label: string; amount: number; key: string; surprise: boolean; absorbed?: boolean; open?: boolean }[];
     fixed?: { label: string; amount: number; rhythm: string }[];

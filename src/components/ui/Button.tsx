@@ -1,6 +1,5 @@
 import React from 'react';
 import { motion } from 'motion/react';
-import { softSpring } from '@/lib/motion';
 import { cn } from '@/lib/utils';
 
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
@@ -25,9 +24,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     return (
       <motion.button
         ref={ref}
-        whileTap={{ scale: 0.985 }}
-        transition={softSpring}
-        className={cn('motion-squish inline-flex items-center justify-center gap-2 font-bold disabled:pointer-events-none disabled:opacity-50', variants[variant], sizes[size], className)}
+        className={cn('inline-flex items-center justify-center gap-2 font-bold disabled:pointer-events-none disabled:opacity-50', variants[variant], sizes[size], className)}
         {...(props as object)}
       />
     );

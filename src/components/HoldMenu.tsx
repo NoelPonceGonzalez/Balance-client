@@ -31,10 +31,11 @@ export function bindHold(event: ReactPointerEvent, open: (x: number, y: number) 
   const timer = window.setTimeout(() => {
     if (!alive) return;
     stop();
-    target.classList.remove('hold-pop');
+    target.classList.remove('hold-pop', 'plan-rise');
     void target.offsetWidth;
     target.classList.add('hold-pop');
-    window.setTimeout(() => target.classList.remove('hold-pop'), 560);
+    target.dataset.held = '1';
+    window.setTimeout(() => target.classList.remove('hold-pop'), 700);
     if (navigator.vibrate) navigator.vibrate(10);
     open(x, y);
   }, 420);

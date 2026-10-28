@@ -1,7 +1,7 @@
 import { forwardRef, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type PointerEvent as ReactPointerEvent, type ReactNode, type SetStateAction } from 'react';
 import { bindHold, HoldMenu, holdItemClass, placeMenu } from '@/components/HoldMenu';
 import { AnimatePresence, motion } from 'motion/react';
-import { ArrowUpDown, ChevronLeft, ChevronRight, Eye, EyeOff, MoreHorizontal, Pencil, Plus, Search, Trash2 } from 'lucide-react';
+import { ArrowUpDown, ChevronLeft, ChevronRight, Eye, EyeOff, Pencil, Plus, Search, Trash2 } from 'lucide-react';
 import { PlatformLogo } from '@/components/PlatformLogo';
 import { QuietLoad } from '@/components/QuietLoad';
 import { QuickSplit } from '@/components/QuickSplit';
@@ -9,15 +9,17 @@ import { Modal } from '@/components/Modal';
 import { Button } from '@/components/ui/Button';
 import { Field, Input, fieldClass } from '@/components/ui/Input';
 import { api, ApiError } from '@/lib/api';
-import { formatDay, formatNumber, formatPct, formatPrice, formatSignedEur } from '@/lib/format';
+import { formatDay, formatEur, formatNumber, formatPct, formatPrice, formatSignedEur } from '@/lib/format';
 import { PLATFORM_COLORS } from '@/lib/platform-colors';
-import { accountOffers, findPlatform, type AccountOffer } from '@/lib/platforms';
+import { findPlatform } from '@/lib/platforms';
+import { accountProducts, KIND_LABEL, kindClass, kindFromClass, partSection, type ProductKind, type ProductSection } from '@/lib/products';
 import { cn } from '@/lib/utils';
 import type { DashboardData } from '@/lib/types';
+import { useHideChrome } from '@/components/Shell';
 import { Wallets } from '@/views/Wallets';
 import { SkinSearch, wearHint, type SkinPhase } from '@/components/SkinSearch';
 import { OriginPicker } from '@/components/OriginMark';
-import { glide, softSpring } from '@/lib/motion';
+import { glide, jelly, quickOut, softSpring, SPRING_EASE } from '@/lib/motion';
 const HIDE_KEY = 'pat_hide_money';
 const SORT_KEY = 'pat_dash_sort';
 const CYCLE_MS = 5000;
@@ -41,6 +43,7 @@ interface AccountPart {
   label: string;
   eur: number;
   group?: string;
+  section?: string;
   costEur?: number | null;
   detail?: string;
   image?: string | null;
@@ -76,7 +79,10 @@ interface PieceDraft {
   quoteId: string;
   extraSpent: string;
   preview: { priceEur: number; quantity: number; note: string } | null;
-  kinds: string[];
+  kinds: ProductKind[];
+  kind: ProductKind;
+  section: string;
+  sectionLabel: string;
 }
 
 function localStamp(date = new Date()): string {
@@ -96,13 +102,9 @@ function withWorldRank(name: string, rank: string): string {
   return next.length <= 80 ? next : base;
 }
 
-const PIECE_CLASSES = [
-  { id: 'crypto', label: 'Cripto' },
-  { id: 'etf', label: 'ETF' },
-  { id: 'stock', label: 'Acción' },
-  { id: 'personal_good', label: 'Bien' },
-  { id: 'other', label: 'Otro' },
-];
+function totalOnly(kind: ProductKind): boolean {
+  return !isMarketClass(kindClass(kind)) && kind !== 'skin';
+}
 
 function knownCoin(name: string): string | null {
   const key = name.trim().toLowerCase();
@@ -111,12 +113,14 @@ function knownCoin(name: string): string | null {
 }
 
 interface Side {
-  group: PartGroup;
+  group: string;
   title: string;
   items: AccountPart[];
   total: number;
   invested: number | null;
   gain: number | null;
+  icon?: string;
+  hint?: string;
 }
 
 const GROUP_ORDER: PartGroup[] = ['cash', 'crypto', 'etf', 'stock', 'personal_good', 'other'];
@@ -146,15 +150,30 @@ function wash(hex: string): string {
   return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.2)`;
 }
 
+function narrowScreen(): boolean {
+  return window.matchMedia('(max-width: 767px)').matches;
+}
+
 function prefersStill(): boolean {
-  return window.matchMedia('(prefers-reduced-motion: reduce)').matches || window.matchMedia('(max-width: 767px)').matches;
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
 
 function motionOff(): boolean {
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
 
-const pageMove = { duration: 0.36, ease: [0.22, 1, 0.36, 1] as const };
+function Flip({ id, className, children }: { id: string; className?: string; children: ReactNode }) {
+  if (motionOff()) return <span className={className}>{children}</span>;
+  return (
+    <AnimatePresence mode="wait" initial={false}>
+      <motion.span key={id} initial={{ opacity: 0, y: 8, scale: 0.85 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -6, scale: 0.9, transition: quickOut }} transition={jelly} className={cn('inline-block', className)}>
+        {children}
+      </motion.span>
+    </AnimatePresence>
+  );
+}
+
+const pageMove = glide;
 
 function ViewSwitch({ value, onChange }: { value: 'general' | 'cartera'; onChange: (value: 'general' | 'cartera') => void }) {
   const still = motionOff();
@@ -173,7 +192,7 @@ function ViewSwitch({ value, onChange }: { value: 'general' | 'cartera'; onChang
             {on && (
               <motion.span
                 layoutId="dash-view-pill"
-                transition={still ? { duration: 0 } : pageMove}
+                transition={still ? { duration: 0 } : softSpring}
                 className="pointer-events-none absolute inset-0 rounded-full bg-slate-900 dark:bg-white"
               />
             )}
@@ -191,9 +210,9 @@ const ScreenSwap = forwardRef<HTMLDivElement, { className?: string; children?: R
     <motion.div
       ref={ref}
       className={className}
-      initial={still ? false : { opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={still ? { opacity: 0 } : { opacity: 0, y: -6 }}
+      initial={still ? false : { opacity: 0, y: 14, scale: 0.985 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={still ? { opacity: 0 } : { opacity: 0, y: -6, transition: quickOut }}
       transition={still ? { duration: 0 } : pageMove}
       {...rest}
     >
@@ -225,7 +244,7 @@ function AccountFold({ open, children }: { open: boolean; children: ReactNode })
     }
     const animation = el.animate(
       [{ height: `${from}px` }, { height: `${to}px` }],
-      { duration: 280, easing: 'cubic-bezier(0.32, 0.72, 0, 1)', fill: 'forwards' },
+      { duration: open ? 560 : 300, easing: open ? SPRING_EASE : 'cubic-bezier(0.32, 0.72, 0, 1)', fill: 'forwards' },
     );
     let alive = true;
     const finish = () => {
@@ -352,23 +371,41 @@ function sideTitle(group: PartGroup, skins: boolean): string {
   return 'Líquido';
 }
 
-function accountSides(parts: AccountPart[], skins: boolean): Side[] {
-  return GROUP_ORDER.flatMap((group) => {
-    const items = parts.filter((part) => (part.group || 'other') === group);
-    if (items.length === 0) return [];
-    const total = items.reduce((sum, item) => sum + item.eur, 0);
-    const costs = items.map((item) => item.costEur);
-    const complete = group !== 'cash' && costs.every((cost) => cost != null);
-    const invested = complete ? costs.reduce((sum: number, cost) => sum + (cost ?? 0), 0) : null;
-    return [{
-      group,
-      title: sideTitle(group, skins),
-      items,
-      total,
-      invested,
-      gain: invested == null ? null : total - invested,
-    }];
-  });
+function makeSide(group: string, title: string, items: AccountPart[], section?: ProductSection | null): Side {
+  const total = items.reduce((sum, item) => sum + item.eur, 0);
+  const costs = items.map((item) => item.costEur);
+  const complete = group !== 'cash' && costs.every((cost) => cost != null);
+  const invested = complete ? costs.reduce((sum: number, cost) => sum + (cost ?? 0), 0) : null;
+  return { group, title, items, total, invested, gain: invested == null ? null : total - invested, icon: section?.icon, hint: section?.hint };
+}
+
+function accountSides(parts: AccountPart[], name: string): Side[] {
+  const products = accountProducts(name);
+  const skins = Boolean(products.auto);
+  const sides: Side[] = [];
+  const cash = parts.filter((part) => (part.group || 'other') === 'cash');
+  if (cash.length) sides.push(makeSide('cash', products.cash?.title || 'Líquido', cash));
+  const placed = new Map<string, AccountPart[]>();
+  const loose = new Map<PartGroup, AccountPart[]>();
+  for (const part of parts) {
+    const group = (part.group || 'other') as PartGroup;
+    if (group === 'cash') continue;
+    const section = partSection(products, part);
+    if (section) placed.set(section.id, [...(placed.get(section.id) || []), part]);
+    else loose.set(group, [...(loose.get(group) || []), part]);
+  }
+  const seen = new Set<string>();
+  for (const section of products.sections) {
+    const items = placed.get(section.id);
+    if (!items || seen.has(section.id)) continue;
+    seen.add(section.id);
+    sides.push(makeSide(section.id, section.label, items, section));
+  }
+  for (const group of GROUP_ORDER) {
+    const items = loose.get(group);
+    if (items) sides.push(makeSide(group, sideTitle(group, skins), items));
+  }
+  return sides;
 }
 
 function accountGain(account: DashboardData['accounts'][number], pnl: DashboardData['pnl']): { eur: number; percent: number | null } | null {
@@ -517,12 +554,20 @@ function PieceDialog({
   const clearPreview = (next: PieceDraft): PieceDraft => ({ ...next, preview: null });
   return (
     <Modal title={piece.id ? piece.name : `Añadir en ${piece.accountName}`} onClose={() => setPiece(null)}>
+      {piece.sectionLabel && <p className="-mt-2 mb-3 text-xs font-bold uppercase tracking-widest text-slate-400">{piece.sectionLabel}</p>}
       <div className="grid gap-4">
         {pieceError && <p className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">{pieceError}</p>}
         {!piece.skins && piece.kinds.length > 1 && (
           <Field label="Tipo">
-            <select className={fieldClass} value={piece.assetClass} onChange={(event) => setPiece({ ...piece, assetClass: event.target.value, quoteSource: '', quoteId: '', preview: null })}>
-              {PIECE_CLASSES.filter((item) => piece.kinds.includes(item.id)).map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+            <select
+              className={fieldClass}
+              value={piece.kind}
+              onChange={(event) => {
+                const kind = event.target.value as ProductKind;
+                setPiece({ ...piece, kind, assetClass: kindClass(kind), quoteSource: '', quoteId: '', preview: null, followMarket: false, quantity: totalOnly(kind) ? '1' : piece.quantity });
+              }}
+            >
+              {piece.kinds.map((kind) => <option key={kind} value={kind}>{KIND_LABEL[kind]}</option>)}
             </select>
           </Field>
         )}
@@ -611,6 +656,7 @@ function PieceDialog({
                           ...piece,
                           name: hit.name,
                           assetClass: hit.kind || (hit.source === 'coingecko' ? 'crypto' : 'etf'),
+                          kind: piece.kind === 'fund' && hit.source === 'yahoo' && hit.kind !== 'stock' ? 'fund' : (hit.kind || (hit.source === 'coingecko' ? 'crypto' : 'etf')),
                           quoteSource: hit.source,
                           quoteId: hit.externalId,
                           followMarket: true,
@@ -660,7 +706,7 @@ function PieceDialog({
             )}
           </div>
         )}
-        {!market && !piece.skins && piece.assetClass !== 'personal_good' && (
+        {!market && !piece.skins && piece.assetClass !== 'personal_good' && !totalOnly(piece.kind) && (
           <Input label="Cantidad" type="number" min="0" step="any" value={piece.quantity} onChange={(event) => setPiece({ ...piece, quantity: event.target.value })} />
         )}
         {(!market || piece.id) && (
@@ -713,6 +759,8 @@ function extraWallet(items: { id: string; name: string; valueEur: number; costEu
     logoName: 'Extras',
     image: '/extras/objeto.svg',
     value: total,
+    gainEur: gain,
+    gainPct: invested > 0 && gain != null ? (gain / invested) * 100 : null,
     cash: 0,
     planId: null,
     flows: [],
@@ -773,6 +821,9 @@ export function Dashboard({ home, books }: { heroMs: number; home: number; books
   const [data, setData] = useState<DashboardData | null>(null);
   const [view, setView] = useState<'general' | 'cartera'>('general');
   const [openWallet, setOpenWallet] = useState<string | null>(null);
+  const [live, setLive] = useState<number | null>(null);
+  const [liveDay, setLiveDay] = useState<string | null>(null);
+  const [paneSlot, setPaneSlot] = useState<HTMLDivElement | null>(null);
   const [error, setError] = useState('');
   const [hidden, setHidden] = useState(() => localStorage.getItem(HIDE_KEY) === '1');
   const [adding, setAdding] = useState(false);
@@ -793,9 +844,6 @@ export function Dashboard({ home, books }: { heroMs: number; home: number; books
   const [keepAsk, setKeepAsk] = useState<{ name: string; amount: number } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const suppressClick = useRef(false);
-  const pinRef = useRef<HTMLDivElement>(null);
-  const [pinHeight, setPinHeight] = useState(0);
-
   const load = () => {
     setError('');
     return api<DashboardData>('/api/dashboard?period=30d')
@@ -845,17 +893,6 @@ export function Dashboard({ home, books }: { heroMs: number; home: number; books
   }, [books]);
 
   useEffect(() => {
-    const node = pinRef.current;
-    if (!node) return;
-    const measure = () => setPinHeight(node.offsetHeight);
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [view, openWallet, hidden, data]);
-
-  useEffect(() => {
-    if (prefersStill()) return;
     const timer = window.setInterval(() => setBeat((value) => value + 1), CYCLE_MS);
     return () => window.clearInterval(timer);
   }, []);
@@ -865,7 +902,6 @@ export function Dashboard({ home, books }: { heroMs: number; home: number; books
     return data.accounts.map((account) => {
       const gain = accountGain(account, data.pnl);
       const name = account.platform || account.name;
-      const skins = /cs2|counter-strike/i.test(name);
       return {
         key: account.id,
         name,
@@ -878,8 +914,10 @@ export function Dashboard({ home, books }: { heroMs: number; home: number; books
         fixed: account.fixed || [],
         purchases: account.planId ? (data.extras || []).filter((item) => item.boughtOn).map((item) => ({ name: item.name, amount: -Math.abs(item.costEur ?? item.valueEur), date: item.boughtOn || '', image: item.imageUrl || null })) : [],
         tracking: account.tracking,
-        sides: accountSides(account.parts || [], skins),
+        sides: accountSides(account.parts || [], name),
+        sections: account.sections || [],
         gainEur: gain?.eur ?? null,
+        gainPct: gain?.percent ?? null,
         frames: framesFor(gain?.eur ?? null, gain?.percent ?? null),
       };
     });
@@ -927,11 +965,17 @@ export function Dashboard({ home, books }: { heroMs: number; home: number; books
     }
   };
 
-  const openPiece = (row: (typeof rows)[number], item?: AccountPart, offer?: AccountOffer) => {
-    const offers = accountOffers(row.name);
-    const skins = offers.includes('skin') || /cs2|counter-strike/i.test(row.name);
-    const kinds = skins ? ['personal_good'] : offers.filter((itemOffer) => itemOffer !== 'cash' && itemOffer !== 'skin');
-    const assetClass = skins ? 'personal_good' : offer && offer !== 'cash' && offer !== 'skin' ? offer : item?.group && item.group !== 'cash' ? item.group : kinds[0] || 'crypto';
+  const openPiece = (row: (typeof rows)[number], item?: AccountPart, sectionId?: string) => {
+    const products = accountProducts(row.name);
+    const skins = Boolean(products.auto);
+    const section = sectionId
+      ? products.sections.find((part) => part.id === sectionId) || null
+      : item ? partSection(products, item) : null;
+    const every = [...new Set(products.sections.flatMap((part) => part.kinds))];
+    const kinds: ProductKind[] = skins ? ['skin'] : section ? section.kinds : every.length ? every : ['crypto', 'etf', 'stock', 'other'];
+    const itemKind = item ? kindFromClass(item.group) : null;
+    const kind: ProductKind = skins ? 'skin' : itemKind && kinds.includes(itemKind) ? itemKind : item && itemKind === 'etf' && kinds.includes('fund') ? 'fund' : item && itemKind === 'other' ? kinds.find(totalOnly) || 'other' : kinds[0];
+    const assetClass = item?.group && item.group !== 'cash' ? item.group : kindClass(kind);
     setPieceError('');
     setPieceDelete(false);
     setPiece({
@@ -959,6 +1003,9 @@ export function Dashboard({ home, books }: { heroMs: number; home: number; books
       extraSpent: '',
       preview: null,
       kinds,
+      kind,
+      section: products.auto ? '' : section?.id || '',
+      sectionLabel: section?.label || '',
     });
   };
 
@@ -1084,12 +1131,17 @@ export function Dashboard({ home, books }: { heroMs: number; home: number; books
     const ranked = skins ? withWorldRank(piece.name.trim(), piece.rank) : piece.name.trim();
     const skinQuote = linked ? { quoteSource: 'csfloat', quoteId: piece.marketName } : {};
     try {
+      const owner = rows.find((row) => row.key === piece.accountId);
+      if (!piece.id && owner?.tracking === 'balance') {
+        await api(`/api/accounts/${piece.accountId}`, { method: 'PATCH', body: JSON.stringify({ tracking: 'positions' }) });
+      }
       const saved = piece.id
         ? await api<{ holding: { _id: string; unitMarketValue: number | null } }>(`/api/holdings/${piece.id}`, {
           method: 'PATCH',
           body: JSON.stringify({
             name: ranked,
             assetClass: piece.assetClass,
+            ...(piece.section ? { section: piece.section } : {}),
             ...(addingBuy ? {} : { quantity, costBasis }),
             notes,
             ...skinQuote,
@@ -1104,6 +1156,7 @@ export function Dashboard({ home, books }: { heroMs: number; home: number; books
             name: ranked,
             symbol: '',
             assetClass: piece.assetClass,
+            section: piece.section,
             quantity,
             unitMarketValue: linked ? null : unit,
             costBasis,
@@ -1221,7 +1274,13 @@ export function Dashboard({ home, books }: { heroMs: number; home: number; books
     ? (data ? { name: 'Extras', value: extraWallet(data.extras).value, logoName: 'Extras' } : null)
     : ordered.find((row) => row.key === openWallet) || null;
   const inAccount = view === 'cartera' && Boolean(openWallet && openAccount);
-  const barValue = inAccount && openAccount ? openAccount.value : shownWorth;
+  const hideChrome = useHideChrome();
+  useEffect(() => {
+    hideChrome(inAccount);
+    if (!inAccount) setLiveDay(null);
+    return () => hideChrome(false);
+  }, [hideChrome, inAccount]);
+  const barValue = inAccount && openAccount ? (live ?? openAccount.value) : shownWorth;
   const chooseView = (next: 'general' | 'cartera') => {
     setView(next);
     setOpenWallet(null);
@@ -1234,23 +1293,36 @@ export function Dashboard({ home, books }: { heroMs: number; home: number; books
     });
   };
   const pin = (
-    <div ref={pinRef} className="sticky top-0 z-30 -mx-4 flex flex-col gap-2 bg-[var(--app-bg)] px-4 py-2 md:-mx-8 md:px-8">
-      <div className="order-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-        <div className="flex min-w-0 items-center gap-1">
-          <p className={cn('min-w-0 whitespace-nowrap text-[clamp(1.45rem,7.2vw,2rem)] font-black leading-none tabular-nums', hidden || inAccount ? 'text-slate-900 dark:text-white' : totalClass)}>
-            {barValue == null ? '—' : <RisingAmount value={barValue} hidden={hidden} card />}
-          </p>
-          <button
-            type="button"
-            onClick={toggleHidden}
-            aria-pressed={hidden}
-            aria-label={hidden ? 'Mostrar importes' : 'Ocultar importes'}
-            className="grid h-8 w-8 shrink-0 place-items-center rounded-xl text-slate-400"
-          >
-            {hidden ? <EyeOff size={16} /> : <Eye size={16} />}
-          </button>
+    <div className="sticky top-0 z-30 -mx-4 flex flex-col gap-2 bg-[var(--app-bg)] px-4 py-2 md:-mx-8 md:px-8">
+      <div className="order-2 min-w-0">
+        <div className="flex items-center justify-between gap-x-3 gap-y-2">
+          <div className="flex min-w-0 items-center gap-1">
+            <p className={cn('min-w-0 whitespace-nowrap text-[clamp(1.45rem,7.2vw,2rem)] font-black leading-none tabular-nums', hidden || inAccount ? 'text-slate-900 dark:text-white' : totalClass)}>
+              {barValue == null ? '—' : inAccount ? (hidden ? '*****' : formatEur(barValue)) : <RisingAmount value={barValue} hidden={hidden} card />}
+            </p>
+            <button
+              type="button"
+              onClick={toggleHidden}
+              aria-pressed={hidden}
+              aria-label={hidden ? 'Mostrar importes' : 'Ocultar importes'}
+              className="grid h-8 w-8 shrink-0 place-items-center rounded-xl text-slate-400"
+            >
+              {hidden ? <EyeOff size={16} /> : <Eye size={16} />}
+            </button>
+          </div>
+          {!inAccount && <ViewSwitch value={view} onChange={chooseView} />}
+          {inAccount && <div ref={setPaneSlot} className="shrink-0" />}
         </div>
-        <ViewSwitch value={view} onChange={chooseView} />
+        {inAccount && liveDay && (
+          <motion.p
+            className="mt-1.5 text-[13px] font-semibold text-slate-400"
+            initial={window.matchMedia('(prefers-reduced-motion: reduce)').matches ? false : { opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={jelly}
+          >
+            {formatDay(liveDay)}
+          </motion.p>
+        )}
       </div>
       {inAccount && openAccount && (
         <div className="order-1 flex items-center gap-2">
@@ -1277,15 +1349,21 @@ export function Dashboard({ home, books }: { heroMs: number; home: number; books
         ) : (
           <Wallets
             hidden={hidden}
+            beat={beat}
             openId={openWallet}
-            stickTop={pinHeight}
+            paneSlot={paneSlot}
             onOpen={setOpenWallet}
+            onFigure={setLive}
+            onDay={setLiveDay}
             accounts={[...ordered.map((row) => ({
               key: row.key,
               name: row.name,
               logoName: row.logoName,
-              offers: accountOffers(row.name),
+              products: accountProducts(row.name),
+              sections: row.sections,
               value: row.value,
+              gainEur: row.gainEur,
+              gainPct: row.gainPct,
               cash: row.cash,
               planId: row.planId,
               flows: row.flows,
@@ -1297,7 +1375,8 @@ export function Dashboard({ home, books }: { heroMs: number; home: number; books
                 total: side.total,
                 invested: side.invested,
                 gain: side.gain,
-                items: side.items.map((item) => ({ id: item.id || undefined, label: item.label, eur: item.eur, detail: item.detail, image: item.image, costEur: item.costEur ?? null, moves: item.moves || [] })),
+                icon: side.icon,
+                items: side.items.map((item) => ({ id: item.id || undefined, label: item.label, eur: item.eur, detail: item.detail, image: item.image, costEur: item.costEur ?? null, group: item.group, moves: item.moves || [] })),
               })),
             })), extraWallet(data.extras)]}
             onSaved={load}
@@ -1317,14 +1396,18 @@ export function Dashboard({ home, books }: { heroMs: number; home: number; books
                 }
               }
             }}
-            onAdd={(key, offer) => {
+            onAdd={(key, section) => {
               if (key === 'extras') {
                 setExtraError('');
                 setExtraDraft(blankExtra());
                 return;
               }
               const row = ordered.find((item) => item.key === key);
-              if (row) openPiece(row, undefined, offer);
+              if (row) openPiece(row, undefined, section);
+            }}
+            onSections={async (key, sections) => {
+              await api(`/api/accounts/${key}`, { method: 'PATCH', body: JSON.stringify({ sections }) });
+              await load();
             }}
           />
         )}
@@ -1430,7 +1513,7 @@ export function Dashboard({ home, books }: { heroMs: number; home: number; books
           </div>
         )}
         {ordered.map((row, index) => {
-          const frame = prefersStill() ? row.frames[0] : row.frames[beat % row.frames.length];
+          const frame = row.frames[beat % row.frames.length];
           const open = openKey === row.key;
           return (
             <motion.div key={row.key} initial={prefersStill() ? false : { opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={prefersStill() ? { duration: 0 } : { ...glide, delay: Math.min(index, 5) * 0.04 }}>
@@ -1479,48 +1562,34 @@ export function Dashboard({ home, books }: { heroMs: number; home: number; books
                       <span className="truncate">{row.name}</span>
                       <ChevronRight size={14} className="shrink-0 opacity-50" />
                     </button>
-                    {prefersStill() && (
-                      <span className={cn('ml-auto shrink-0 text-[11px] font-black tabular-nums sm:hidden', hidden ? 'text-slate-400' : frame.className)}>
+                    {narrowScreen() && (
+                      <Flip id={hidden ? 'hidden' : frame.text} className={cn('ml-auto shrink-0 text-[11px] font-black tabular-nums sm:hidden', hidden ? 'text-slate-400' : frame.className)}>
                         {mask(frame.text)}
-                      </span>
+                      </Flip>
                     )}
                   </span>
                   <span className="mt-0.5 block whitespace-nowrap text-[clamp(1rem,5.2vw,1.75rem)] font-black leading-none tabular-nums text-slate-900 dark:text-white sm:text-[28px]">
                     {row.value == null ? '—' : <RisingAmount value={row.value} hidden={hidden} card delay={40} />}
                   </span>
                 </span>
-                {prefersStill() ? (
-                  <span className={cn('hidden shrink-0 text-right text-xs font-black tabular-nums leading-tight sm:inline sm:text-base', hidden ? 'text-slate-400' : frame.className)}>
+                {narrowScreen() ? (
+                  <Flip id={hidden ? 'hidden' : frame.text} className={cn('hidden shrink-0 text-right text-xs font-black tabular-nums leading-tight sm:inline sm:text-base', hidden ? 'text-slate-400' : frame.className)}>
                     {mask(frame.text)}
-                  </span>
+                  </Flip>
                 ) : (
                   <AnimatePresence mode="wait">
                     <motion.span
                       key={hidden ? 'hidden' : frame.text}
-                      initial={{ opacity: 0, y: 8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -8 }}
-                      transition={glide}
-                      className={cn('shrink-0 text-sm font-black tabular-nums sm:text-base', hidden ? 'text-slate-400' : frame.className)}
+                      initial={{ opacity: 0, y: 8, scale: 0.85 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: -8, scale: 0.9, transition: quickOut }}
+                      transition={jelly}
+                      className={cn('inline-block shrink-0 text-sm font-black tabular-nums sm:text-base', hidden ? 'text-slate-400' : frame.className)}
                     >
                       {mask(frame.text)}
                     </motion.span>
                   </AnimatePresence>
                 )}
-                <button
-                  type="button"
-                  aria-label="Editar o eliminar"
-                  onPointerDown={(event) => event.stopPropagation()}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    setConfirmDelete(false);
-                    const rect = event.currentTarget.getBoundingClientRect();
-                    setMenu({ id: row.key, name: row.name, cash: row.cash, ...placeMenu(rect.left + rect.width / 2, rect.top) });
-                  }}
-                  className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-slate-400"
-                >
-                  <MoreHorizontal size={16} />
-                </button>
               </div>
               <AccountFold open={open}>
                 <ul className="mt-2 space-y-1 rounded-[28px] border border-white/70 bg-white/45 px-4 py-3 shadow-[0_8px_32px_rgba(15,23,42,0.06)] backdrop-blur-2xl dark:border-white/10 dark:bg-white/10">
@@ -1529,7 +1598,7 @@ export function Dashboard({ home, books }: { heroMs: number; home: number; books
                       <li key={side.group} className="border-t border-slate-200/80 pt-2 first:border-t-0 first:pt-0 dark:border-white/10">
                         {side.group === 'cash' ? (
                           <div className="flex items-center justify-between gap-3 text-sm font-semibold text-slate-500">
-                            <span>Líquido</span>
+                            <span>{side.title}</span>
                             <span className="font-black tabular-nums text-slate-800 dark:text-slate-100">
                               <RisingAmount value={side.total} hidden={hidden} />
                             </span>
@@ -1616,9 +1685,8 @@ export function Dashboard({ home, books }: { heroMs: number; home: number; books
           onClick={() => setAdding(true)}
           initial={prefersStill() ? false : { opacity: 0, y: 18 }}
           animate={{ opacity: 1, y: 0 }}
-          whileTap={{ scale: 0.985 }}
-          transition={prefersStill() ? softSpring : { ...glide, delay: 0.06 }}
-          className="motion-squish flex w-full items-center gap-3 rounded-[28px] border border-dashed border-slate-300/90 bg-white/40 px-5 py-3.5 text-left text-slate-600 backdrop-blur-xl hover:bg-white/70 dark:border-white/15 dark:bg-white/5 dark:text-slate-300"
+          transition={prefersStill() ? { duration: 0 } : { ...glide, delay: 0.06 }}
+          className="flex w-full items-center gap-3 rounded-[28px] border border-dashed border-slate-300/90 bg-white/40 px-5 py-3.5 text-left text-slate-600 backdrop-blur-xl hover:bg-white/70 dark:border-white/15 dark:bg-white/5 dark:text-slate-300"
         >
           <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-slate-300/80 dark:border-white/15">
             <Plus size={15} />

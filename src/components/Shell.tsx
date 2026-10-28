@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { motion } from 'motion/react';
 import { LayoutDashboard, Target, Settings, ArrowLeftRight, LineChart } from 'lucide-react';
 import { FixedCheck } from '@/components/FixedCheck';
@@ -18,6 +18,13 @@ const ITEMS = [
 
 export type Section = (typeof ITEMS)[number]['id'] | 'settings';
 
+const ChromeHidden = createContext<(hidden: boolean) => void>(() => {});
+
+/** Oculta la barra de Balance mientras se está dentro de una cartera. */
+export function useHideChrome() {
+  return useContext(ChromeHidden);
+}
+
 export function Shell({
   section,
   onChange,
@@ -33,6 +40,8 @@ export function Shell({
 }) {
   const [dueNonce, setDueNonce] = useState(0);
   const [dueKey, setDueKey] = useState<string | null>(null);
+  const [bare, setBare] = useState(false);
+  const hideChrome = useCallback((hidden: boolean) => setBare(hidden), []);
   const scrollRef = useRef<HTMLElement>(null);
   const bandRef = useRef<HTMLDivElement>(null);
 
@@ -70,11 +79,13 @@ export function Shell({
       band.style.transform = '';
       band.animate(
         [
-          { transform: `translate3d(0, ${from}px, 0)` },
-          { transform: `translate3d(0, ${-from * 0.04}px, 0)`, offset: 0.82 },
+          { transform: `translate3d(0, ${from}px, 0)`, easing: 'cubic-bezier(0.3, 0.7, 0.4, 1)' },
+          { transform: `translate3d(0, ${-from * 0.14}px, 0)`, offset: 0.4, easing: 'ease-in-out' },
+          { transform: `translate3d(0, ${from * 0.05}px, 0)`, offset: 0.68, easing: 'ease-in-out' },
+          { transform: `translate3d(0, ${-from * 0.015}px, 0)`, offset: 0.86, easing: 'ease-in-out' },
           { transform: 'translate3d(0, 0, 0)' },
         ],
-        { duration: 780, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' },
+        { duration: 900 },
       );
     };
     const onTouchStart = (event: TouchEvent) => begin(event.touches[0]?.clientY ?? 0);
@@ -92,30 +103,35 @@ export function Shell({
   }, []);
 
   return (
+    <ChromeHidden.Provider value={hideChrome}>
     <div className="relative flex h-dvh flex-col overflow-hidden bg-[var(--app-bg)] text-[var(--app-text)]">
-      <header className="flex shrink-0 items-center gap-3 px-4 pb-2 pt-[max(0.75rem,env(safe-area-inset-top))] md:px-8">
-        <span className="grid h-9 w-9 place-items-center rounded-xl bg-indigo-600 text-white">
-          <Mark size={22} />
-        </span>
-        <div className="min-w-0">
-          <p className="font-black leading-none">Balance</p>
-          <p className="mt-0.5 truncate text-[11px] font-medium text-slate-400">{user.name}</p>
-        </div>
-        <div className="ml-auto flex items-center gap-1">
-          <InstallApp compact />
-          <NotificationsBell align="right" onDue={(quoteKey) => { setDueKey(quoteKey); setDueNonce((value) => value + 1); }} />
-          <button
-            type="button"
-            onClick={() => onChange('settings')}
-            className={cn('rounded-full p-2', section === 'settings' ? 'text-indigo-700 dark:text-white' : 'text-slate-400 hover:text-slate-700 dark:hover:text-slate-200')}
-            aria-label="Ajustes"
-          >
-            <Settings size={18} />
-          </button>
+      <header aria-hidden={bare} className={cn('grid shrink-0 transition-[grid-template-rows,opacity] duration-300 ease-out', bare ? 'pointer-events-none grid-rows-[0fr] opacity-0' : 'grid-rows-[1fr] opacity-100')}>
+        <div className="min-h-0 overflow-hidden">
+          <div className="flex items-center gap-3 px-4 pb-2 pt-[max(0.75rem,env(safe-area-inset-top))] md:px-8">
+            <span className="grid h-9 w-9 place-items-center rounded-xl bg-indigo-600 text-white">
+              <Mark size={22} />
+            </span>
+            <div className="min-w-0">
+              <p className="font-black leading-none">Balance</p>
+              <p className="mt-0.5 truncate text-[11px] font-medium text-slate-400">{user.name}</p>
+            </div>
+            <div className="ml-auto flex items-center gap-1">
+              <InstallApp compact />
+              <NotificationsBell align="right" onDue={(quoteKey) => { setDueKey(quoteKey); setDueNonce((value) => value + 1); }} />
+              <button
+                type="button"
+                onClick={() => onChange('settings')}
+                className={cn('rounded-full p-2', section === 'settings' ? 'text-indigo-700 dark:text-white' : 'text-slate-400 hover:text-slate-700 dark:hover:text-slate-200')}
+                aria-label="Ajustes"
+              >
+                <Settings size={18} />
+              </button>
+            </div>
+          </div>
         </div>
       </header>
       <FixedCheck nonce={dueNonce} focusKey={dueKey} onSettled={onSettled} />
-      <main ref={scrollRef} className="app-scroll min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-4 py-2 md:px-8">
+      <main ref={scrollRef} className={cn('app-scroll min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-4 py-2 md:px-8', bare && 'pt-[max(0.75rem,env(safe-area-inset-top))]')}>
         <div ref={bandRef} className="origin-center will-change-transform">
           {children}
         </div>
@@ -155,5 +171,6 @@ export function Shell({
         </div>
       </div>
     </div>
+    </ChromeHidden.Provider>
   );
 }

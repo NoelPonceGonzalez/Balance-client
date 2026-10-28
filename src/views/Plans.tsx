@@ -3,14 +3,14 @@ import { bindHold, HoldMenu, holdItemClass, placeMenu } from '@/components/HoldM
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'motion/react';
 import { Banknote, Check, ChevronLeft, GripVertical, ImageIcon, MoreHorizontal, Pencil, Plus, Trash2 } from 'lucide-react';
-import { ModalClose, modalOverlayClass, modalPanelClass } from '@/components/Modal';
+import { ModalClose, modalPanelClass, Overlay } from '@/components/Modal';
 import { OriginGlyph, OriginPicker } from '@/components/OriginMark';
 import { PlatformLogo } from '@/components/PlatformLogo';
 import { QuietLoad } from '@/components/QuietLoad';
 import { Button } from '@/components/ui/Button';
 import { Input, fieldClass } from '@/components/ui/Input';
 import { api } from '@/lib/api';
-import { glide } from '@/lib/motion';
+import { jelly, quickOut } from '@/lib/motion';
 import { formatEur, formatSignedEur } from '@/lib/format';
 import { planImageFileName, renderPlanPng } from '@/lib/plan-image';
 import { cn, docId } from '@/lib/utils';
@@ -183,18 +183,18 @@ function PlanCorner({ balance, target, delta, beat }: { balance: number; target:
   if (delta != null && Math.abs(delta) > 0.5) {
     frames.push({ text: formatSignedEur(delta), className: delta > 0 ? 'text-[#16c784]' : 'text-[#ea3943]' });
   }
-  const still = window.matchMedia('(max-width: 767px)').matches || window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const frame = still ? frames[0] : frames[beat % frames.length];
+  const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const frame = frames[beat % frames.length];
   if (still) return <span className={cn('shrink-0 text-xs font-black tabular-nums', frame.className)}>{frame.text}</span>;
   return (
     <AnimatePresence mode="wait">
       <motion.span
         key={frame.text}
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: -8 }}
-        transition={glide}
-        className={cn('shrink-0 text-sm font-black tabular-nums', frame.className)}
+        initial={{ opacity: 0, y: 8, scale: 0.85 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: -8, scale: 0.9, transition: quickOut }}
+        transition={jelly}
+        className={cn('inline-block shrink-0 text-sm font-black tabular-nums', frame.className)}
       >
         {frame.text}
       </motion.span>
@@ -318,7 +318,6 @@ export function Plans({ embedded = false, books = 0 }: { embedded?: boolean; boo
   };
 
   useEffect(() => {
-    if (window.matchMedia('(max-width: 767px)').matches || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
     const timer = window.setInterval(() => setBeat((value) => value + 1), 5000);
     return () => window.clearInterval(timer);
   }, []);
@@ -363,6 +362,7 @@ export function Plans({ embedded = false, books = 0 }: { embedded?: boolean; boo
   const lookingAhead = Boolean(forecast?.today && previewDay && previewDay > forecast.today);
   const shownMonths = lookingAhead && reachedDay ? walkMonths(months, reachedDay, openingBalance) : months;
   const shownBalance = lookingAhead && reachedDay ? walkedBalance(months, reachedDay, openingBalance) : todayBalance;
+  const finished = forecast?.today && plan ? completion(months, forecast.today, openingBalance, plan.targetAmount) : null;
   const linked = accounts.filter((account) => (plan?.linkedAccountIds || []).map(String).includes(String(account._id)) && !account.archived);
   const payday = accounts.find((account) => String(account._id) === String(plan?.salaryAccountId) && !account.archived) || (linked.length === 1 ? linked[0] : undefined);
   const liquidity = linked[0];
@@ -680,7 +680,11 @@ export function Plans({ embedded = false, books = 0 }: { embedded?: boolean; boo
             <div className="h-1.5 overflow-hidden rounded-full bg-slate-900/10 dark:bg-white/15">
               <div className="h-full rounded-full bg-slate-900/75 transition-[width] duration-700 ease-out dark:bg-white" style={{ width: `${barWidth(shownBalance, plan.targetAmount)}%` }} />
             </div>
-            <p className={cn('mt-2 text-xs font-bold leading-snug', monthPace(forecast?.extraMonths).className)}>{monthPace(forecast?.extraMonths).text}</p>
+            {finished ? (
+              <p className="mt-2 inline-flex items-center gap-1 text-xs font-black text-[#16c784]"><Check size={13} strokeWidth={3} /> Completado el {shortDay(finished.day)}</p>
+            ) : (
+              <p className={cn('mt-2 text-xs font-bold leading-snug', monthPace(forecast?.extraMonths).className)}>{monthPace(forecast?.extraMonths).text}</p>
+            )}
           </div>
         </div>
       )}
@@ -689,9 +693,12 @@ export function Plans({ embedded = false, books = 0 }: { embedded?: boolean; boo
       {ready && !selected && (
         <div className="grid grid-cols-1 gap-3 min-[480px]:grid-cols-2">
           {items.map((item) => {
-            const id = docId(item.plan);
             const opening = item.forecast.months?.[0]?.lines[0]?.balance ?? item.plan.openingBalance ?? 0;
-            const balance = item.forecast.today ? balanceAsOf(item.forecast.months || [], item.forecast.today, opening) : opening;
+            const done = item.forecast.today ? completion(item.forecast.months || [], item.forecast.today, opening, item.plan.targetAmount) : null;
+            return { item, opening, done };
+          }).sort((a, b) => Number(Boolean(a.done)) - Number(Boolean(b.done))).map(({ item, opening, done }) => {
+            const id = docId(item.plan);
+            const balance = done ? done.balance : item.forecast.today ? balanceAsOf(item.forecast.months || [], item.forecast.today, opening) : opening;
             const site = accounts.find((account) => (item.plan.linkedAccountIds || []).map(String).includes(String(account._id)) && !account.archived);
             const pace = surprisePace(item.plan);
             const delta = item.plan.kind === 'inversion' ? pace.ahead - pace.behind : null;
@@ -735,15 +742,21 @@ export function Plans({ embedded = false, books = 0 }: { embedded?: boolean; boo
                       <MoreHorizontal size={15} />
                     </button>
                   </span>
-                  <PlanCorner balance={balance} target={item.plan.targetAmount} delta={delta} beat={beat} />
+                  {done ? (
+                    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[#16c784]/12 px-2 py-0.5 text-[11px] font-black text-[#16c784]">
+                      <Check size={12} strokeWidth={3} /> Completado
+                    </span>
+                  ) : (
+                    <PlanCorner balance={balance} target={item.plan.targetAmount} delta={delta} beat={beat} />
+                  )}
                 </span>
                 <span className="mt-2 block text-[11px] font-semibold text-slate-400">{kindLabel(item.plan)}</span>
                 <span className="mt-1 block whitespace-nowrap text-[clamp(1.35rem,6.2vw,1.85rem)] font-black leading-none tabular-nums sm:text-[28px]"><SoftEur value={balance} /></span>
                 <span className="mt-3 block h-1.5 overflow-hidden rounded-full bg-slate-200/80 dark:bg-white/10">
-                  <span className="block h-full rounded-full bg-slate-800 transition-[width] duration-700 dark:bg-white" style={{ width: `${barWidth(balance, item.plan.targetAmount)}%` }} />
+                  <span className={cn('block h-full rounded-full transition-[width] duration-700', done ? 'bg-[#16c784]' : 'bg-slate-800 dark:bg-white')} style={{ width: `${barWidth(balance, item.plan.targetAmount)}%` }} />
                 </span>
                 <span className="mt-2 flex items-center justify-between gap-2">
-                  <span className="text-[11px] font-semibold text-slate-400">de {formatEur(item.plan.targetAmount)}</span>
+                  <span className="text-[11px] font-semibold text-slate-400">{done ? `Llegó el ${shortDay(done.day)}` : `de ${formatEur(item.plan.targetAmount)}`}</span>
                   <button
                     type="button"
                     onPointerDown={(event) => event.stopPropagation()}
@@ -916,7 +929,7 @@ export function Plans({ embedded = false, books = 0 }: { embedded?: boolean; boo
         </article>
       )}
       {keepAsk && (
-        <div className={modalOverlayClass} onClick={() => setKeepAsk(null)}>
+        <Overlay onClose={() => setKeepAsk(null)}>
           <div className={cn(modalPanelClass, 'max-w-md')} onClick={(event) => event.stopPropagation()}>
             <div className="mb-4 flex items-center justify-between gap-4">
               <h3 className="text-[17px] font-semibold">¿Lo guardas?</h3>
@@ -928,10 +941,10 @@ export function Plans({ embedded = false, books = 0 }: { embedded?: boolean; boo
               <Button variant="secondary" onClick={() => setKeepAsk(null)}>No, era un gasto</Button>
             </div>
           </div>
-        </div>
+        </Overlay>
       )}
       {sheet && (
-        <div className={modalOverlayClass} onClick={closeSheet}>
+        <Overlay onClose={closeSheet}>
           <div className={cn(modalPanelClass, 'flex max-w-md flex-col')} onClick={(event) => event.stopPropagation()}>
             <div className="mb-3 flex items-center justify-between gap-4">
               <h3 className="text-[17px] font-semibold">Imagen del plan</h3>
@@ -946,10 +959,10 @@ export function Plans({ embedded = false, books = 0 }: { embedded?: boolean; boo
               <Button className="flex-1" onClick={saveSheet}>Guardar</Button>
             </div>
           </div>
-        </div>
+        </Overlay>
       )}
       {draft && (
-        <div className={modalOverlayClass} onClick={() => setDraft(null)}>
+        <Overlay onClose={() => setDraft(null)}>
           <div
             className={cn(modalPanelClass, 'max-w-md')}
             onClick={(event) => event.stopPropagation()}
@@ -1060,10 +1073,10 @@ export function Plans({ embedded = false, books = 0 }: { embedded?: boolean; boo
               {shaped && <Button onClick={() => void save()}>Guardar plan</Button>}
             </div>
           </div>
-        </div>
+        </Overlay>
       )}
       {editor && (
-        <div className={modalOverlayClass} onClick={() => setEditor(null)}>
+        <Overlay onClose={() => setEditor(null)}>
           <div className={cn(modalPanelClass, 'max-w-md')} onClick={(event) => event.stopPropagation()}>
             <div className="mb-4 flex items-center justify-between gap-4">
               <h3 className="text-[17px] font-semibold">Apunte</h3>
@@ -1088,7 +1101,7 @@ export function Plans({ embedded = false, books = 0 }: { embedded?: boolean; boo
               </div>
             </div>
           </div>
-        </div>
+        </Overlay>
       )}
     </div>
   );
@@ -1114,6 +1127,18 @@ function balanceAsOf(months: PlanMonthView[], day: string, opening: number): num
     }
   }
   return balance;
+}
+
+function completion(months: PlanMonthView[], day: string, opening: number, target: number): { day: string; balance: number } | null {
+  if (!(target > 0)) return null;
+  if (opening >= target) return { day: months[0]?.lines.find((line) => line.day)?.day || day, balance: opening };
+  for (const month of months) {
+    for (const line of month.lines) {
+      if (!line.day || !(line.day <= day || line.paid)) continue;
+      if (line.balance >= target) return { day: line.day, balance: line.balance };
+    }
+  }
+  return null;
 }
 
 function roundCents(value: number): number {
@@ -1170,7 +1195,7 @@ function SoftEur({ value, signed = false }: { value: number; signed?: boolean })
   useEffect(() => {
     const start = from.current;
     if (start === value) return;
-    if (window.matchMedia('(max-width: 767px)').matches || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
       from.current = value;
       setShown(value);
       return;
@@ -1275,6 +1300,7 @@ function PlanLine({ line, index, lifted, today, ahead, until, image, onMark, onO
               drop();
               point.current.held = true;
               node.classList.add('hold-pop');
+              node.dataset.held = '1';
               if (navigator.vibrate) navigator.vibrate(10);
               if (ref.current) onOpenMenu(line, ref.current.getBoundingClientRect());
             }, 420);

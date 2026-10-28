@@ -1,7 +1,7 @@
 import { useEffect, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { motion } from 'motion/react';
-import { glide } from '@/lib/motion';
+import { softSpring } from '@/lib/motion';
 import { cn } from '@/lib/utils';
 
 export const modalOverlayClass =
@@ -23,6 +23,23 @@ export function ModalClose({ onClose }: { onClose: () => void }) {
   );
 }
 
+/** Fondo del modal pintado en `body`, para que quede centrado en la pantalla aunque el padre tenga transform. */
+export function Overlay({ onClose, className, children }: { onClose: () => void; className?: string; children: ReactNode }) {
+  useEffect(() => {
+    const scroller = document.querySelector('.app-scroll');
+    if (!(scroller instanceof HTMLElement)) return;
+    const previous = scroller.style.overflow;
+    scroller.style.overflow = 'hidden';
+    return () => { scroller.style.overflow = previous; };
+  }, []);
+  return createPortal(
+    <div className={cn(modalOverlayClass, className)} onClick={onClose}>
+      {children}
+    </div>,
+    document.body,
+  );
+}
+
 export function Modal({ title, onClose, children, wide }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
   useEffect(() => {
     const scroller = document.querySelector('.app-scroll');
@@ -38,9 +55,9 @@ export function Modal({ title, onClose, children, wide }: { title: string; onClo
         onClick={(event) => event.stopPropagation()}
         role="dialog"
         aria-labelledby="modal-title"
-        initial={{ opacity: 0, scale: 0.98, y: 10 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        transition={glide}
+        initial={{ opacity: 0, scaleX: 0.86, scaleY: 0.8, y: 28 }}
+        animate={{ opacity: 1, scaleX: 1, scaleY: 1, y: 0 }}
+        transition={{ ...softSpring, opacity: { duration: 0.18 } }}
       >
         <div className="mb-5 flex items-center justify-between gap-4">
           <h2 id="modal-title" className="min-w-0 break-words text-[17px] font-semibold leading-snug tracking-tight text-slate-900 dark:text-white">{title}</h2>
