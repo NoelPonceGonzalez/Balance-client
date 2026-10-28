@@ -5,7 +5,7 @@ import { formatAgo } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import type { AppNotification } from '@/lib/types';
 
-export function NotificationsBell({ align = 'left' }: { align?: 'left' | 'right' }) {
+export function NotificationsBell({ align = 'left', onDue }: { align?: 'left' | 'right'; onDue?: (quoteKey: string) => void }) {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<AppNotification[]>([]);
   const [permission, setPermission] = useState<NotificationPermission>(typeof Notification === 'undefined' ? 'denied' : Notification.permission);
@@ -73,14 +73,29 @@ export function NotificationsBell({ align = 'left' }: { align?: 'left' | 'right'
             </button>
           )}
           <div className="max-h-80 space-y-2 overflow-y-auto">
-            {items.length === 0 && <p className="px-1 py-3 text-sm font-medium text-slate-500">Cuando una inversión cruce el umbral, el aviso aparece aquí.</p>}
-            {items.map((item) => (
-              <article key={item.id} className={cn('rounded-2xl px-3 py-2', item.read ? 'bg-transparent' : 'bg-slate-50 dark:bg-slate-900')}>
-                <p className={cn('text-sm font-black', item.direction === 'up' ? 'text-[#16c784]' : item.direction === 'due' ? 'text-slate-800 dark:text-white' : 'text-[#ea3943]')}>{item.title}</p>
-                <p className="text-xs font-medium text-slate-500">{item.body}</p>
-                <p className="mt-1 text-[11px] font-bold text-slate-400">{formatAgo(item.createdAt)}</p>
-              </article>
-            ))}
+            {items.length === 0 && <p className="px-1 py-3 text-sm font-medium text-slate-500">Aquí salen los pagos y los ingresos que tocan, y si una inversión cruza el umbral.</p>}
+            {items.map((item) => {
+              const openDue = item.direction === 'due' && item.quoteKey && onDue;
+              const body = (
+                <>
+                  <p className={cn('text-sm font-black', item.direction === 'up' ? 'text-[#16c784]' : item.direction === 'due' ? 'text-slate-800 dark:text-white' : 'text-[#ea3943]')}>{item.title}</p>
+                  <p className="text-xs font-medium text-slate-500">{item.body}</p>
+                  <p className="mt-1 text-[11px] font-bold text-slate-400">{formatAgo(item.createdAt)}</p>
+                </>
+              );
+              if (openDue) {
+                return (
+                  <button key={item.id} type="button" onClick={() => { setOpen(false); onDue(item.quoteKey as string); }} className={cn('block w-full rounded-2xl px-3 py-2 text-left', item.read ? 'bg-transparent' : 'bg-slate-50 dark:bg-slate-900')}>
+                    {body}
+                  </button>
+                );
+              }
+              return (
+                <article key={item.id} className={cn('rounded-2xl px-3 py-2', item.read ? 'bg-transparent' : 'bg-slate-50 dark:bg-slate-900')}>
+                  {body}
+                </article>
+              );
+            })}
           </div>
         </div>
       )}

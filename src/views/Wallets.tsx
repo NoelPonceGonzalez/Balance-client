@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { motion } from 'motion/react';
 import { Check, ChevronLeft, ChevronRight, Plus, Search, Trash2 } from 'lucide-react';
 import { PlatformLogo } from '@/components/PlatformLogo';
 import { SpendIcon } from '@/components/SpendIcon';
@@ -8,7 +9,9 @@ import { Input } from '@/components/ui/Input';
 import { api, ApiError } from '@/lib/api';
 import { OriginGlyph, OriginPicker } from '@/components/OriginMark';
 import { formatDay, formatEur, formatNumber, formatPct, formatSignedEur } from '@/lib/format';
+import { glide } from '@/lib/motion';
 import { cn } from '@/lib/utils';
+import type { AccountOffer } from '@/lib/platforms';
 
 export interface CarteraMove {
   at: string;
@@ -66,6 +69,7 @@ export interface CarteraAccount {
   fixed: FixedRule[];
   purchases?: { name: string; amount: number; date: string; image?: string | null }[];
   sides: CarteraSide[];
+  offers?: AccountOffer[];
   extras?: boolean;
   image?: string | null;
 }
@@ -339,10 +343,6 @@ function ActivityList({ rows, hidden, mode }: { rows: Activity[]; hidden: boolea
   );
 }
 
-function laneClass(on: boolean): string {
-  return cn('inline-flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-[13px] font-bold', on ? 'bg-white/80 text-slate-900 shadow-sm dark:bg-white/15 dark:text-white' : 'text-slate-500');
-}
-
 function sideCaption(group: string): string {
   if (group === 'crypto') return 'Criptomonedas, cada moneda';
   if (group === 'etf') return 'ETF, cada uno';
@@ -351,29 +351,12 @@ function sideCaption(group: string): string {
   return 'Cada cosa por separado';
 }
 
-function bookChapters(sides: CarteraSide[]): { id: string; title: string; caption: string; sides: CarteraSide[] }[] {
-  const chapters: { id: string; title: string; caption: string; sides: CarteraSide[] }[] = [];
-  const crypto = sides.filter((side) => side.group === 'crypto');
-  if (crypto.length) {
-    const names = crypto.flatMap((side) => side.items.map((item) => item.label)).filter(Boolean);
-    chapters.push({ id: 'crypto', title: 'Wallet cripto', caption: names.join(' · ') || 'Criptomonedas', sides: crypto });
-  }
-  const valores = sides.filter((side) => side.group === 'etf' || side.group === 'stock');
-  if (valores.length) chapters.push({ id: 'valores', title: 'Cuenta de valores', caption: valores.map((side) => side.title).join(' · '), sides: valores });
-  for (const side of sides) {
-    if (side.group === 'crypto' || side.group === 'etf' || side.group === 'stock') continue;
-    chapters.push({ id: side.group, title: side.title, caption: sideCaption(side.group), sides: [side] });
-  }
-  return chapters;
-}
-
-export function Wallets({ accounts, hidden, openId, stickTop = 0, onOpen, onAdd, onSaved, onKeep, onEditExtra }: { accounts: CarteraAccount[]; hidden: boolean; openId: string | null; stickTop?: number; onOpen: (id: string | null) => void; onAdd?: (accountKey: string) => void; onSaved?: () => Promise<void> | void; onKeep?: (name: string, amount: number) => void; onEditExtra?: (id: string) => void }) {
+export function Wallets({ accounts, hidden, openId, stickTop = 0, onOpen, onAdd, onSaved, onKeep, onEditExtra }: { accounts: CarteraAccount[]; hidden: boolean; openId: string | null; stickTop?: number; onOpen: (id: string | null) => void; onAdd?: (accountKey: string, offer?: AccountOffer) => void; onSaved?: () => Promise<void> | void; onKeep?: (name: string, amount: number) => void; onEditExtra?: (id: string) => void }) {
   const [notes, setNotes] = useState<WalletRow[]>([]);
   const [error, setError] = useState('');
   const [entryDraft, setEntryDraft] = useState<EntryDraft | null>(null);
+  const [entryMore, setEntryMore] = useState(false);
   const [fixedDraft, setFixedDraft] = useState<FixedDraft | null>(null);
-  const [place, setPlace] = useState<'efectivo' | 'cartera'>('efectivo');
-  const [focus, setFocus] = useState<string | null>(null);
   const [ledger, setLedger] = useState<null | 'cash' | 'moves'>(null);
   const [detail, setDetail] = useState<{ label: string; note: string; amount: number; image?: string | null } | null>(null);
 
@@ -411,8 +394,6 @@ export function Wallets({ accounts, hidden, openId, stickTop = 0, onOpen, onAdd,
   }, []);
 
   useEffect(() => {
-    setPlace('efectivo');
-    setFocus(null);
     setLedger(null);
     setDetail(null);
   }, [openId]);
@@ -477,22 +458,15 @@ export function Wallets({ accounts, hidden, openId, stickTop = 0, onOpen, onAdd,
     return walked.sort((a, b) => b.day.localeCompare(a.day) || a.label.localeCompare(b.label));
   })();
   const cashSide = current?.sides.find((side) => side.group === 'cash') ?? null;
-  const chapters = bookChapters((current?.sides || []).filter((side) => side.group !== 'cash'));
   const hasCash = Boolean(cashSide && current && !current.extras);
-  const hasBook = Boolean(current && !current.extras && chapters.length > 0);
-  const onEfectivo = hasCash && (!hasBook || place === 'efectivo');
-  const onCartera = hasBook && (!hasCash || place === 'cartera');
-  const directBook = !hasCash && chapters.length <= 1;
-  const chapter = onCartera ? chapters.find((item) => item.id === focus) ?? null : null;
-  const detailSides = !current
-    ? []
-    : current.extras
-      ? current.sides
-      : directBook
-        ? (chapters[0]?.sides || current.sides)
-        : chapter?.sides || [];
+  const investmentSides = (current?.sides || []).filter((side) => side.group !== 'cash' && side.items.length > 0);
+  const detailSides = current?.extras ? current.sides : investmentSides;
+  const offerLabel: Record<AccountOffer, string> = { cash: 'efectivo', crypto: 'cripto', etf: 'un ETF', stock: 'una acción', skin: 'una skin' };
+  const usedOffers = new Set(detailSides.map((side) => (side.group === 'personal_good' ? 'skin' : side.group)));
+  const dormant = (current?.offers || []).filter((offer) => offer !== 'cash' && !usedOffers.has(offer));
   const openEntry = (direction: 'in' | 'out') => {
     if (!current) return;
+    setEntryMore(false);
     setEntryDraft({ id: null, name: '', amount: '', date: todayKey(), direction, origin: '', image: '', source: current.planId ? 'plan' : 'wallet', key: '', surprise: true });
   };
   const positionMoves = detailSides
@@ -508,12 +482,9 @@ export function Wallets({ accounts, hidden, openId, stickTop = 0, onOpen, onAdd,
       note,
       amount: row.amount,
       image: row.image,
-      checked: row.source === 'plan' && !row.automatic && !row.open,
-      onToggle: row.source === 'plan' && !row.automatic && /^(expense|income|savings|recurring|interval):/.test(row.key)
-        ? () => void togglePlan(row.key, row.open === true)
-        : undefined,
       onOpen: () => {
         if (row.source === 'wallet' || row.key) {
+          setEntryMore(true);
           setEntryDraft({
             id: row.source === 'wallet' ? row.id : null,
             name: row.name,
@@ -584,10 +555,16 @@ export function Wallets({ accounts, hidden, openId, stickTop = 0, onOpen, onAdd,
           body: JSON.stringify({ accountName: current.name, name: entryDraft.name.trim(), amount, date: entryDraft.date, direction: entryDraft.direction, origin, image: entryDraft.image }),
         });
       }
-      const freshOut = !entryDraft.id && !entryDraft.key && entryDraft.direction === 'out';
+      const fresh = !entryDraft.id && !entryDraft.key;
+      const freshOut = fresh && entryDraft.direction === 'out';
       const keptName = name;
       const keptAmount = amount;
-      setEntryDraft(null);
+      const direction = entryDraft.direction;
+      const source = entryDraft.source;
+      if (fresh) {
+        setEntryMore(false);
+        setEntryDraft({ id: null, name: '', amount: '', date: todayKey(), direction, origin: '', image: '', source, key: '', surprise: true });
+      } else setEntryDraft(null);
       await load();
       await onSaved?.();
       if (freshOut) onKeep?.(keptName, keptAmount);
@@ -633,17 +610,6 @@ export function Wallets({ accounts, hidden, openId, stickTop = 0, onOpen, onAdd,
     }
   };
 
-  const togglePlan = async (key: string, paid: boolean) => {
-    if (!current?.planId || !key) return;
-    setError('');
-    try {
-      await api(`/api/plans/${current.planId}/mark`, { method: 'POST', body: JSON.stringify({ key, paid }) });
-      await onSaved?.();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se ha podido cambiar la marca.');
-    }
-  };
-
   const removeEntry = async () => {
     if (!entryDraft || !current) return;
     setError('');
@@ -670,11 +636,14 @@ export function Wallets({ accounts, hidden, openId, stickTop = 0, onOpen, onAdd,
       {error && <p className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">{error}</p>}
       {!current && (
         <div className="grid grid-cols-1 gap-3 min-[480px]:grid-cols-2">
-          {accounts.map((account) => (
-            <button
+          {accounts.map((account, index) => (
+            <motion.button
               key={account.key}
               type="button"
               onClick={() => onOpen(account.key)}
+              initial={window.matchMedia('(prefers-reduced-motion: reduce)').matches ? false : { opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ ...glide, delay: Math.min(index, 5) * 0.04 }}
               className="rounded-[24px] border border-white/70 bg-white/70 p-3 text-left shadow-lg shadow-slate-900/5 backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/60"
             >
               <span className="flex items-center gap-2">
@@ -685,7 +654,7 @@ export function Wallets({ accounts, hidden, openId, stickTop = 0, onOpen, onAdd,
               <span className="mt-2 block text-[11px] font-semibold text-slate-400">
                 {(account.sides || []).map((side) => side.title).join(' · ') || 'Sin desglose'}
               </span>
-            </button>
+            </motion.button>
           ))}
         </div>
       )}
@@ -703,44 +672,14 @@ export function Wallets({ accounts, hidden, openId, stickTop = 0, onOpen, onAdd,
       {current && !ledger && (
         <div className="space-y-3">
           {hasCash && (
-            <div className="sticky z-20 -mx-4 flex flex-wrap items-center gap-2 bg-[var(--app-bg)] px-4 py-2 md:-mx-8 md:px-8" style={{ top: stickTop }}>
-              {hasCash && hasBook && (
-                <div className="flex min-w-0 rounded-2xl border border-white/50 bg-white/30 p-1 backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
-                  <button type="button" onClick={() => { setPlace('efectivo'); setFocus(null); }} className={laneClass(onEfectivo)}>
-                    <img src={groupIcon('cash')} alt="" className="h-4 w-4 rounded-md object-contain" />
-                    Efectivo
-                  </button>
-                  <button type="button" onClick={() => { setPlace('cartera'); setFocus(null); }} className={laneClass(onCartera)}>
-                    <img src={groupIcon(chapters.length === 1 ? chapters[0].id : 'crypto')} alt="" className="h-4 w-4 rounded-md object-contain" />
-                    {chapters.length === 1 ? chapters[0].title : 'Apartados'}
-                  </button>
-                </div>
-              )}
-              {hasCash && (
-                <div className="ml-auto flex shrink-0 gap-1.5">
-                  <button type="button" onClick={() => openEntry('out')} className="rounded-full border border-[#ea3943]/40 px-2.5 py-1 text-[13px] font-bold text-[#ea3943]">Gasto</button>
-                  <button type="button" onClick={() => openEntry('in')} className="rounded-full border border-[#16c784]/40 px-2.5 py-1 text-[13px] font-bold text-[#16c784]">Ha entrado</button>
-                </div>
-              )}
+            <div className="sticky z-20 -mx-4 flex justify-end bg-[var(--app-bg)] px-4 py-2 md:-mx-8 md:px-8" style={{ top: stickTop }}>
+              <div className="flex shrink-0 gap-1.5">
+                <button type="button" onClick={() => openEntry('out')} className="rounded-full border border-[#ea3943]/40 px-2.5 py-1 text-[13px] font-bold text-[#ea3943]">Gasto</button>
+                <button type="button" onClick={() => openEntry('in')} className="rounded-full border border-[#16c784]/40 px-2.5 py-1 text-[13px] font-bold text-[#16c784]">Ha entrado</button>
+              </div>
             </div>
           )}
-          {onCartera && !chapter && !directBook && chapters.map((item) => {
-            const total = item.sides.reduce((sum, side) => sum + side.total, 0);
-            const count = item.sides.reduce((sum, side) => sum + side.items.length, 0);
-            return (
-              <button key={item.id} type="button" onClick={() => setFocus(item.id)} className="flex w-full items-center justify-between gap-3 rounded-[24px] border border-white/50 bg-white/40 px-4 py-4 text-left shadow-[0_10px_30px_rgba(15,23,42,0.05)] backdrop-blur-xl dark:border-white/10 dark:bg-white/10">
-                <span className="flex min-w-0 items-center gap-3">
-                  <img src={groupIcon(item.id)} alt="" className="h-11 w-11 shrink-0 rounded-2xl bg-white/80 object-contain p-1.5 shadow-sm" />
-                  <span className="min-w-0">
-                    <span className="block text-base font-black">{item.title}</span>
-                    <span className="mt-0.5 block truncate text-[11px] font-medium text-slate-400">{item.caption} · {count} {item.id === 'crypto' ? (count === 1 ? 'moneda' : 'monedas') : count === 1 ? 'cosa' : 'cosas'}</span>
-                  </span>
-                </span>
-                <span className="shrink-0 text-base font-black tabular-nums sm:text-xl">{money(total, hidden)}</span>
-              </button>
-            );
-          })}
-          {onEfectivo && cashSide && (
+          {hasCash && cashSide && (
             <section className="rounded-[24px] border border-white/70 bg-white/80 p-4 dark:border-white/10 dark:bg-white/10">
               <div className="flex items-start justify-between gap-3">
                 <span className="flex items-center gap-3">
@@ -759,8 +698,8 @@ export function Wallets({ accounts, hidden, openId, stickTop = 0, onOpen, onAdd,
           {current?.extras && (
             <SectionChart card points={holdingPath(current.sides.flatMap((side) => side.items).map((item) => ({ day: item.boughtOn, cost: item.costEur, value: item.eur })), todayKey())} title="Extras" />
           )}
-          {current && !current.extras && (chapter || directBook) && (
-            <SectionChart card accountKey={current.key} group={chapter?.id || chapters[0]?.id || null} title={chapter?.title || chapters[0]?.title || 'Cartera'} />
+          {current && !current.extras && investmentSides.length > 0 && (
+            <SectionChart card accountKey={current.key} group={investmentSides.length === 1 ? investmentSides[0].group : null} title={investmentSides.length === 1 ? investmentSides[0].title : 'Inversión'} />
           )}
           {detailSides.filter((side) => side.group !== 'cash').map((side) => (
             <section key={side.group} className="rounded-[24px] border border-white/70 bg-white/80 p-4 dark:border-white/10 dark:bg-white/10">
@@ -796,9 +735,9 @@ export function Wallets({ accounts, hidden, openId, stickTop = 0, onOpen, onAdd,
                   <Plus size={14} /> Añadir
                 </button>
               )}
-              {side.group === 'personal_good' && onAdd && current && (
-                <button type="button" onClick={() => onAdd(current.key)} className="mt-3 inline-flex items-center gap-1 text-sm font-bold text-slate-500">
-                  <Plus size={14} /> Añadir skin
+              {side.group !== 'cash' && !current.extras && onAdd && current && (
+                <button type="button" onClick={() => onAdd(current.key, side.group === 'personal_good' ? 'skin' : side.group as AccountOffer)} className="mt-3 inline-flex items-center gap-1 text-sm font-bold text-slate-500">
+                  <Plus size={14} /> {side.group === 'personal_good' ? 'Añadir skin' : 'Añadir'}
                 </button>
               )}
               {(side.invested != null || side.gain != null) && (
@@ -826,7 +765,16 @@ export function Wallets({ accounts, hidden, openId, stickTop = 0, onOpen, onAdd,
               </div>
             </section>
           )}
-          {onEfectivo && cashSide && !current.extras && <section className="rounded-[24px] border border-white/70 bg-white/80 p-4 dark:border-white/10 dark:bg-white/10">
+          {dormant.length > 0 && current && onAdd && (
+            <div className="grid gap-1 px-1">
+              {dormant.map((offer) => (
+                <button key={offer} type="button" onClick={() => onAdd(current.key, offer)} className="inline-flex items-center gap-1 py-1 text-left text-sm font-bold text-slate-500">
+                  <Plus size={14} /> Añadir {offerLabel[offer]}
+                </button>
+              ))}
+            </div>
+          )}
+          {hasCash && cashSide && !current.extras && <section className="rounded-[24px] border border-white/70 bg-white/80 p-4 dark:border-white/10 dark:bg-white/10">
             <button type="button" onClick={() => setLedger('cash')} className="flex w-full items-center justify-between gap-3 text-left">
               <h3 className="text-base font-black">Transacciones</h3>
               <ChevronRight size={18} className="shrink-0 text-slate-400" />
@@ -885,15 +833,33 @@ export function Wallets({ accounts, hidden, openId, stickTop = 0, onOpen, onAdd,
               <button type="button" onClick={() => setEntryDraft({ ...entryDraft, direction: 'in' })} className={cn('flex-1 rounded-full border py-2 text-sm font-bold', entryDraft.direction === 'in' ? 'border-[#16c784] text-[#16c784]' : 'border-slate-200 text-slate-400')}>Entra</button>
             </div>
             <Input label="Qué es" value={entryDraft.name} onChange={(event) => setEntryDraft({ ...entryDraft, name: event.target.value })} />
-            <OriginPicker name={`${entryDraft.name} ${entryDraft.origin}`} image={entryDraft.image} onImage={(image) => setEntryDraft({ ...entryDraft, image })} />
             <Input label="Importe €" type="number" min="0" step="any" value={entryDraft.amount} onChange={(event) => setEntryDraft({ ...entryDraft, amount: event.target.value })} />
-            <Input label="Fecha" type="date" value={entryDraft.date} onChange={(event) => setEntryDraft({ ...entryDraft, date: event.target.value })} />
-            <Input
-              label={entryDraft.direction === 'in' ? 'De dónde entra' : 'Para qué'}
-              placeholder={entryDraft.direction === 'in' ? 'Nómina, familia…' : 'Para aguantar el mes'}
-              value={entryDraft.origin}
-              onChange={(event) => setEntryDraft({ ...entryDraft, origin: event.target.value })}
-            />
+            {entryMore ? (
+              <>
+                <OriginPicker name={`${entryDraft.name} ${entryDraft.origin}`} image={entryDraft.image} onImage={(image) => setEntryDraft({ ...entryDraft, image })} />
+                <Input label="Fecha" type="date" value={entryDraft.date} onChange={(event) => setEntryDraft({ ...entryDraft, date: event.target.value })} />
+                <Input
+                  label={entryDraft.direction === 'in' ? 'De dónde entra' : 'Para qué'}
+                  placeholder={entryDraft.direction === 'in' ? 'Nómina, familia…' : 'Para aguantar el mes'}
+                  value={entryDraft.origin}
+                  onChange={(event) => setEntryDraft({ ...entryDraft, origin: event.target.value })}
+                />
+              </>
+            ) : (
+              <button type="button" onClick={() => setEntryMore(true)} className="text-left text-sm font-bold text-slate-500">Fecha y para qué</button>
+            )}
+            {(entryDraft.id || /^(expense|income):/.test(entryDraft.key)) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setEntryMore(true);
+                  setEntryDraft({ ...entryDraft, id: null, key: '', date: todayKey(), surprise: true });
+                }}
+                className="text-left text-sm font-bold text-slate-500"
+              >
+                Otra vez, hoy
+              </button>
+            )}
             <div className="flex gap-2">
               <Button className="flex-1" onClick={() => void saveEntry()}>Guardar</Button>
               {(entryDraft.id || entryDraft.key) && (

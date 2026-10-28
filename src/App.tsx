@@ -24,6 +24,7 @@ export default function App() {
   const [offline, setOffline] = useState(false);
   const [section, setSection] = useState<Section>('dashboard');
   const [home, setHome] = useState(0);
+  const [books, setBooks] = useState(0);
   const [heroMs, setHeroMs] = useState(() => Number(localStorage.getItem('pat_hero_ms')) || 2000);
 
   const restoreSession = () => {
@@ -93,16 +94,16 @@ export default function App() {
   if (!user) return <LoginView onLogin={(next) => { setOffline(false); setUser(next); }} />;
 
   return (
-    <Shell section={section} onChange={(next) => { setSection(next); if (next === 'dashboard') setHome((value) => value + 1); }} user={user}>
+    <Shell section={section} onChange={(next) => { setSection(next); if (next === 'dashboard') setHome((value) => value + 1); }} user={user} onSettled={() => setBooks((value) => value + 1)}>
       <motion.div
         key={section}
         initial={window.matchMedia('(prefers-reduced-motion: reduce)').matches ? false : { opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={glide}
       >
-        {section === 'dashboard' && <Dashboard heroMs={heroMs} home={home} />}
+        {section === 'dashboard' && <Dashboard heroMs={heroMs} home={home} books={books} />}
         {section === 'market' && <Market />}
-        {section === 'plans' && <Plans />}
+        {section === 'plans' && <Plans books={books} />}
         {section === 'movements' && <Movements />}
         {section === 'settings' && <Settings user={user} heroMs={heroMs} onHero={changeHero} onUser={setUser} onLogout={logout} />}
       </motion.div>

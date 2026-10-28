@@ -1077,6 +1077,19 @@ export const PLATFORMS: PlatformPreset[] = [
   }
 ];
 
+export type AccountOffer = 'cash' | 'crypto' | 'etf' | 'stock' | 'skin';
+
+/** Lo que ese sitio puede tener. Un apartado vacío no se enseña hasta que lo usas. */
+export function accountOffers(name: string | null | undefined): AccountOffer[] {
+  const platform = findPlatform(name);
+  const id = platform?.id || '';
+  if (id === 'cs2' || /cs2|counter-strike/i.test(name || '')) return ['skin'];
+  if (platform?.group === 'Cripto' || platform?.group === 'Wallets' || platform?.kind === 'exchange' || platform?.kind === 'wallet') return ['cash', 'crypto'];
+  if (id === 'traderepublic') return ['cash', 'crypto', 'etf', 'stock'];
+  if (platform?.kind === 'broker' && platform.tracking === 'positions') return ['cash', 'etf', 'stock'];
+  return ['cash'];
+}
+
 export function findPlatform(name: string | null | undefined): PlatformPreset | undefined {
   const key = (name || '').trim().toLowerCase();
   if (!key) return undefined;

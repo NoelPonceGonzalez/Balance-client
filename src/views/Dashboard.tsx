@@ -1,7 +1,7 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type PointerEvent as ReactPointerEvent, type ReactNode, type SetStateAction } from 'react';
+import { forwardRef, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type PointerEvent as ReactPointerEvent, type ReactNode, type SetStateAction } from 'react';
 import { bindHold, HoldMenu, holdItemClass, placeMenu } from '@/components/HoldMenu';
 import { AnimatePresence, motion } from 'motion/react';
-import { ArrowUpDown, ChevronLeft, Eye, EyeOff, MoreHorizontal, Pencil, Plus, Search, Trash2 } from 'lucide-react';
+import { ArrowUpDown, ChevronLeft, ChevronRight, Eye, EyeOff, MoreHorizontal, Pencil, Plus, Search, Trash2 } from 'lucide-react';
 import { PlatformLogo } from '@/components/PlatformLogo';
 import { QuietLoad } from '@/components/QuietLoad';
 import { QuickSplit } from '@/components/QuickSplit';
@@ -11,7 +11,7 @@ import { Field, Input, fieldClass } from '@/components/ui/Input';
 import { api, ApiError } from '@/lib/api';
 import { formatDay, formatNumber, formatPct, formatPrice, formatSignedEur } from '@/lib/format';
 import { PLATFORM_COLORS } from '@/lib/platform-colors';
-import { findPlatform } from '@/lib/platforms';
+import { accountOffers, findPlatform, type AccountOffer } from '@/lib/platforms';
 import { cn } from '@/lib/utils';
 import type { DashboardData } from '@/lib/types';
 import { Wallets } from '@/views/Wallets';
@@ -76,6 +76,7 @@ interface PieceDraft {
   quoteId: string;
   extraSpent: string;
   preview: { priceEur: number; quantity: number; note: string } | null;
+  kinds: string[];
 }
 
 function localStamp(date = new Date()): string {
@@ -148,6 +149,58 @@ function wash(hex: string): string {
 function prefersStill(): boolean {
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches || window.matchMedia('(max-width: 767px)').matches;
 }
+
+function motionOff(): boolean {
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+const pageMove = { duration: 0.36, ease: [0.22, 1, 0.36, 1] as const };
+
+function ViewSwitch({ value, onChange }: { value: 'general' | 'cartera'; onChange: (value: 'general' | 'cartera') => void }) {
+  const still = motionOff();
+  return (
+    <div className="grid shrink-0 grid-cols-2 rounded-full bg-slate-900/5 p-0.5 dark:bg-white/10">
+      {(['general', 'cartera'] as const).map((item) => {
+        const on = value === item;
+        return (
+          <button
+            key={item}
+            type="button"
+            aria-pressed={on}
+            onClick={() => onChange(item)}
+            className={cn('relative rounded-full px-3 py-1 text-[13px] font-bold', on ? 'text-white dark:text-slate-900' : 'text-slate-500')}
+          >
+            {on && (
+              <motion.span
+                layoutId="dash-view-pill"
+                transition={still ? { duration: 0 } : pageMove}
+                className="pointer-events-none absolute inset-0 rounded-full bg-slate-900 dark:bg-white"
+              />
+            )}
+            <span className="relative z-10">{item === 'general' ? 'General' : 'Cartera'}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+const ScreenSwap = forwardRef<HTMLDivElement, { className?: string; children?: ReactNode }>(function ScreenSwap({ className, children, ...rest }, ref) {
+  const still = motionOff();
+  return (
+    <motion.div
+      ref={ref}
+      className={className}
+      initial={still ? false : { opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={still ? { opacity: 0 } : { opacity: 0, y: -6 }}
+      transition={still ? { duration: 0 } : pageMove}
+      {...rest}
+    >
+      {children}
+    </motion.div>
+  );
+});
 
 function AccountFold({ open, children }: { open: boolean; children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -328,26 +381,6 @@ function accountGain(account: DashboardData['accounts'][number], pnl: DashboardD
   return { eur, percent: cost != null && cost > 0 ? (eur / cost) * 100 : null };
 }
 
-function ViewSwitch({ value, onChange }: { value: 'general' | 'cartera'; onChange: (value: 'general' | 'cartera') => void }) {
-  return (
-    <div className="flex rounded-full bg-slate-900/5 p-0.5 dark:bg-white/10">
-      {(['general', 'cartera'] as const).map((item) => (
-        <button
-          key={item}
-          type="button"
-          onClick={() => onChange(item)}
-          className={cn(
-            'rounded-full px-3 py-1 text-[13px] font-bold',
-            value === item ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900' : 'text-slate-500',
-          )}
-        >
-          {item === 'general' ? 'General' : 'Cartera'}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 interface QuoteHit {
   source: 'coingecko' | 'yahoo';
   externalId: string;
@@ -486,10 +519,10 @@ function PieceDialog({
     <Modal title={piece.id ? piece.name : `Añadir en ${piece.accountName}`} onClose={() => setPiece(null)}>
       <div className="grid gap-4">
         {pieceError && <p className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">{pieceError}</p>}
-        {!piece.skins && (
+        {!piece.skins && piece.kinds.length > 1 && (
           <Field label="Tipo">
             <select className={fieldClass} value={piece.assetClass} onChange={(event) => setPiece({ ...piece, assetClass: event.target.value, quoteSource: '', quoteId: '', preview: null })}>
-              {PIECE_CLASSES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+              {PIECE_CLASSES.filter((item) => piece.kinds.includes(item.id)).map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
             </select>
           </Field>
         )}
@@ -539,6 +572,17 @@ function PieceDialog({
             <p className="text-xs font-medium text-slate-400">{wearHint(piece.floatText, piece.wears)}</p>
             <Input label="Puesto en el mundo" value={piece.rank} onChange={(event) => { rankLock.current = true; setPiece({ ...piece, rank: event.target.value }); }} placeholder="26" />
             {rankNote && <p className="text-xs font-medium text-slate-400">{rankNote}</p>}
+            <Input label="Fecha y hora" type="datetime-local" value={piece.boughtAt} onChange={(event) => setPiece(clearPreview({ ...piece, boughtAt: event.target.value }))} />
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setPiece(clearPreview({ ...piece, receiveMode: 'market' }))} className={cn('flex-1 rounded-full border py-2 text-sm font-bold', piece.receiveMode === 'market' ? 'border-slate-900 text-slate-900 dark:border-white dark:text-white' : 'border-slate-200 text-slate-400')}>Calcular lo que valía</button>
+              <button type="button" onClick={() => setPiece(clearPreview({ ...piece, receiveMode: 'manual' }))} className={cn('flex-1 rounded-full border py-2 text-sm font-bold', piece.receiveMode === 'manual' ? 'border-slate-900 text-slate-900 dark:border-white dark:text-white' : 'border-slate-200 text-slate-400')}>Lo escribo yo</button>
+            </div>
+            {piece.preview && (
+              <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+                A esa hora valía {formatPrice(piece.preview.priceEur)}.
+                <span className="mt-1 block text-xs font-medium text-slate-400">{piece.preview.note}</span>
+              </p>
+            )}
           </div>
         )}
         {market && (
@@ -697,20 +741,27 @@ function extraDetail(item: { boughtOn?: string; track?: boolean; counts?: boolea
 }
 
 function ExtraDialog({ draft, error, setDraft, onClose, onSave, onDelete }: { draft: ExtraDraft; error: string; setDraft: (next: ExtraDraft) => void; onClose: () => void; onSave: () => void; onDelete: () => void }) {
+  const [more, setMore] = useState(Boolean(draft.image || draft.boughtOn || draft.track || draft.counts === false));
   return (
     <Modal title={draft.id ? draft.name : 'Extra'} onClose={onClose}>
       <div className="grid gap-3">
         {error && <p className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">{error}</p>}
         <p className="text-xs font-medium text-slate-400">Un reloj, un PC o un anillo. Una cena no va aquí.</p>
         <Input label="Qué es" value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="Seiko Presage" />
-        <OriginPicker name={draft.name} image={draft.image} onImage={(image) => setDraft({ ...draft, image })} />
-        <Input label="Imagen (enlace https)" value={draft.image} onChange={(event) => setDraft({ ...draft, image: event.target.value })} placeholder="https://..." />
-        {draft.image.startsWith('https://') && <img src={draft.image} alt="" referrerPolicy="no-referrer" className="h-28 w-full rounded-2xl bg-slate-50 object-contain" />}
-        <Input label="Fecha" type="date" value={draft.boughtOn} onChange={(event) => setDraft({ ...draft, boughtOn: event.target.value })} />
         <Input label="Me costó €" type="number" min="0" step="any" value={draft.cost} onChange={(event) => setDraft({ ...draft, cost: event.target.value })} />
         <Input label="Vale ahora €" type="number" min="0" step="any" value={draft.value} onChange={(event) => setDraft({ ...draft, value: event.target.value })} />
-        <button type="button" onClick={() => setDraft({ ...draft, track: !draft.track })} className={cn('rounded-full border py-2 text-sm font-bold', draft.track ? 'border-[#16c784] text-[#16c784]' : 'border-slate-200 text-slate-400')}>{draft.track ? 'Sigo si sube o baja' : 'Solo lo guardo'}</button>
-        <button type="button" onClick={() => setDraft({ ...draft, counts: !draft.counts })} className={cn('rounded-full border py-2 text-sm font-bold', draft.counts ? 'border-slate-900 text-slate-900 dark:border-white dark:text-white' : 'border-slate-200 text-slate-400')}>{draft.counts ? 'Cuenta en el patrimonio' : 'No entra en el total'}</button>
+        {more ? (
+          <>
+            <OriginPicker name={draft.name} image={draft.image} onImage={(image) => setDraft({ ...draft, image })} />
+            <Input label="Imagen (enlace https)" value={draft.image} onChange={(event) => setDraft({ ...draft, image: event.target.value })} placeholder="https://..." />
+            {draft.image.startsWith('https://') && <img src={draft.image} alt="" referrerPolicy="no-referrer" className="h-28 w-full rounded-2xl bg-slate-50 object-contain" />}
+            <Input label="Fecha" type="date" value={draft.boughtOn} onChange={(event) => setDraft({ ...draft, boughtOn: event.target.value })} />
+            <button type="button" onClick={() => setDraft({ ...draft, track: !draft.track })} className={cn('rounded-full border py-2 text-sm font-bold', draft.track ? 'border-[#16c784] text-[#16c784]' : 'border-slate-200 text-slate-400')}>{draft.track ? 'Sigo si sube o baja' : 'Solo lo guardo'}</button>
+            <button type="button" onClick={() => setDraft({ ...draft, counts: !draft.counts })} className={cn('rounded-full border py-2 text-sm font-bold', draft.counts ? 'border-slate-900 text-slate-900 dark:border-white dark:text-white' : 'border-slate-200 text-slate-400')}>{draft.counts ? 'Cuenta en el patrimonio' : 'No entra en el total'}</button>
+          </>
+        ) : (
+          <button type="button" onClick={() => setMore(true)} className="text-left text-sm font-bold text-slate-500">Foto, fecha y si cuenta</button>
+        )}
         <Button onClick={onSave}>Guardar</Button>
         {draft.id && <Button variant="danger" onClick={onDelete}>Eliminar</Button>}
       </div>
@@ -718,7 +769,7 @@ function ExtraDialog({ draft, error, setDraft, onClose, onSave, onDelete }: { dr
   );
 }
 
-export function Dashboard({ home }: { heroMs: number; home: number }) {
+export function Dashboard({ home, books }: { heroMs: number; home: number; books: number }) {
   const [data, setData] = useState<DashboardData | null>(null);
   const [view, setView] = useState<'general' | 'cartera'>('general');
   const [openWallet, setOpenWallet] = useState<string | null>(null);
@@ -791,7 +842,7 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, []);
+  }, [books]);
 
   useEffect(() => {
     const node = pinRef.current;
@@ -876,8 +927,11 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
     }
   };
 
-  const openPiece = (row: (typeof rows)[number], item?: AccountPart) => {
-    const skins = /cs2|counter-strike/i.test(row.name);
+  const openPiece = (row: (typeof rows)[number], item?: AccountPart, offer?: AccountOffer) => {
+    const offers = accountOffers(row.name);
+    const skins = offers.includes('skin') || /cs2|counter-strike/i.test(row.name);
+    const kinds = skins ? ['personal_good'] : offers.filter((itemOffer) => itemOffer !== 'cash' && itemOffer !== 'skin');
+    const assetClass = skins ? 'personal_good' : offer && offer !== 'cash' && offer !== 'skin' ? offer : item?.group && item.group !== 'cash' ? item.group : kinds[0] || 'crypto';
     setPieceError('');
     setPieceDelete(false);
     setPiece({
@@ -885,7 +939,7 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
       accountId: row.key,
       accountName: row.name,
       skins,
-      assetClass: skins ? 'personal_good' : item?.group && item.group !== 'cash' ? item.group : 'crypto',
+      assetClass,
       name: item?.label || '',
       floatText: ((item?.detail || '').match(/\d+\.\d+/) || [''])[0],
       quantity: item?.quantity != null ? String(item.quantity) : '1',
@@ -904,6 +958,7 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
       quoteId: item?.quoteId || '',
       extraSpent: '',
       preview: null,
+      kinds,
     });
   };
 
@@ -938,6 +993,37 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
         setPiece({ ...piece, preview, quantity: String(preview.quantity) });
       } catch (err) {
         setPieceError(err instanceof Error ? err.message : 'No se ha podido calcular lo recibido.');
+      }
+      return;
+    }
+    if (skins && piece.receiveMode === 'market' && piece.marketName && !piece.preview && !piece.cost.trim() && !piece.value.trim()) {
+      const floatValue = Number(piece.floatText.trim().replace(',', '.'));
+      if (!piece.boughtAt) {
+        setPieceError('Pon la fecha y la hora.');
+        return;
+      }
+      if (!(floatValue >= 0 && floatValue <= 1)) {
+        setPieceError('Escribe el float, aunque sea aproximado.');
+        return;
+      }
+      try {
+        const preview = await api<{ eur: number; note: string }>('/api/market/skin-worth', {
+          method: 'POST',
+          body: JSON.stringify({
+            marketName: piece.marketName,
+            float: floatValue,
+            paint: piece.phasePaint,
+            at: piece.boughtAt,
+          }),
+        });
+        setPiece({
+          ...piece,
+          cost: piece.cost.trim() ? piece.cost : String(preview.eur),
+          value: piece.value.trim() ? piece.value : String(preview.eur),
+          preview: { priceEur: preview.eur, quantity: 1, note: preview.note },
+        });
+      } catch (err) {
+        setPieceError(err instanceof Error ? err.message : 'No se ha podido calcular lo que valía.');
       }
       return;
     }
@@ -1134,7 +1220,8 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
   const openAccount = openWallet === 'extras'
     ? (data ? { name: 'Extras', value: extraWallet(data.extras).value, logoName: 'Extras' } : null)
     : ordered.find((row) => row.key === openWallet) || null;
-  const barValue = view === 'cartera' && openAccount ? openAccount.value : shownWorth;
+  const inAccount = view === 'cartera' && Boolean(openWallet && openAccount);
+  const barValue = inAccount && openAccount ? openAccount.value : shownWorth;
   const chooseView = (next: 'general' | 'cartera') => {
     setView(next);
     setOpenWallet(null);
@@ -1147,19 +1234,10 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
     });
   };
   const pin = (
-    <div ref={pinRef} className="sticky top-0 z-30 -mx-4 space-y-2 bg-[var(--app-bg)] px-4 py-2 md:-mx-8 md:px-8">
-      {view === 'cartera' && openAccount && (
-        <div className="flex items-center gap-2">
-          <button type="button" onClick={() => setOpenWallet(null)} className="inline-flex items-center gap-1 rounded-full bg-white/80 px-3 py-1.5 text-sm font-bold text-slate-700 shadow-sm dark:bg-white/10 dark:text-white" aria-label="Volver a carteras">
-            <ChevronLeft size={16} /> Carteras
-          </button>
-          <PlatformLogo name={openAccount.logoName} size={28} />
-          <h2 className="min-w-0 truncate text-base font-black">{openAccount.name}</h2>
-        </div>
-      )}
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+    <div ref={pinRef} className="sticky top-0 z-30 -mx-4 flex flex-col gap-2 bg-[var(--app-bg)] px-4 py-2 md:-mx-8 md:px-8">
+      <div className="order-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
         <div className="flex min-w-0 items-center gap-1">
-          <p className={cn('min-w-0 whitespace-nowrap text-[clamp(1.45rem,7.2vw,2rem)] font-black leading-none tabular-nums', hidden || (view === 'cartera' && openAccount) ? 'text-slate-900 dark:text-white' : totalClass)}>
+          <p className={cn('min-w-0 whitespace-nowrap text-[clamp(1.45rem,7.2vw,2rem)] font-black leading-none tabular-nums', hidden || inAccount ? 'text-slate-900 dark:text-white' : totalClass)}>
             {barValue == null ? '—' : <RisingAmount value={barValue} hidden={hidden} card />}
           </p>
           <button
@@ -1174,6 +1252,15 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
         </div>
         <ViewSwitch value={view} onChange={chooseView} />
       </div>
+      {inAccount && openAccount && (
+        <div className="order-1 flex items-center gap-2">
+          <button type="button" onClick={() => setOpenWallet(null)} className="inline-flex items-center gap-1 rounded-full bg-white/80 px-3 py-1.5 text-sm font-bold text-slate-700 shadow-sm dark:bg-white/10 dark:text-white" aria-label="Volver a carteras">
+            <ChevronLeft size={16} /> Carteras
+          </button>
+          <PlatformLogo name={openAccount.logoName} size={28} />
+          <h2 className="min-w-0 truncate text-base font-black">{openAccount.name}</h2>
+        </div>
+      )}
     </div>
   );
 
@@ -1181,6 +1268,8 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
     return (
       <div className="mx-auto max-w-3xl space-y-4">
         {pin}
+        <AnimatePresence mode="wait" initial={false}>
+          <ScreenSwap key={openWallet || 'carteras'} className="space-y-4">
         {error ? (
           <p className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">{error}</p>
         ) : !data ? (
@@ -1195,6 +1284,7 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
               key: row.key,
               name: row.name,
               logoName: row.logoName,
+              offers: accountOffers(row.name),
               value: row.value,
               cash: row.cash,
               planId: row.planId,
@@ -1227,14 +1317,14 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
                 }
               }
             }}
-            onAdd={(key) => {
+            onAdd={(key, offer) => {
               if (key === 'extras') {
                 setExtraError('');
                 setExtraDraft(blankExtra());
                 return;
               }
               const row = ordered.find((item) => item.key === key);
-              if (row) openPiece(row);
+              if (row) openPiece(row, undefined, offer);
             }}
           />
         )}
@@ -1270,6 +1360,8 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
             <span className="text-sm font-semibold">Añadir sitio</span>
           </button>
         )}
+          </ScreenSwap>
+        </AnimatePresence>
         {adding && <QuickSplit onClose={() => setAdding(false)} onSaved={load} />}
       </div>
     );
@@ -1296,8 +1388,10 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
   if (countExtras && extraWealth > 0) slices.push({ key: 'extras', name: 'Extras', eur: extraWealth, color: '#3F3A4A' });
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
+    <div className="mx-auto max-w-3xl space-y-4">
       {pin}
+      <AnimatePresence mode="wait" initial={false}>
+        <ScreenSwap key="general" className="space-y-6">
       <motion.section initial={prefersStill() ? false : { opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={prefersStill() ? { duration: 0 } : rise}>
         <p className="text-[11px] font-semibold text-slate-400">{formatDay(data.today)}</p>
         <button
@@ -1370,7 +1464,21 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
                 <PlatformLogo name={row.logoName} size={32} />
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center gap-2">
-                    <span className="min-w-0 truncate text-sm font-semibold" style={{ color: isLight(row.color) ? '#1C1C1E' : row.color }}>{row.name}</span>
+                    <button
+                      type="button"
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setView('cartera');
+                        setOpenWallet(row.key);
+                      }}
+                      className="inline-flex min-w-0 items-center gap-0.5 text-sm font-semibold"
+                      style={{ color: isLight(row.color) ? '#1C1C1E' : row.color }}
+                      aria-label={`Entrar en ${row.name}`}
+                    >
+                      <span className="truncate">{row.name}</span>
+                      <ChevronRight size={14} className="shrink-0 opacity-50" />
+                    </button>
                     {prefersStill() && (
                       <span className={cn('ml-auto shrink-0 text-[11px] font-black tabular-nums sm:hidden', hidden ? 'text-slate-400' : frame.className)}>
                         {mask(frame.text)}
@@ -1495,7 +1603,7 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
           );
         })}
         {countExtras && extraWealth > 0 && (
-          <button type="button" onClick={() => chooseView('cartera')} className="flex w-full items-center gap-4 rounded-[28px] border border-white/70 bg-white/50 px-5 py-4 text-left dark:border-white/10 dark:bg-white/5">
+          <button type="button" onClick={() => { setView('cartera'); setOpenWallet('extras'); }} className="flex w-full items-center gap-4 rounded-[28px] border border-white/70 bg-white/50 px-5 py-4 text-left dark:border-white/10 dark:bg-white/5">
             <img src="/extras/objeto.svg" alt="" className="h-9 w-9 rounded-xl" />
             <span className="min-w-0 flex-1">
               <span className="block text-sm font-semibold">Extras</span>
@@ -1518,6 +1626,8 @@ export function Dashboard({ home }: { heroMs: number; home: number }) {
           <span className="text-sm font-semibold">Añadir sitio</span>
         </motion.button>
       </section>
+        </ScreenSwap>
+      </AnimatePresence>
       {adding && <QuickSplit onClose={() => setAdding(false)} onSaved={load} />}
       {menu && (
         <HoldMenu top={menu.top} left={menu.left} onClose={() => setMenu(null)}>

@@ -170,6 +170,7 @@ export interface QuoteCandidate {
 
 export interface AppNotification {
   id: string;
+  quoteKey?: string | null;
   title: string;
   body: string;
   direction: 'up' | 'down' | 'due';

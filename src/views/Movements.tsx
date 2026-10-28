@@ -80,6 +80,7 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
   const [filters, setFilters] = useState({ q: '', type: '', accountId: '', ...periodRange(initialYear, initialMonth) });
   const [sort, setSort] = useState<{ key: 'date' | 'amount'; dir: 'asc' | 'desc' }>({ key: 'date', dir: 'desc' });
   const [draft, setDraft] = useState<Draft | null>(null);
+  const [formMore, setFormMore] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
   const [duplicate, setDuplicate] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
@@ -190,6 +191,12 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
   };
 
   const accountHoldings = holdings.filter((item) => String(item.accountId) === draft?.accountId);
+  const simpleMove = draft?.type === 'expense' || draft?.type === 'income';
+  const pickAccount = (accountId: string) => {
+    if (!draft) return;
+    const currency = accounts.find((account) => docId(account) === accountId)?.currency || draft.currency;
+    setDraft({ ...draft, accountId, currency, applyToBalances: simpleMove ? currency === 'EUR' : draft.applyToBalances });
+  };
 
   return (
     <div className={embedded ? 'space-y-4' : 'mx-auto max-w-3xl space-y-5'}>
@@ -200,7 +207,7 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
         </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={exportCsv}>Exportar</Button>
-          <Button onClick={() => { setEditing(null); setDuplicate(false); setDraft(emptyDraft(accounts[0] ? docId(accounts[0]) : '')); }}>Nuevo</Button>
+          <Button onClick={() => { setEditing(null); setDuplicate(false); setFormMore(false); setDraft(emptyDraft(accounts[0] ? docId(accounts[0]) : '')); }}>Nuevo</Button>
         </div>
       </div>
       {error && <p className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">{error}</p>}
@@ -312,15 +319,28 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
           <div className="grid gap-3">
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Tipo">
-                <select className={fieldClass} value={draft.type} onChange={(e) => setDraft({ ...draft, type: e.target.value })}>
+                <select className={fieldClass} value={draft.type} onChange={(e) => { setFormMore(e.target.value !== 'expense' && e.target.value !== 'income'); setDraft({ ...draft, type: e.target.value }); }}>
                   {Object.entries(TYPE_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                 </select>
               </Field>
+              {simpleMove && !formMore && !editing ? (
+                <>
+                  <Input label="Qué es" value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} />
+                  <Input label="Importe" type="number" step="any" value={draft.amount} onChange={(e) => setDraft({ ...draft, amount: e.target.value })} />
+                  <Field label="Cuenta">
+                    <select className={fieldClass} value={draft.accountId} onChange={(e) => pickAccount(e.target.value)}>
+                      <option value="">Elige</option>
+                      {accounts.filter((account) => !account.archived).map((account) => <option key={docId(account)} value={docId(account)}>{account.name}</option>)}
+                    </select>
+                  </Field>
+                </>
+              ) : (
+                <>
               <Input label="Fecha" type="date" value={draft.date} onChange={(e) => setDraft({ ...draft, date: e.target.value })} />
               <Input label="Importe" type="number" step="any" value={draft.amount} onChange={(e) => setDraft({ ...draft, amount: e.target.value })} />
-              <Input label="Moneda" value={draft.currency} onChange={(e) => setDraft({ ...draft, currency: e.target.value.toUpperCase() })} />
+              <Input label="Moneda" value={draft.currency} onChange={(e) => setDraft({ ...draft, currency: e.target.value.toUpperCase(), applyToBalances: e.target.value.toUpperCase() === 'EUR' ? draft.applyToBalances : false })} />
               <Field label="Cuenta">
-                <select className={fieldClass} value={draft.accountId} onChange={(e) => setDraft({ ...draft, accountId: e.target.value, currency: accounts.find((account) => docId(account) === e.target.value)?.currency || draft.currency })}>
+                <select className={fieldClass} value={draft.accountId} onChange={(e) => pickAccount(e.target.value)}>
                   <option value="">Elige</option>
                   {accounts.filter((account) => !account.archived).map((account) => <option key={docId(account)} value={docId(account)}>{account.name}</option>)}
                 </select>
@@ -341,7 +361,8 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
                       {accountHoldings.map((item) => <option key={docId(item)} value={docId(item)}>{item.name}</option>)}
                     </select>
                   </Field>
-                  <Input label="Cantidad" type="number" step="any" value={draft.quantity} onChange={(e) => setDraft({ ...draft, quantity: e.target.value })} />
+                  <Input label="Recibí" type="number" step="any" value={draft.quantity} onChange={(e) => setDraft({ ...draft, quantity: e.target.value })} />
+                  <p className="text-xs font-medium text-slate-500 sm:col-span-2">En la cuenta, con la fecha y la hora, se calcula lo que recibiste.</p>
                 </>
               )}
               {draft.type === 'adjustment' && (
@@ -357,13 +378,25 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
                 <datalist id="categories">{CATEGORIES.map((item) => <option key={item} value={item} />)}</datalist>
               </Field>
               <Input label="Comisión informativa" type="number" step="any" value={draft.fee} onChange={(e) => setDraft({ ...draft, fee: e.target.value })} placeholder="No se resta otra vez" />
+                </>
+              )}
             </div>
+            {simpleMove && !formMore && !editing && (
+              <button type="button" onClick={() => setFormMore(true)} className="text-left text-sm font-bold text-slate-500">Fecha, categoría y comisión</button>
+            )}
+            {(formMore || editing || !simpleMove) && (
+              <>
             <Input label="Descripción" value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} />
-            <label className="flex items-center gap-2 text-sm font-medium">
-              <input type="checkbox" checked={draft.applyToBalances} onChange={(e) => setDraft({ ...draft, applyToBalances: e.target.checked })} />
-              Actualizar el saldo de la cuenta
-            </label>
-            <p className="text-xs font-medium text-slate-500">Para BTC, ETH u otra moneda sin precio en euros, déjalo sin marcar. El apunte se guarda y no se inventa un importe en euros.</p>
+            {draft.currency === 'EUR' ? (
+              <label className="flex items-center gap-2 text-sm font-medium">
+                <input type="checkbox" checked={draft.applyToBalances} onChange={(e) => setDraft({ ...draft, applyToBalances: e.target.checked })} />
+                Actualizar el saldo de la cuenta
+              </label>
+            ) : (
+              <p className="text-xs font-medium text-slate-500">Se guarda en {draft.currency} y el saldo en euros no cambia.</p>
+            )}
+              </>
+            )}
             <div className="flex items-center justify-between gap-2">
               {editing ? (
                 <Button variant="outline" onClick={() => { if (confirmRemove) void remove(); else setConfirmRemove(true); }}>{confirmRemove ? 'Confirmar' : 'Eliminar'}</Button>
@@ -382,6 +415,7 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
     setEditing(docId(row));
     setDuplicate(false);
     setConfirmRemove(false);
+    setFormMore(true);
     setDraft({
       type: row.type,
       date: row.date,

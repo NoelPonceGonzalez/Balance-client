@@ -1,6 +1,7 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { motion } from 'motion/react';
 import { LayoutDashboard, Target, Settings, ArrowLeftRight, LineChart } from 'lucide-react';
+import { FixedCheck } from '@/components/FixedCheck';
 import { InstallApp } from '@/components/InstallApp';
 import { Mark } from '@/components/Mark';
 import { NotificationsBell } from '@/components/NotificationsBell';
@@ -21,13 +22,17 @@ export function Shell({
   section,
   onChange,
   user,
+  onSettled,
   children,
 }: {
   section: Section;
   onChange: (section: Section) => void;
   user: User;
+  onSettled: () => void;
   children: ReactNode;
 }) {
+  const [dueNonce, setDueNonce] = useState(0);
+  const [dueKey, setDueKey] = useState<string | null>(null);
   const scrollRef = useRef<HTMLElement>(null);
   const bandRef = useRef<HTMLDivElement>(null);
 
@@ -98,7 +103,7 @@ export function Shell({
         </div>
         <div className="ml-auto flex items-center gap-1">
           <InstallApp compact />
-          <NotificationsBell align="right" />
+          <NotificationsBell align="right" onDue={(quoteKey) => { setDueKey(quoteKey); setDueNonce((value) => value + 1); }} />
           <button
             type="button"
             onClick={() => onChange('settings')}
@@ -109,6 +114,7 @@ export function Shell({
           </button>
         </div>
       </header>
+      <FixedCheck nonce={dueNonce} focusKey={dueKey} onSettled={onSettled} />
       <main ref={scrollRef} className="app-scroll min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-4 py-2 md:px-8">
         <div ref={bandRef} className="origin-center will-change-transform">
           {children}

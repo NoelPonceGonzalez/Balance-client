@@ -17,7 +17,12 @@ interface DuePrompt {
 type Answer = 'yes' | 'no' | null;
 type Fit = 'same' | 'more' | 'less' | null;
 
-export function FixedCheck({ onSettled }: { onSettled: () => void }) {
+function sameDue(prompt: DuePrompt, focusKey: string | null): boolean {
+  if (!focusKey) return false;
+  return focusKey === `plan-due:${prompt.planId}:${prompt.key}`;
+}
+
+export function FixedCheck({ nonce, focusKey, onSettled }: { nonce: number; focusKey: string | null; onSettled: () => void }) {
   const [prompts, setPrompts] = useState<DuePrompt[]>([]);
   const [answer, setAnswer] = useState<Answer>(null);
   const [fit, setFit] = useState<Fit>(null);
@@ -25,12 +30,23 @@ export function FixedCheck({ onSettled }: { onSettled: () => void }) {
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [later, setLater] = useState(false);
+  const [token, setToken] = useState(nonce);
+  if (token !== nonce) {
+    setToken(nonce);
+    setLater(false);
+  }
 
   useEffect(() => {
     let cancelled = false;
     api<{ prompts: DuePrompt[] }>('/api/plans/due')
       .then((data) => {
-        if (!cancelled) setPrompts(data.prompts || []);
+        if (cancelled) return;
+        const rows = data.prompts || [];
+        const focus = rows.findIndex((item) => sameDue(item, focusKey));
+        setPrompts(focus > 0 ? [rows[focus], ...rows.slice(0, focus), ...rows.slice(focus + 1)] : rows);
+        setAnswer(null);
+        setFit(null);
+        setAmount('');
       })
       .catch(() => {
         if (!cancelled) setPrompts([]);
@@ -38,7 +54,7 @@ export function FixedCheck({ onSettled }: { onSettled: () => void }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [nonce, focusKey]);
 
   const current = prompts[0];
   if (!current || later) return null;

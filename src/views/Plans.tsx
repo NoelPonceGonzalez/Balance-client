@@ -281,7 +281,7 @@ function shiftMonths(months: PlanMonthView[], key: string, paid: boolean): PlanM
   }));
 }
 
-export function Plans({ embedded = false }: { embedded?: boolean }) {
+export function Plans({ embedded = false, books = 0 }: { embedded?: boolean; books?: number }) {
   const [items, setItems] = useState<{ plan: PlanRow; forecast: PlanForecast }[]>([]);
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
@@ -332,7 +332,7 @@ export function Plans({ embedded = false }: { embedded?: boolean }) {
     api<{ accounts: AccountRow[] }>('/api/accounts')
       .then((data) => setAccounts(data.accounts))
       .catch(() => setAccounts([]));
-  }, []);
+  }, [books]);
 
   const save = async () => {
     if (!draft) return;
