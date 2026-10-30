@@ -11,6 +11,8 @@ import { Market } from '@/views/Market';
 import { Movements } from '@/views/Movements';
 import { Plans } from '@/views/Plans';
 import { Settings } from '@/views/Settings';
+import { JoinTrip } from '@/views/TripPlan';
+import { TicketCam } from '@/components/TicketCam';
 
 function applyTheme(theme: User['theme']) {
   const dark = theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
@@ -25,7 +27,11 @@ export default function App() {
   const [section, setSection] = useState<Section>('dashboard');
   const [home, setHome] = useState(0);
   const [books, setBooks] = useState(0);
-  const [heroMs, setHeroMs] = useState(() => Number(localStorage.getItem('pat_hero_ms')) || 2000);
+  const [heroMs, setHeroMs] = useState(() => Number(localStorage.getItem('pat_hero_ms')) || 5000);
+  const [junta, setJunta] = useState<string | null>(null);
+  const [ticket, setTicket] = useState(false);
+  const [focusPlan, setFocusPlan] = useState<string | null>(null);
+  const [focusTick, setFocusTick] = useState(0);
 
   const restoreSession = () => {
     const token = localStorage.getItem('pat_token');
@@ -57,6 +63,16 @@ export default function App() {
   useEffect(() => {
     localStorage.removeItem('pat_login_id');
     restoreSession();
+    const params = new URLSearchParams(window.location.search);
+    const fromUrl = params.get('junta') || '';
+    if (/^[A-Za-z0-9_-]{8,24}$/.test(fromUrl)) {
+      sessionStorage.setItem('pat_junta', fromUrl);
+      params.delete('junta');
+      const rest = params.toString();
+      window.history.replaceState({}, '', `${window.location.pathname}${rest ? `?${rest}` : ''}${window.location.hash}`);
+    }
+    const stored = sessionStorage.getItem('pat_junta') || '';
+    if (/^[A-Za-z0-9_-]{8,24}$/.test(stored)) setJunta(stored);
   }, []);
 
   useEffect(() => {
@@ -109,7 +125,14 @@ export default function App() {
   if (!user) return <LoginView onLogin={(next) => { setOffline(false); setSection('dashboard'); setHome((value) => value + 1); setUser(next); }} />;
 
   return (
-    <Shell section={section} onChange={(next) => { setSection(next); if (next === 'dashboard') setHome((value) => value + 1); }} user={user} onSettled={() => setBooks((value) => value + 1)}>
+    <Shell
+      section={section}
+      onChange={(next) => { setSection(next); if (next === 'dashboard') setHome((value) => value + 1); }}
+      onPlan={(id) => { setFocusPlan(id); setFocusTick((value) => value + 1); setSection('plans'); }}
+      onTicket={() => setTicket(true)}
+      user={user}
+      onSettled={() => setBooks((value) => value + 1)}
+    >
       <motion.div
         key={section}
         initial={window.matchMedia('(prefers-reduced-motion: reduce)').matches ? false : { opacity: 0, y: 8 }}
@@ -118,10 +141,32 @@ export default function App() {
       >
         {section === 'dashboard' && <Dashboard heroMs={heroMs} home={home} books={books} />}
         {section === 'market' && <Market />}
-        {section === 'plans' && <Plans books={books} />}
+        {section === 'plans' && <Plans books={books} userId={user.id} focusId={focusPlan} focusTick={focusTick} />}
         {section === 'movements' && <Movements />}
         {section === 'settings' && <Settings user={user} heroMs={heroMs} onHero={changeHero} onUser={setUser} onLogout={logout} />}
       </motion.div>
+      {junta && (
+        <JoinTrip
+          code={junta}
+          onClose={() => {
+            sessionStorage.removeItem('pat_junta');
+            setJunta(null);
+          }}
+          onOpen={(id) => {
+            sessionStorage.removeItem('pat_junta');
+            setJunta(null);
+            setFocusPlan(id);
+            setSection('plans');
+          }}
+        />
+      )}
+      {ticket && (
+        <TicketCam
+          userId={user.id}
+          onClose={() => setTicket(false)}
+          onSaved={() => { setTicket(false); setBooks((value) => value + 1); }}
+        />
+      )}
     </Shell>
   );
 }

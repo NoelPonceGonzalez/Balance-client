@@ -11,6 +11,7 @@ import { api, ApiError } from '@/lib/api';
 import { OriginGlyph, OriginPicker } from '@/components/OriginMark';
 import { formatDay, formatEur, formatNumber, formatPct, formatSignedEur } from '@/lib/format';
 import { glide, jelly, quickOut, softSpring } from '@/lib/motion';
+import { placeOnCurve, smoothPath } from '@/lib/curve';
 import { cn } from '@/lib/utils';
 import type { AccountProducts, ProductSection } from '@/lib/products';
 
@@ -218,27 +219,12 @@ function groupIcon(group: string): string {
   return '/extras/objeto.svg';
 }
 
-function smoothPath(xy: [number, number][]): string {
-  const n = xy.length;
-  const h = xy.slice(1).map(([x], index) => x - xy[index][0]);
-  const s = xy.slice(1).map(([, y], index) => (h[index] ? (y - xy[index][1]) / h[index] : 0));
-  const m = xy.map((_, index) => {
-    if (index === 0) return s[0];
-    if (index === n - 1) return s[n - 2];
-    const s0 = s[index - 1];
-    const s1 = s[index];
-    if (s0 * s1 <= 0) return 0;
-    const p = (s0 * h[index] + s1 * h[index - 1]) / (h[index - 1] + h[index]);
-    return Math.sign(s0) * Math.min(Math.abs(s0), Math.abs(s1), 0.5 * Math.abs(p)) * 2;
-  });
-  let d = `M${xy[0][0].toFixed(1)} ${xy[0][1].toFixed(1)}`;
-  for (let index = 0; index < n - 1; index += 1) {
-    const [x0, y0] = xy[index];
-    const [x1, y1] = xy[index + 1];
-    const step = h[index] / 3;
-    d += ` C${(x0 + step).toFixed(1)} ${(y0 + m[index] * step).toFixed(1)} ${(x1 - step).toFixed(1)} ${(y1 - m[index + 1] * step).toFixed(1)} ${x1.toFixed(1)} ${y1.toFixed(1)}`;
+function pointTime(day: string): number {
+  if (day.includes('T')) {
+    const parsed = Date.parse(day);
+    if (Number.isFinite(parsed)) return parsed;
   }
-  return d;
+  return Date.parse(`${day.slice(0, 10)}T00:00:00Z`);
 }
 
 const MONTH = new Intl.DateTimeFormat('es-ES', { month: 'short', timeZone: 'UTC' });
@@ -294,21 +280,27 @@ export function CashChart({ points, now, hidden, base = null, label, showPct = f
   const guideId = `${fillId}-guide`;
   const [box, setBox] = useState<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(0);
-  const [active, setActive] = useState<number | null>(null);
+  const [scrub, setScrub] = useState<{ x: number; y: number; eur: number; day: string } | null>(null);
   const pressed = useRef(false);
+  const scrubOn = useRef(false);
+  const pendingX = useRef<number | null>(null);
+  const frame = useRef(0);
+  const sampleRef = useRef<(x: number) => { x: number; y: number; eur: number; day: string } | null>(() => null);
+  const pickAt = useRef<(clientX: number) => void>(() => {});
+  useEffect(() => () => { if (frame.current) cancelAnimationFrame(frame.current); }, []);
   useEffect(() => {
     if (!box) return;
     const watch = new ResizeObserver(([entry]) => setWidth(Math.round(entry.contentRect.width)));
     watch.observe(box);
     return () => watch.disconnect();
   }, [box]);
-  const byDay = new Map<string, number>();
-  for (const point of points) byDay.set(point.day.slice(0, 10), point.eur);
-  const line = [...byDay.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([day, eur]) => ({ day, eur }));
+  const byStamp = new Map<string, number>();
+  for (const point of points) byStamp.set(point.day, point.eur);
+  const line = [...byStamp.entries()].sort((a, b) => pointTime(a[0]) - pointTime(b[0])).map(([day, eur]) => ({ day, eur }));
   const height = plain ? 300 : tall ? 228 : 168;
   const still = stillMotion();
   const enough = line.length >= 2 && width > 0;
-  const times = line.map((point) => Date.parse(`${point.day}T00:00:00Z`));
+  const times = line.map((point) => pointTime(point.day));
   const t0 = times[0] ?? 0;
   const tSpan = (times[times.length - 1] ?? 0) - t0 || 1;
   const values = line.map((point) => point.eur);
@@ -325,7 +317,7 @@ export function CashChart({ points, now, hidden, base = null, label, showPct = f
   const d = enough ? smoothPath(xy) : '';
   const area = enough ? `${d} L${width} ${height} L0 ${height} Z` : '';
   const first = reference ?? line[0]?.eur ?? now;
-  const focus = active != null ? line[active] : null;
+  const focus = scrub;
   const value = focus ? focus.eur : now;
   const change = value - first;
   const pct = first > 0 ? (change / first) * 100 : null;
@@ -336,18 +328,94 @@ export function CashChart({ points, now, hidden, base = null, label, showPct = f
   const accent = tone && tone !== 'ink' ? tone : null;
   const color = accent || (up ? '#16c784' : '#ea3943');
   const stroke = lined && !accent ? 'currentColor' : color;
-  const mark = active != null ? xy[active] : xy[xy.length - 1];
-  const cut = active != null ? mark?.[0] ?? null : null;
+  const mark = focus ? [focus.x, focus.y] as [number, number] : xy[xy.length - 1];
+  const cut = focus ? focus.x : null;
+  sampleRef.current = (x: number) => {
+    if (!enough) return null;
+    const placed = placeOnCurve(xy, x, height, bottom, top);
+    let day = line[0]?.day || '';
+    let best = Infinity;
+    for (let index = 0; index < xy.length; index += 1) {
+      const dist = Math.abs(xy[index][0] - placed.x);
+      if (dist < best) {
+        best = dist;
+        day = line[index].day;
+      }
+    }
+    return { ...placed, day };
+  };
   const pick = (clientX: number) => {
     if (!box || !enough) return;
     const rect = box.getBoundingClientRect();
-    const x = Math.min(Math.max(clientX - rect.left, 0), rect.width);
-    let best = 0;
-    xy.forEach(([px], index) => {
-      if (Math.abs(px - x) < Math.abs(xy[best][0] - x)) best = index;
+    pendingX.current = Math.min(Math.max(clientX - rect.left, 0), rect.width);
+    if (frame.current) return;
+    frame.current = requestAnimationFrame(() => {
+      frame.current = 0;
+      const x = pendingX.current;
+      if (x == null) return;
+      const next = sampleRef.current(x);
+      if (!next) return;
+      scrubOn.current = true;
+      setScrub(next);
     });
-    setActive(best);
   };
+  pickAt.current = pick;
+  const release = () => {
+    pressed.current = false;
+    pendingX.current = null;
+    if (frame.current) cancelAnimationFrame(frame.current);
+    frame.current = 0;
+    if (!scrubOn.current) return;
+    scrubOn.current = false;
+    setScrub(null);
+  };
+  useEffect(() => {
+    const el = box;
+    if (!el) return;
+    let mode: 'wait' | 'scrub' | 'scroll' = 'wait';
+    let x0 = 0;
+    let y0 = 0;
+    const begin = (event: TouchEvent) => {
+      if (event.touches.length !== 1) {
+        mode = 'scroll';
+        release();
+        return;
+      }
+      mode = 'wait';
+      x0 = event.touches[0].clientX;
+      y0 = event.touches[0].clientY;
+    };
+    const move = (event: TouchEvent) => {
+      if (event.touches.length !== 1 || mode === 'scroll') return;
+      const x = event.touches[0].clientX;
+      const y = event.touches[0].clientY;
+      if (mode === 'wait') {
+        const dx = x - x0;
+        const dy = y - y0;
+        if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+        mode = Math.abs(dx) > Math.abs(dy) * 1.25 ? 'scrub' : 'scroll';
+        if (mode === 'scroll') return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      pressed.current = true;
+      pickAt.current(x);
+    };
+    const end = () => {
+      mode = 'wait';
+      release();
+    };
+    el.addEventListener('touchstart', begin, { passive: true });
+    el.addEventListener('touchmove', move, { passive: false });
+    el.addEventListener('touchend', end);
+    el.addEventListener('touchcancel', end);
+    return () => {
+      el.removeEventListener('touchstart', begin);
+      el.removeEventListener('touchmove', move);
+      el.removeEventListener('touchend', end);
+      el.removeEventListener('touchcancel', end);
+    };
+  }, [box]);
   const shownDay = focus?.day || line[line.length - 1]?.day || null;
   useEffect(() => { onValue?.(value); }, [onValue, value]);
   useEffect(() => { if (shownDay) onDay?.(shownDay); }, [onDay, shownDay]);
@@ -387,10 +455,15 @@ export function CashChart({ points, now, hidden, base = null, label, showPct = f
         ref={setBox}
         className={cn('relative select-none', plain ? '-mx-5 mt-1' : 'mt-4')}
         style={{ height: enough || width === 0 ? height : 48, touchAction: 'pan-y' }}
-        onPointerDown={(event) => { pressed.current = true; pick(event.clientX); try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* un puntero sintético no se puede capturar */ } }}
-        onPointerMove={(event) => { if (pressed.current) pick(event.clientX); }}
-        onPointerUp={() => { pressed.current = false; setActive(null); }}
-        onPointerCancel={() => { pressed.current = false; setActive(null); }}
+        onPointerDown={(event) => {
+          if (event.pointerType === 'touch') return;
+          pressed.current = true;
+          pick(event.clientX);
+          try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* un puntero sintético no se puede capturar */ }
+        }}
+        onPointerMove={(event) => { if (event.pointerType !== 'touch' && pressed.current) pick(event.clientX); }}
+        onPointerUp={release}
+        onPointerCancel={release}
       >
         {enough ? (
           <>
@@ -451,18 +524,25 @@ export function CashChart({ points, now, hidden, base = null, label, showPct = f
                   clipPath={`url(#${futureId})`}
                 />
               )}
-              {active != null && mark && <line x1={mark[0]} x2={mark[0]} y1={0} y2={height} stroke={`url(#${guideId})`} strokeWidth={1} className="text-slate-500 dark:text-white" />}
+              {focus && mark && <line x1={mark[0]} x2={mark[0]} y1={0} y2={height} stroke={`url(#${guideId})`} strokeWidth={1} className="text-slate-500 dark:text-white" />}
             </svg>
-            {mark && !plain && (!lined || active != null) && (
-              <motion.span
+            {mark && !plain && focus && (
+              <span
                 aria-hidden
                 className={cn('pointer-events-none absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white dark:border-slate-900', lined && !accent && 'bg-slate-950 dark:bg-white')}
                 style={{ left: mark[0], top: mark[1], background: lined && !accent ? undefined : color }}
+              />
+            )}
+            {mark && !plain && !lined && !focus && (
+              <motion.span
+                aria-hidden
+                className="pointer-events-none absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white dark:border-slate-900"
+                style={{ left: mark[0], top: mark[1], background: color }}
                 initial={still ? false : { scale: 0 }}
                 animate={{ scale: 1 }}
-                transition={{ ...jelly, delay: active != null || still ? 0 : 1.25 }}
+                transition={{ ...jelly, delay: still ? 0 : 1.25 }}
               >
-                {active == null && !still && (
+                {!still && (
                   <motion.span
                     className="absolute inset-0 rounded-full"
                     style={{ background: color }}

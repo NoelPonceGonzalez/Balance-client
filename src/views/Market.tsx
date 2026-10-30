@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { Search, X } from 'lucide-react';
-import { motion } from 'motion/react';
 import { Modal } from '@/components/Modal';
 import { QuietLoad } from '@/components/QuietLoad';
 import { Sparkline } from '@/components/Sparkline';
@@ -10,6 +9,7 @@ import { Input } from '@/components/ui/Input';
 import { api } from '@/lib/api';
 import { formatAgo, formatDay, formatEur, formatNumber, formatPct, formatPrice } from '@/lib/format';
 import { cn } from '@/lib/utils';
+import { CashChart, type LinePoint } from '@/views/Wallets';
 import type { MarketBoard, MarketItem, MarketPending, MarketStory, MarketTapeItem, QuoteCandidate } from '@/lib/types';
 
 function fold(value: string): string {
@@ -162,57 +162,12 @@ const STORY_SPANS = [
 ] as const;
 
 function canSpan(kind: string) {
-  return kind === 'crypto' || kind === 'etf' || kind === 'stock' || kind === 'gold';
+  return kind === 'crypto' || kind === 'etf' || kind === 'stock' || kind === 'gold' || kind === 'silver' || kind === 'oil' || kind === 'copper' || kind === 'index';
 }
 
-function PriceChart({ values, up }: { values: number[]; up: boolean }) {
-  const clean = values.filter((value) => Number.isFinite(value));
-  if (clean.length < 2) return <p className="text-sm font-medium text-slate-400">Todavía no hay suficientes precios para la gráfica.</p>;
-  const min = Math.min(...clean);
-  const max = Math.max(...clean);
-  const span = max - min || 1;
-  const width = 640;
-  const height = 220;
-  const points = clean.map((value, index) => {
-    const x = (index / (clean.length - 1)) * width;
-    const y = height - ((value - min) / span) * (height - 24) - 12;
-    return { x, y };
-  });
-  const path = points.map((point, index) => `${index === 0 ? 'M' : 'L'}${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(' ');
-  const area = `${path} L${width} ${height} L0 ${height} Z`;
-  const last = points[points.length - 1];
-  const color = up ? '#16c784' : '#ea3943';
-  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  return (
-    <div>
-      <div className="mb-1 flex justify-between text-[11px] font-bold tabular-nums text-slate-400">
-        <span>Máx {formatPrice(max)}</span>
-        <span>Mín {formatPrice(min)}</span>
-      </div>
-      <svg viewBox={`0 0 ${width} ${height}`} className="h-52 w-full overflow-visible" role="img" aria-label="Gráfica del precio">
-        <defs>
-          <linearGradient id="price-area" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={color} stopOpacity="0.28" />
-            <stop offset="100%" stopColor={color} stopOpacity="0" />
-          </linearGradient>
-        </defs>
-        <motion.path d={area} fill="url(#price-area)" initial={reduce ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.45 }} />
-        <motion.path
-          d={path}
-          fill="none"
-          stroke={color}
-          strokeWidth="3.5"
-          strokeLinejoin="round"
-          strokeLinecap="round"
-          initial={reduce ? false : { pathLength: 0 }}
-          animate={{ pathLength: 1 }}
-          transition={{ duration: 0.95, ease: [0.22, 1, 0.36, 1] }}
-        />
-        <circle cx={last.x} cy={last.y} r="5" fill={color} />
-        <circle cx={last.x} cy={last.y} r="9" fill={color} opacity="0.2" />
-      </svg>
-    </div>
-  );
+function quoteAmount(kind: string, value: number | null | undefined): string {
+  if (kind === 'index') return formatNumber(value, 2);
+  return formatPrice(value);
 }
 
 function QuoteRow({ item, onOpen, onChanged }: { item: MarketItem; onOpen: () => void; onChanged: () => void }) {
@@ -267,7 +222,7 @@ function TapeRow({ item, fallback, onOpen }: { item: MarketTapeItem; fallback?: 
       </div>
       <span className="hidden sm:block"><Sparkline values={item.sparkline} up={up} /></span>
       <div className="text-right">
-        <p className="font-black tabular-nums">{formatPrice(item.priceEur)}</p>
+        <p className="font-black tabular-nums">{quoteAmount(item.kind, item.priceEur)}</p>
         <p className={cn('text-[11px] font-black tabular-nums', !up && !down ? 'text-slate-400' : up ? 'text-[#16c784]' : 'text-[#ea3943]')}>
           {item.changePct == null ? '—' : formatPct(item.changePct)}
           {item.changePct != null && <span className="ml-1 font-bold opacity-80">{item.changeLabel}</span>}
@@ -313,6 +268,8 @@ function StoryDialog({ item, onClose }: { item: { kind: string; key: string; nam
   const [failed, setFailed] = useState('');
   const [days, setDays] = useState(30);
   const [loadedDays, setLoadedDays] = useState(30);
+  const [live, setLive] = useState<number | null>(null);
+  const [liveDay, setLiveDay] = useState<string | null>(null);
   const spans = canSpan(item.kind);
   useEffect(() => {
     if (!item.key) return;
@@ -324,19 +281,20 @@ function StoryDialog({ item, onClose }: { item: { kind: string; key: string; nam
       .catch((err: Error) => { if (!cancelled) setFailed(err.message); });
     return () => { cancelled = true; };
   }, [item.kind, item.key, item.name, item.symbol, days, spans]);
-  const drawn = story && story.series.length >= 2 ? story.series.map((point) => point.eur) : [];
-  const matched = Boolean(story && story.series.length >= 2);
+  const points: LinePoint[] = story && story.series.length >= 2 ? story.series.map((point) => ({ day: point.at, eur: point.eur })) : [];
+  const matched = points.length >= 2;
   const change = matched ? story?.changePct : item.changePct;
   const label = matched ? story?.changeLabel : item.changeLabel;
   const up = (change ?? 0) > 0;
   const down = (change ?? 0) < 0;
-  const started = matched ? story?.series[0]?.at : undefined;
-  const ended = matched ? story?.series[story.series.length - 1]?.at : undefined;
   const waiting = Boolean(item.key) && !story && !failed;
   return (
     <Modal title={item.name} onClose={onClose} wide>
       <div className="flex flex-wrap items-end justify-between gap-3">
-        <p className="text-2xl font-black tabular-nums sm:text-3xl">{item.priceEur == null ? '—' : formatPrice(item.priceEur)}</p>
+        <div>
+          <p className="text-2xl font-black tabular-nums sm:text-3xl">{quoteAmount(item.kind, live ?? item.priceEur)}</p>
+          {liveDay && <p className="mt-1 text-[13px] font-semibold text-slate-400">{formatDay(liveDay)}</p>}
+        </div>
         <span className={cn('rounded-xl px-3 py-1.5 text-sm font-black', !up && !down ? 'bg-slate-100 text-slate-500' : up ? 'bg-[#16c784]/15 text-[#16c784]' : 'bg-[#ea3943]/15 text-[#ea3943]')}>
           {change == null ? '—' : formatPct(change)}
           {change != null && <span className="ml-1 text-[10px] font-bold opacity-80">{label}</span>}
@@ -357,9 +315,20 @@ function StoryDialog({ item, onClose }: { item: { kind: string; key: string; nam
         </div>
       )}
       <div className="mt-4">
-        {waiting && drawn.length < 2 ? <QuietLoad kind="chart" /> : <PriceChart key={`${loadedDays}:${drawn.length}`} values={drawn} up={up || (!down && (change ?? 0) >= 0)} />}
+        {waiting && points.length < 2 ? <QuietLoad kind="chart" /> : points.length < 2 ? <p className="text-sm font-medium text-slate-400">Todavía no hay suficientes precios para la gráfica.</p> : (
+          <CashChart
+            key={`${item.key}:${loadedDays}`}
+            quiet
+            tall
+            points={points}
+            now={item.priceEur ?? points[points.length - 1].eur}
+            hidden={false}
+            onValue={setLive}
+            onDay={setLiveDay}
+            emptyText="Todavía no hay suficientes precios para la gráfica."
+          />
+        )}
         {spans && days !== loadedDays && <p className="mt-1 text-[11px] font-bold text-slate-400">Cargando este tramo…</p>}
-        {started && ended && <p className="mt-1 flex justify-between text-[11px] font-bold text-slate-400"><span>{formatDay(started.slice(0, 10))}</span><span>{formatDay(ended.slice(0, 10))}</span></p>}
       </div>
       {story && story.floats.length > 0 && (
         <div className="mt-4">
@@ -420,19 +389,24 @@ export function Market() {
   const needle = query.trim();
   const keep = (items: MarketTapeItem[] | undefined) => (items || []).filter((item) => matches(needle, [item.name, item.symbol, item.sourceLabel]));
   const sections = [
-    { id: 'crypto', title: 'Criptomonedas', icon: data.cryptos?.find((item) => item.image)?.image || '/markets/crypto.svg', items: keep(data.cryptos) },
-    { id: 'etf', title: 'ETF', icon: '/markets/etf.svg', items: keep(data.etfs) },
-    { id: 'stock', title: 'Acciones', icon: '/markets/stock.svg', items: keep(data.stocks) },
-    { id: 'gold', title: 'Oro', icon: '/platforms/oro.svg', items: keep(data.gold) },
-    { id: 'cs2', title: 'CS2', icon: data.icons?.cs2 || '/platforms/cs2.svg', items: keep(data.cs2) },
-    { id: 'tf2', title: 'TF2', icon: data.icons?.tf2 || '/extras/tf2.svg', items: keep(data.tf2) },
+    { id: 'crypto', title: 'Criptomonedas', icon: data.cryptos?.find((item) => item.image)?.image || '/markets/crypto.svg', items: keep(data.cryptos), ready: (data.cryptos || []).length > 0 },
+    { id: 'stock', title: 'Acciones', icon: '/markets/stock.svg', items: keep(data.stocks), ready: (data.stocks || []).length > 0 },
+    { id: 'etf', title: 'ETF', icon: '/markets/etf.svg', items: keep(data.etfs), ready: (data.etfs || []).length > 0 },
+    { id: 'index', title: 'Índices', icon: '/markets/index.svg', items: keep(data.indices), ready: (data.indices || []).length > 0 },
+    { id: 'gold', title: 'Oro', icon: '/platforms/oro.svg', items: keep(data.gold), ready: (data.gold || []).length > 0 },
+    { id: 'silver', title: 'Plata', icon: '/markets/silver.svg', items: keep(data.silver), ready: (data.silver || []).length > 0 },
+    { id: 'oil', title: 'Petróleo', icon: '/markets/oil.svg', items: keep(data.oil), ready: (data.oil || []).length > 0 },
+    { id: 'copper', title: 'Cobre', icon: '/markets/copper.svg', items: keep(data.copper), ready: (data.copper || []).length > 0 },
+    { id: 'cs2', title: 'CS2', icon: data.icons?.cs2 || '/platforms/cs2.svg', items: keep(data.cs2), ready: (data.cs2 || []).length > 0 },
+    { id: 'tf2', title: 'TF2', icon: data.icons?.tf2 || '/extras/tf2.svg', items: keep(data.tf2), ready: (data.tf2 || []).length > 0 },
   ];
+  const chips = sections.filter((section) => section.ready);
   const visible = market === 'all' ? sections : sections.filter((section) => section.id === market);
   const investments = data.items.filter((item) => matches(needle, [item.name, item.symbol, item.accountName]));
   const pending = data.pending.filter((item) => matches(needle, [item.name, item.symbol, item.accountName]));
   const tapes = sections.flatMap((section) => section.items);
   const fresh = [...tapes, ...data.items].some((item) => !item.stale && !item.error);
-  const empty = sections.every((section) => (section.id === 'crypto' ? (data.cryptos || []) : section.id === 'etf' ? (data.etfs || []) : section.id === 'stock' ? (data.stocks || []) : section.id === 'gold' ? (data.gold || []) : section.id === 'cs2' ? (data.cs2 || []) : (data.tf2 || [])).length === 0) && data.items.length === 0;
+  const empty = sections.every((section) => !section.ready) && data.items.length === 0;
   const noMatch = !empty && needle.length > 0 && tapes.length + investments.length + pending.length === 0;
 
   return (
@@ -463,9 +437,9 @@ export function Market() {
           }
         />
       </div>
-      <div className="flex touch-[pan-x_pan-y] gap-2 overflow-x-auto pb-1">
+      <div className="market-pills -mx-4 flex gap-2 overflow-x-auto px-4">
         <button type="button" onClick={() => setMarket('all')} className={cn('shrink-0 rounded-full px-3 py-1.5 text-sm font-bold', market === 'all' ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900' : 'bg-white text-slate-500 dark:bg-white/10')}>Todos</button>
-        {sections.map((section) => (
+        {chips.map((section) => (
           <button key={section.id} type="button" onClick={() => setMarket(section.id)} className={cn('inline-flex shrink-0 items-center gap-2 rounded-full py-1 pl-1 pr-3 text-sm font-bold', market === section.id ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900' : 'bg-white text-slate-600 dark:bg-white/10 dark:text-slate-200')}>
             <img src={section.icon} alt="" width={28} height={28} referrerPolicy="no-referrer" className="h-7 w-7 rounded-full bg-white object-cover" />
             {section.title}

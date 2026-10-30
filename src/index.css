@@ -52,6 +52,17 @@
   }
 }
 
+.market-pills {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x pan-y;
+}
+
+.market-pills::-webkit-scrollbar {
+  display: none;
+}
+
 .app-scroll {
   scrollbar-width: thin;
   scrollbar-color: rgba(100, 116, 139, 0.45) transparent;

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <rect width="128" height="128" rx="28" fill="#C4724A"/>
+  <circle cx="64" cy="64" r="30" fill="none" stroke="#6B3418" stroke-width="6"/>
+  <text x="64" y="72" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="26" font-weight="700" fill="#6B3418">Cu</text>
+</svg>

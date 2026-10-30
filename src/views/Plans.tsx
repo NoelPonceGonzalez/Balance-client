@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } f
 import { bindHold, HoldMenu, holdItemClass, placeMenu } from '@/components/HoldMenu';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'motion/react';
-import { Banknote, Check, ChevronLeft, GripVertical, ImageIcon, MoreHorizontal, Pencil, Plus, Trash2 } from 'lucide-react';
+import { Banknote, Check, ChevronLeft, ChevronRight, GripVertical, ImageIcon, MoreHorizontal, Pencil, Plus, Trash2 } from 'lucide-react';
 import { ModalClose, modalPanelClass, Overlay } from '@/components/Modal';
 import { OriginGlyph, OriginPicker } from '@/components/OriginMark';
 import { PlatformLogo } from '@/components/PlatformLogo';
@@ -11,12 +11,14 @@ import { Button } from '@/components/ui/Button';
 import { Input, fieldClass } from '@/components/ui/Input';
 import { api } from '@/lib/api';
 import { jelly, quickOut } from '@/lib/motion';
-import { formatEur, formatSignedEur } from '@/lib/format';
+import { formatDay, formatEur, formatSignedEur } from '@/lib/format';
 import { planImageFileName, renderPlanPng } from '@/lib/plan-image';
 import { cn, docId } from '@/lib/utils';
-import type { AccountRow, PlanForecast, PlanMonthLine, PlanMonthView, PlanRow } from '@/lib/types';
+import type { AccountRow, PlanForecast, PlanMonthLine, PlanMonthView, PlanRow, TripSplit } from '@/lib/types';
+import { TripFace, TripPlan } from '@/views/TripPlan';
 
-type Kind = 'patrimonio' | 'liquidez' | 'inversion';
+type Kind = 'patrimonio' | 'liquidez' | 'inversion' | 'gastos';
+type PlanItem = { plan: PlanRow; forecast: PlanForecast; split?: TripSplit };
 
 interface Draft {
   name: string;
@@ -30,6 +32,7 @@ interface Draft {
   targetAmount: string;
   targetDate: string;
   monthlySavings: string;
+  contributed: string;
   linkedAccountIds: string[];
   manualRealBalance: string;
   recurring: { id?: string; name: string; amount: string; dayOfMonth: string; paidDates: string[]; direction?: 'in' | 'out' }[];
@@ -51,6 +54,7 @@ const blank = (): Draft => ({
   targetAmount: '',
   targetDate: '',
   monthlySavings: '',
+  contributed: '',
   linkedAccountIds: [],
   manualRealBalance: '',
   recurring: [],
@@ -150,6 +154,7 @@ function fromPlan(plan: PlanRow): Draft {
     targetAmount: String(plan.targetAmount),
     targetDate: plan.targetDate,
     monthlySavings: String(plan.monthlySavings ?? ''),
+    contributed: '',
     linkedAccountIds: (plan.linkedAccountIds || []).map(String),
     manualRealBalance: plan.manualRealBalance == null ? '' : String(plan.manualRealBalance),
     recurring: (plan.recurring || []).map((item) => ({ id: item._id, name: item.name, amount: String(item.amount), dayOfMonth: String(item.dayOfMonth), paidDates: item.paidDates || [], direction: item.direction === 'in' ? 'in' as const : 'out' as const })),
@@ -161,12 +166,11 @@ function fromPlan(plan: PlanRow): Draft {
 }
 
 function planPlaces(accounts: AccountRow[]): AccountRow[] {
-  const open = accounts.filter((account) => !account.archived && !/cs2|counter-strike|tf2|team fortress/i.test(`${account.platform} ${account.name}`));
-  const withMoney = open.filter((account) => account.balance > 0);
-  return withMoney.length ? withMoney : open;
+  return accounts.filter((account) => !account.archived);
 }
 
 function kindLabel(plan: { kind?: string; linkedAccountIds?: unknown[] }): string {
+  if (plan.kind === 'gastos') return 'Reparto';
   if (plan.kind === 'liquidez') return 'Liquidez';
   if (plan.kind === 'inversion') return 'Inversión';
   if (isPurchase(plan)) return 'Compra';
@@ -207,18 +211,16 @@ function barWidth(balance: number, target: number): number {
   return Math.max(0, Math.min(100, (balance / target) * 100));
 }
 
-function monthPace(extraMonths: number | null | undefined): { text: string; className: string } {
-  if (extraMonths == null) return { text: 'Sin mes de más', className: 'text-slate-400' };
-  if (extraMonths > 0) {
-    const months = extraMonths === 1 ? 'un mes de más' : `${extraMonths} meses de más`;
-    return { text: `Vas mal · ${months}`, className: 'text-[#ea3943]' };
-  }
-  if (extraMonths < 0) {
-    const ahead = -extraMonths;
-    const months = ahead === 1 ? 'un mes antes' : `${ahead} meses antes`;
-    return { text: `Vas mejor · ${months}`, className: 'text-[#16c784]' };
-  }
-  return { text: 'Vas mejor · sin mes de más', className: 'text-[#16c784]' };
+function arrivalNote(hit: string | null | undefined, targetDate: string | undefined): { text: string; className: string } | null {
+  if (!hit) return null;
+  const hitMonth = hit.slice(0, 7);
+  const targetMonth = targetDate?.slice(0, 7) || '';
+  const late = Boolean(targetMonth) && hitMonth > targetMonth;
+  const early = Boolean(targetMonth) && hitMonth < targetMonth;
+  return {
+    text: `Llegas el ${formatDay(hit)}`,
+    className: late ? 'text-[#ea3943]' : early ? 'text-[#16c784]' : 'text-slate-400',
+  };
 }
 
 function surprisePace(plan: PlanRow): { ahead: number; behind: number } {
@@ -281,13 +283,12 @@ function shiftMonths(months: PlanMonthView[], key: string, paid: boolean): PlanM
   }));
 }
 
-export function Plans({ embedded = false, books = 0 }: { embedded?: boolean; books?: number }) {
-  const [items, setItems] = useState<{ plan: PlanRow; forecast: PlanForecast }[]>([]);
+export function Plans({ embedded = false, books = 0, userId = '', focusId = null, focusTick = 0 }: { embedded?: boolean; books?: number; userId?: string; focusId?: string | null; focusTick?: number }) {
+  const [items, setItems] = useState<PlanItem[]>([]);
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [monthOpen, setMonthOpen] = useState<Record<string, boolean>>({});
   const [draft, setDraft] = useState<Draft | null>(null);
-  const [shaped, setShaped] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState('');
@@ -305,6 +306,8 @@ export function Plans({ embedded = false, books = 0 }: { embedded?: boolean; boo
   const [ready, setReady] = useState(false);
   const [previewDay, setPreviewDay] = useState<string | null>(null);
   const suppressCard = useRef(false);
+  const focusRef = useRef(focusId);
+  focusRef.current = focusId;
   useEffect(() => {
     setMonthOpen({});
   }, [selected]);
@@ -312,9 +315,12 @@ export function Plans({ embedded = false, books = 0 }: { embedded?: boolean; boo
   const marking = useRef(new Set<string>());
 
   const load = async () => {
-    const planData = await api<{ plans: { plan: PlanRow; forecast: PlanForecast }[] }>('/api/plans');
+    const planData = await api<{ plans: PlanItem[] }>('/api/plans');
     setItems(planData.plans);
-    setSelected((current) => (current && planData.plans.some((item) => docId(item.plan) === current) ? current : null));
+    setSelected((current) => {
+      const keep = current || focusRef.current;
+      return keep && planData.plans.some((item) => docId(item.plan) === keep) ? keep : null;
+    });
   };
 
   useEffect(() => {
@@ -327,6 +333,13 @@ export function Plans({ embedded = false, books = 0 }: { embedded?: boolean; boo
   }, [selected]);
 
   useEffect(() => {
+    if (!focusId || sessionStorage.getItem('pat_focus_done') === `${focusId}:${focusTick}`) return;
+    sessionStorage.setItem('pat_focus_done', `${focusId}:${focusTick}`);
+    setSelected(focusId);
+    load().catch((err: Error) => setError(err.message));
+  }, [focusId, focusTick]);
+
+  useEffect(() => {
     load().catch((err: Error) => setError(err.message)).finally(() => setReady(true));
     api<{ accounts: AccountRow[] }>('/api/accounts')
       .then((data) => setAccounts(data.accounts))
@@ -337,6 +350,18 @@ export function Plans({ embedded = false, books = 0 }: { embedded?: boolean; boo
     if (!draft) return;
     setError('');
     try {
+      if (draft.kind === 'gastos') {
+        const name = draft.name.trim();
+        if (!name) throw new Error('Ponle un nombre.');
+        const contributed = Number(draft.contributed || 0);
+        if (!Number.isFinite(contributed) || contributed < 0) throw new Error('Lo aportado no puede ser negativo.');
+        const saved = await api<{ plan: PlanRow }>('/api/plans', { method: 'POST', body: JSON.stringify({ name, kind: 'gastos', contributed }) });
+        setDraft(null);
+        setEditing(null);
+        await load();
+        setSelected(docId(saved.plan));
+        return;
+      }
       const body = toBody(draft);
       if (!(body.targetAmount > 0)) throw new Error('El objetivo tiene que ser mayor que cero.');
       if (!body.targetDate || !body.startDate) throw new Error('Faltan las fechas del plan.');
@@ -354,6 +379,7 @@ export function Plans({ embedded = false, books = 0 }: { embedded?: boolean; boo
 
   const current = items.find((item) => docId(item.plan) === selected) || null;
   const plan = current?.plan;
+  const menuPlan = cardMenu ? items.find((entry) => docId(entry.plan) === cardMenu.id) : null;
   const forecast = current?.forecast;
   const months = forecast?.months || [];
   const openingBalance = months[0]?.lines[0]?.balance ?? plan?.openingBalance ?? 0;
@@ -363,6 +389,7 @@ export function Plans({ embedded = false, books = 0 }: { embedded?: boolean; boo
   const shownMonths = lookingAhead && reachedDay ? walkMonths(months, reachedDay, openingBalance) : months;
   const shownBalance = lookingAhead && reachedDay ? walkedBalance(months, reachedDay, openingBalance) : todayBalance;
   const finished = forecast?.today && plan ? completion(months, forecast.today, openingBalance, plan.targetAmount) : null;
+  const arrival = finished ? null : arrivalNote(forecast?.estimatedDate, plan?.targetDate);
   const linked = accounts.filter((account) => (plan?.linkedAccountIds || []).map(String).includes(String(account._id)) && !account.archived);
   const payday = accounts.find((account) => String(account._id) === String(plan?.salaryAccountId) && !account.archived) || (linked.length === 1 ? linked[0] : undefined);
   const liquidity = linked[0];
@@ -657,6 +684,15 @@ export function Plans({ embedded = false, books = 0 }: { embedded?: boolean; boo
     await load();
   };
 
+  if (plan?.kind === 'gastos') {
+    return (
+      <div className={embedded ? 'space-y-4' : 'mx-auto max-w-3xl space-y-4'}>
+        {error && <p className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">{error}</p>}
+        <TripPlan plan={plan} split={current?.split} userId={userId} onBack={() => setSelected(null)} onChanged={load} />
+      </div>
+    );
+  }
+
   return (
     <div className={embedded ? 'space-y-4' : 'mx-auto max-w-3xl space-y-4'}>
       {plan && (
@@ -682,9 +718,9 @@ export function Plans({ embedded = false, books = 0 }: { embedded?: boolean; boo
             </div>
             {finished ? (
               <p className="mt-2 inline-flex items-center gap-1 text-xs font-black text-[#16c784]"><Check size={13} strokeWidth={3} /> Completado el {shortDay(finished.day)}</p>
-            ) : (
-              <p className={cn('mt-2 text-xs font-bold leading-snug', monthPace(forecast?.extraMonths).className)}>{monthPace(forecast?.extraMonths).text}</p>
-            )}
+            ) : arrival ? (
+              <p className={cn('mt-2 text-xs font-semibold leading-snug', arrival.className)}>{arrival.text}</p>
+            ) : null}
           </div>
         </div>
       )}
@@ -698,6 +734,37 @@ export function Plans({ embedded = false, books = 0 }: { embedded?: boolean; boo
             return { item, opening, done };
           }).sort((a, b) => Number(Boolean(a.done)) - Number(Boolean(b.done))).map(({ item, opening, done }) => {
             const id = docId(item.plan);
+            if (item.plan.kind === 'gastos') {
+              return (
+                <div
+                  key={id}
+                  onPointerDown={(event) => {
+                    if ((event.target as HTMLElement).closest('[data-menu]')) return;
+                    holdCard(id, event);
+                  }}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    setCardMenu({ id, ...placeMenu(event.clientX, event.clientY), confirm: false });
+                  }}
+                  onClick={() => {
+                    if (suppressCard.current) {
+                      suppressCard.current = false;
+                      return;
+                    }
+                    setSelected(id);
+                    setConfirmDelete(false);
+                  }}
+                  className="hold-target plan-rise cursor-pointer rounded-2xl border border-white/70 bg-white/70 p-3 text-left shadow-lg shadow-slate-900/5 backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/60"
+                >
+                  <TripFace
+                    plan={item.plan}
+                    split={item.split}
+                    onMenu={(rect) => setCardMenu({ id, ...placeMenu(rect.left + rect.width / 2, rect.top), confirm: false })}
+                    userId={userId}
+                  />
+                </div>
+              );
+            }
             const balance = done ? done.balance : item.forecast.today ? balanceAsOf(item.forecast.months || [], item.forecast.today, opening) : opening;
             const site = accounts.find((account) => (item.plan.linkedAccountIds || []).map(String).includes(String(account._id)) && !account.archived);
             const pace = surprisePace(item.plan);
@@ -765,7 +832,7 @@ export function Plans({ embedded = false, books = 0 }: { embedded?: boolean; boo
                       void makeImage(item);
                     }}
                     disabled={makingId === id}
-                    className="inline-flex items-center gap-1 rounded-full bg-slate-900 px-2.5 py-1 text-[11px] font-bold text-white disabled:opacity-50 dark:bg-white dark:text-slate-900"
+                    className="inline-flex items-center gap-1 rounded-full border border-slate-200/90 bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-slate-500 disabled:opacity-50 dark:border-white/15 dark:bg-white/5 dark:text-slate-300"
                   >
                     <ImageIcon size={12} />
                     {makingId === id ? 'Creando…' : 'Imagen'}
@@ -776,7 +843,7 @@ export function Plans({ embedded = false, books = 0 }: { embedded?: boolean; boo
           })}
           <button
             type="button"
-            onClick={() => { setEditing(null); setDraft(blank()); setShaped(false); setConfirmDelete(false); }}
+            onClick={() => { setEditing(null); setDraft(blank()); setConfirmDelete(false); }}
             className="flex min-h-28 flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-slate-300 bg-white/40 text-sm font-bold text-slate-500 transition-colors hover:bg-white/70 dark:border-white/15 dark:bg-white/5"
           >
             <Plus size={18} />
@@ -792,21 +859,26 @@ export function Plans({ embedded = false, books = 0 }: { embedded?: boolean; boo
               const item = items.find((entry) => docId(entry.plan) === cardMenu.id);
               setCardMenu(null);
               if (!item) return;
+              if (item.plan.kind === 'gastos') {
+                setSelected(cardMenu.id);
+                return;
+              }
               setEditing(cardMenu.id);
-              setShaped(true);
               setDraft(fromPlan(item.plan));
             }}
             className={cn(holdItemClass, 'text-slate-800 dark:text-slate-100')}
           >
             <Pencil size={14} /> Editar
           </button>
-          <button
-            type="button"
-            onClick={() => { if (cardMenu.confirm) void removeCard(cardMenu.id); else setCardMenu({ ...cardMenu, confirm: true }); }}
-            className={cn(holdItemClass, 'text-[#ea3943]')}
-          >
-            <Trash2 size={14} /> {cardMenu.confirm ? 'Confirmar' : 'Eliminar'}
-          </button>
+          {(menuPlan?.plan.kind === 'gastos' || String(menuPlan?.plan.userId || '') === userId) && (
+            <button
+              type="button"
+              onClick={() => { if (cardMenu.confirm) void removeCard(cardMenu.id); else setCardMenu({ ...cardMenu, confirm: true }); }}
+              className={cn(holdItemClass, 'text-[#ea3943]')}
+            >
+              <Trash2 size={14} /> {cardMenu.confirm ? 'Confirmar' : menuPlan?.plan.kind === 'gastos' ? 'Salir' : 'Eliminar'}
+            </button>
+          )}
         </HoldMenu>
       )}
       {plan && forecast && (
@@ -830,7 +902,7 @@ export function Plans({ embedded = false, books = 0 }: { embedded?: boolean; boo
               <button type="button" disabled={makingId === docId(plan)} onClick={() => current && void makeImage(current)} className="inline-flex items-center gap-1 text-xs font-bold text-slate-500 disabled:opacity-50">
                 <ImageIcon size={13} /> {makingId === docId(plan) ? 'Creando…' : 'Imagen'}
               </button>
-              <button type="button" onClick={() => { setEditing(docId(plan)); setShaped(true); setDraft(fromPlan(plan)); }} className="text-xs font-bold text-slate-500">Editar</button>
+              <button type="button" onClick={() => { setEditing(docId(plan)); setDraft(fromPlan(plan)); }} className="text-xs font-bold text-slate-500">Editar</button>
               {confirmDelete ? (
                 <button type="button" onClick={() => void remove()} className="text-xs font-bold text-[#ea3943]">Confirmar</button>
               ) : (
@@ -962,118 +1034,15 @@ export function Plans({ embedded = false, books = 0 }: { embedded?: boolean; boo
         </Overlay>
       )}
       {draft && (
-        <Overlay onClose={() => setDraft(null)}>
-          <div
-            className={cn(modalPanelClass, 'max-w-md')}
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="mb-5 flex items-center justify-between gap-4">
-              <h3 className="text-[17px] font-semibold">{editing ? 'Editar plan' : 'Nuevo plan'}</h3>
-              <ModalClose onClose={() => setDraft(null)} />
-            </div>
-            <div className="grid gap-4">
-              <div className="grid gap-2">
-                {([
-                  { kind: 'liquidez' as Kind, title: 'Llegar a un líquido', hint: 'Como los 10.000 € de Trade Republic.' },
-                  { kind: 'inversion' as Kind, title: 'Subir una inversión', hint: 'Cripto, ETF o acciones.' },
-                  { kind: 'patrimonio' as Kind, title: 'Comprar algo', hint: 'Un reloj o unos guantes. Solo el precio.' },
-                ]).map((item) => (
-                  <button
-                    key={item.kind}
-                    type="button"
-                    onClick={() => {
-                      setShaped(true);
-                      setDraft({
-                        ...draft,
-                        kind: item.kind,
-                        field: item.kind === 'inversion' && ['Cripto', 'ETF', 'Acciones'].includes(draft.field) ? draft.field : item.kind === 'inversion' ? 'Cripto' : draft.field,
-                        linkedAccountIds: item.kind === 'patrimonio' ? [] : draft.linkedAccountIds.slice(0, 1),
-                        salary: item.kind === 'liquidez' ? draft.salary : '',
-                      });
-                    }}
-                    className={cn('rounded-2xl border px-3 py-2.5 text-left', shaped && draft.kind === item.kind ? 'border-slate-900 bg-slate-900 text-white dark:border-white dark:bg-white dark:text-slate-900' : 'border-slate-200 text-slate-700 dark:border-white/10')}
-                  >
-                    <span className="block text-sm font-black">{item.title}</span>
-                    <span className={cn('mt-0.5 block text-[11px] font-medium', shaped && draft.kind === item.kind ? 'text-white/70 dark:text-slate-500' : 'text-slate-400')}>{item.hint}</span>
-                  </button>
-                ))}
-              </div>
-              {shaped && draft.kind === 'inversion' && (
-                <div className="flex flex-wrap gap-2">
-                  {['Cripto', 'ETF', 'Acciones'].map((field) => (
-                    <button key={field} type="button" onClick={() => setDraft({ ...draft, field })} className={cn('rounded-full border px-3 py-1 text-xs font-semibold', draft.field === field ? 'border-slate-900 bg-slate-900 text-white dark:border-white dark:bg-white dark:text-slate-900' : 'border-slate-200 text-slate-500')}>{field}</button>
-                  ))}
-                </div>
-              )}
-              {shaped && (
-                <Input label={draft.kind === 'patrimonio' ? 'Qué quieres comprar' : 'Nombre'} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder={draft.kind === 'patrimonio' ? 'Guantes' : 'Plan 10k'} />
-              )}
-              {shaped && draft.kind !== 'patrimonio' && (
-                <div>
-                  <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">{draft.kind === 'liquidez' ? 'El líquido de' : `${draft.field || 'Inversión'} en`}</p>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {planPlaces(accounts).map((account) => {
-                      const id = String(account._id);
-                      const on = draft.linkedAccountIds[0] === id;
-                      return (
-                        <button
-                          key={id}
-                          type="button"
-                          onClick={() => setDraft({ ...draft, linkedAccountIds: on ? [] : [id] })}
-                          className={cn('inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-bold', on ? 'border-slate-900 bg-slate-900 text-white dark:border-white dark:bg-white dark:text-slate-900' : 'border-slate-200 text-slate-600 dark:border-white/10')}
-                        >
-                          <PlatformLogo name={account.platform || account.name} size={16} />
-                          {account.name}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-              {shaped && draft.kind === 'liquidez' && (
-                <Input label="Nómina al mes" type="number" min="0" step="any" value={draft.salary} onChange={(event) => setDraft({ ...draft, salary: event.target.value })} placeholder="Si no entra, déjalo vacío" />
-              )}
-              {shaped && (
-                <>
-                  <Input label="Cuánto apartas" type="number" min="0" step="any" value={draft.monthlySavings} onChange={(event) => setDraft({ ...draft, monthlySavings: event.target.value })} />
-                  <Input label="Día en que apartas" type="number" min="1" max="31" value={draft.savingsDay} onChange={(event) => setDraft({ ...draft, savingsDay: event.target.value })} />
-                  {draft.kind !== 'patrimonio' && draft.linkedAccountIds.length === 0 && (
-                    <Input label="Saldo de partida" type="number" min="0" step="any" value={draft.openingBalance} onChange={(event) => setDraft({ ...draft, openingBalance: event.target.value })} />
-                  )}
-                  <Input label={draft.kind === 'patrimonio' ? 'Cuánto cuesta' : 'A cuánto quieres llegar'} type="number" min="0" step="any" value={draft.targetAmount} onChange={(event) => setDraft({ ...draft, targetAmount: event.target.value })} />
-                  <Input label="Empieza" type="date" value={draft.startDate} onChange={(event) => setDraft({ ...draft, startDate: event.target.value })} />
-                  <Input label="Fecha del objetivo" type="date" value={draft.targetDate} onChange={(event) => setDraft({ ...draft, targetDate: event.target.value })} />
-                </>
-              )}
-              {shaped && (
-              <details className="rounded-2xl border border-slate-200 p-3 dark:border-white/10">
-              <summary className="cursor-pointer text-sm font-semibold text-slate-600 dark:text-slate-300">Apuntes</summary>
-              <div className="mt-3 grid gap-2">
-                {draft.plannedExpenses.map((item, index) => (
-                  <ApunteRow key={`e-${index}`} kind="Gasto" name={item.name} amount={item.amount} when={item.date} whenType="date" image={item.image} onName={(name) => patchList(draft, setDraft, 'plannedExpenses', index, { name })} onAmount={(amount) => patchList(draft, setDraft, 'plannedExpenses', index, { amount })} onWhen={(date) => patchList(draft, setDraft, 'plannedExpenses', index, { date })} onImage={(image) => patchList(draft, setDraft, 'plannedExpenses', index, { image })} onRemove={() => setDraft({ ...draft, plannedExpenses: draft.plannedExpenses.filter((_, itemIndex) => itemIndex !== index) })} />
-                ))}
-                {draft.recurring.map((item, index) => (
-                  <ApunteRow key={`r-${index}`} kind="Cada mes" name={item.name} amount={item.amount} when={item.dayOfMonth} whenType="day" onName={(name) => patchList(draft, setDraft, 'recurring', index, { name })} onAmount={(amount) => patchList(draft, setDraft, 'recurring', index, { amount })} onWhen={(dayOfMonth) => patchList(draft, setDraft, 'recurring', index, { dayOfMonth })} onRemove={() => setDraft({ ...draft, recurring: draft.recurring.filter((_, itemIndex) => itemIndex !== index) })} />
-                ))}
-                {draft.intervals.map((item, index) => (
-                  <ApunteRow key={`w-${index}`} kind="Semanas" name={item.name} amount={item.amount} when={item.everyWeeks} whenType="weeks" extra={item.startDate} onName={(name) => patchList(draft, setDraft, 'intervals', index, { name })} onAmount={(amount) => patchList(draft, setDraft, 'intervals', index, { amount })} onWhen={(everyWeeks) => patchList(draft, setDraft, 'intervals', index, { everyWeeks })} onExtra={(startDate) => patchList(draft, setDraft, 'intervals', index, { startDate })} onRemove={() => setDraft({ ...draft, intervals: draft.intervals.filter((_, itemIndex) => itemIndex !== index) })} />
-                ))}
-                {draft.incomes.map((item, index) => (
-                  <ApunteRow key={`i-${index}`} kind="Ingreso" name={item.name} amount={item.amount} when={item.date} whenType="date" status={item.status} image={item.image} onStatus={(status) => patchList(draft, setDraft, 'incomes', index, { status })} onName={(name) => patchList(draft, setDraft, 'incomes', index, { name })} onAmount={(amount) => patchList(draft, setDraft, 'incomes', index, { amount })} onWhen={(date) => patchList(draft, setDraft, 'incomes', index, { date })} onImage={(image) => patchList(draft, setDraft, 'incomes', index, { image })} onRemove={() => setDraft({ ...draft, incomes: draft.incomes.filter((_, itemIndex) => itemIndex !== index) })} />
-                ))}
-                <div className="flex flex-wrap gap-1.5 pt-1">
-                  <button type="button" onClick={() => setDraft({ ...draft, plannedExpenses: [...draft.plannedExpenses, { name: '', amount: '', date: draft.startDate, paid: false }] })} className="rounded-full border border-slate-200 px-2.5 py-1 text-[11px] font-semibold text-slate-500 dark:border-white/10">+ Gasto</button>
-                  <button type="button" onClick={() => setDraft({ ...draft, recurring: [...draft.recurring, { name: '', amount: '', dayOfMonth: '1', paidDates: [] }] })} className="rounded-full border border-slate-200 px-2.5 py-1 text-[11px] font-semibold text-slate-500 dark:border-white/10">+ Cada mes</button>
-                  <button type="button" onClick={() => setDraft({ ...draft, intervals: [...draft.intervals, { name: '', amount: '', everyWeeks: '2', startDate: draft.startDate, paidDates: [] }] })} className="rounded-full border border-slate-200 px-2.5 py-1 text-[11px] font-semibold text-slate-500 dark:border-white/10">+ Cada X sem.</button>
-                  <button type="button" onClick={() => setDraft({ ...draft, incomes: [...draft.incomes, { name: '', amount: '', date: draft.startDate, status: 'expected', paid: false }] })} className="rounded-full border border-slate-200 px-2.5 py-1 text-[11px] font-semibold text-slate-500 dark:border-white/10">+ Ingreso</button>
-                </div>
-              </div>
-              </details>
-              )}
-              {shaped && <Button onClick={() => void save()}>Guardar plan</Button>}
-            </div>
-          </div>
-        </Overlay>
+        <PlanDraft
+          draft={draft}
+          setDraft={setDraft}
+          accounts={accounts}
+          editing={editing != null}
+          error={error}
+          onSave={save}
+          onClose={() => { setDraft(null); setEditing(null); }}
+        />
       )}
       {editor && (
         <Overlay onClose={() => setEditor(null)}>
@@ -1104,6 +1073,312 @@ export function Plans({ embedded = false, books = 0 }: { embedded?: boolean; boo
         </Overlay>
       )}
     </div>
+  );
+}
+
+type PlanStep = 'tipo' | 'campo' | 'nombre' | 'cuenta' | 'partida' | 'nomina' | 'aportado' | 'ritmo' | 'meta' | 'fechas' | 'apuntes';
+
+const PLAN_KINDS: { kind: Kind; title: string; hint: string }[] = [
+  { kind: 'liquidez', title: 'Llegar a un líquido', hint: 'Un colchón en una cuenta.' },
+  { kind: 'inversion', title: 'Subir una inversión', hint: 'Cripto, ETF o acciones.' },
+  { kind: 'patrimonio', title: 'Comprar algo', hint: 'Un reloj o unos guantes.' },
+  { kind: 'gastos', title: 'Repartir', hint: 'Entre varias personas.' },
+];
+
+function planSteps(kind: Kind, linked: boolean): PlanStep[] {
+  const steps: PlanStep[] = ['tipo'];
+  if (kind === 'inversion') steps.push('campo');
+  steps.push('nombre');
+  if (kind === 'liquidez' || kind === 'inversion') {
+    steps.push('cuenta');
+    if (!linked) steps.push('partida');
+  }
+  if (kind === 'liquidez') steps.push('nomina');
+  if (kind === 'gastos') {
+    steps.push('aportado');
+    return steps;
+  }
+  steps.push('ritmo', 'meta', 'fechas', 'apuntes');
+  return steps;
+}
+
+function planStepBlock(step: PlanStep, draft: Draft, picked: boolean): string {
+  if (step === 'tipo' && !picked) return 'Elige un tipo.';
+  if (step === 'nombre' && (draft.kind === 'gastos' || draft.kind === 'patrimonio') && !draft.name.trim()) {
+    return draft.kind === 'patrimonio' ? 'Di qué quieres comprar.' : 'Ponle un nombre.';
+  }
+  if (step === 'ritmo') {
+    const day = Number(draft.savingsDay);
+    if (!Number.isInteger(day) || day < 1 || day > 31) return 'El día va del 1 al 31.';
+  }
+  if (step === 'meta' && !(Number(draft.targetAmount) > 0)) return 'Tiene que ser mayor que cero.';
+  if (step === 'fechas' && (!draft.startDate || !draft.targetDate)) return 'Faltan las fechas.';
+  if (step === 'aportado') {
+    const contributed = Number(draft.contributed || 0);
+    if (!Number.isFinite(contributed) || contributed < 0) return 'Lo aportado no puede ser negativo.';
+  }
+  return '';
+}
+
+function accountMoney(account: AccountRow): string {
+  if (account.currency && account.currency !== 'EUR') {
+    return `${new Intl.NumberFormat('es-ES', { maximumFractionDigits: 2 }).format(account.balance)} ${account.currency}`;
+  }
+  return formatEur(account.balance);
+}
+
+function PlanDraft({
+  draft,
+  setDraft,
+  accounts,
+  editing,
+  error,
+  onSave,
+  onClose,
+}: {
+  draft: Draft;
+  setDraft: (draft: Draft) => void;
+  accounts: AccountRow[];
+  editing: boolean;
+  error: string;
+  onSave: () => Promise<void>;
+  onClose: () => void;
+}) {
+  const [stepId, setStepId] = useState<PlanStep>('tipo');
+  const [picked, setPicked] = useState(editing);
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const linked = draft.linkedAccountIds.length > 0;
+  const steps = picked ? planSteps(draft.kind, linked) : (['tipo'] as PlanStep[]);
+  const index = Math.max(0, steps.indexOf(stepId));
+  const step = steps[index] || 'tipo';
+  const last = picked && index === steps.length - 1;
+
+  useEffect(() => {
+    if (!picked) return;
+    const list = planSteps(draft.kind, draft.linkedAccountIds.length > 0);
+    if (!list.includes(stepId)) {
+      const afterAccount = list.indexOf('cuenta');
+      setStepId(list[afterAccount + 1] || list[list.length - 1]);
+    }
+  }, [draft.kind, draft.linkedAccountIds.length, picked, stepId]);
+
+  const chooseKind = (kind: Kind) => {
+    setPicked(true);
+    setNote('');
+    setDraft({
+      ...draft,
+      kind,
+      field: kind === 'inversion' && ['Cripto', 'ETF', 'Acciones'].includes(draft.field) ? draft.field : kind === 'inversion' ? 'Cripto' : draft.field,
+      linkedAccountIds: kind === 'patrimonio' || kind === 'gastos' ? [] : draft.linkedAccountIds.slice(0, 1),
+      salary: kind === 'liquidez' ? draft.salary : '',
+    });
+    setStepId(kind === 'inversion' ? 'campo' : 'nombre');
+  };
+
+  const go = (dir: 1 | -1) => {
+    const list = planSteps(draft.kind, draft.linkedAccountIds.length > 0);
+    const at = Math.max(0, list.indexOf(step));
+    if (dir === 1) {
+      const problem = planStepBlock(step, draft, picked);
+      if (problem) {
+        setNote(problem);
+        return;
+      }
+    }
+    setNote('');
+    const next = list[at + dir];
+    if (next) setStepId(next);
+  };
+
+  const finish = async () => {
+    const problem = planStepBlock(step, draft, picked);
+    if (problem) {
+      setNote(problem);
+      return;
+    }
+    if (busy) return;
+    setBusy(true);
+    try {
+      await onSave();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const question = step === 'tipo' ? 'Qué plan es'
+    : step === 'campo' ? 'Qué estás subiendo'
+      : step === 'nombre' ? (draft.kind === 'patrimonio' ? 'Qué quieres comprar' : 'Cómo se llama')
+        : step === 'cuenta' ? (draft.kind === 'liquidez' ? 'El líquido de' : `${draft.field || 'La inversión'} en`)
+          : step === 'partida' ? 'Saldo de partida'
+            : step === 'nomina' ? 'Nómina al mes'
+              : step === 'aportado' ? 'Cuánto has puesto ya'
+                : step === 'ritmo' ? 'Cuánto apartas'
+                  : step === 'meta' ? (draft.kind === 'patrimonio' ? 'Cuánto cuesta' : 'A cuánto quieres llegar')
+                    : step === 'fechas' ? 'Cuándo'
+                      : 'Apuntes';
+
+  const hint = step === 'cuenta' ? 'Salen todas las cuentas. Elige una, o ninguna si el plan lleva su propio saldo.'
+    : step === 'partida' ? 'Lo que ya tienes, sin enlazar una cuenta.'
+      : step === 'nomina' ? 'Si no entra, déjalo vacío.'
+        : step === 'aportado' ? 'Si todavía nada, déjalo vacío.'
+          : step === 'apuntes' ? 'Gastos o ingresos que ya conoces. Puedes dejarlo vacío.'
+            : '';
+
+  return (
+    <Overlay onClose={onClose}>
+      <form
+        className={cn(modalPanelClass, 'max-w-sm')}
+        onClick={(event) => event.stopPropagation()}
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (last) void finish();
+          else go(1);
+        }}
+      >
+        <div className="mb-5 flex items-center justify-between gap-3">
+          <p className="text-[13px] font-medium text-slate-400">{editing ? 'Editar plan' : 'Nuevo plan'}</p>
+          <ModalClose onClose={onClose} />
+        </div>
+        <h3 className="text-[22px] font-semibold tracking-tight">{question}</h3>
+        {hint && <p className="mt-1.5 text-[13px] leading-snug text-slate-400">{hint}</p>}
+        {picked && steps.length > 1 && (
+          <div className="mt-4 flex items-center gap-1.5" aria-hidden>
+            {steps.map((item, dot) => (
+              <span key={item} className={cn('h-1 rounded-full', dot === index ? 'w-5 bg-indigo-500' : dot < index ? 'w-1.5 bg-indigo-200 dark:bg-indigo-400/40' : 'w-1.5 bg-slate-200 dark:bg-white/15')} />
+            ))}
+          </div>
+        )}
+        <div className="mt-5">
+        {step === 'tipo' && (
+          <div className="divide-y divide-slate-200/80 overflow-hidden rounded-2xl border border-slate-200/70 bg-white/80 dark:divide-white/10 dark:border-white/10 dark:bg-white/[0.04]">
+            {PLAN_KINDS.map((item) => (
+              <button
+                key={item.kind}
+                type="button"
+                onClick={() => chooseKind(item.kind)}
+                className="flex w-full items-center gap-3 px-3.5 py-3 text-left hover:bg-slate-50 dark:hover:bg-white/5"
+              >
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-semibold text-slate-800 dark:text-slate-100">{item.title}</span>
+                  <span className="mt-0.5 block text-[12px] leading-snug text-slate-400">{item.hint}</span>
+                </span>
+                <ChevronRight size={16} className="shrink-0 text-slate-300" />
+              </button>
+            ))}
+          </div>
+        )}
+        {step === 'campo' && (
+          <div className="divide-y divide-slate-200/80 overflow-hidden rounded-2xl border border-slate-200/70 bg-white/80 dark:divide-white/10 dark:border-white/10 dark:bg-white/[0.04]">
+            {['Cripto', 'ETF', 'Acciones'].map((field) => (
+              <button
+                key={field}
+                type="button"
+                onClick={() => { setNote(''); setDraft({ ...draft, field }); setStepId('nombre'); }}
+                className="flex w-full items-center gap-3 px-3.5 py-3 text-left text-sm font-semibold text-slate-800 hover:bg-slate-50 dark:text-slate-100 dark:hover:bg-white/5"
+              >
+                <span className="min-w-0 flex-1">{field}</span>
+                <ChevronRight size={16} className="shrink-0 text-slate-300" />
+              </button>
+            ))}
+          </div>
+        )}
+        {step === 'nombre' && (
+          <Input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder={draft.kind === 'gastos' ? 'Cena' : draft.kind === 'patrimonio' ? 'Guantes' : 'Plan 10k'} autoFocus />
+        )}
+        {step === 'cuenta' && (
+          <div className="max-h-64 divide-y divide-slate-200/80 overflow-y-auto rounded-2xl border border-slate-200/70 bg-white/80 dark:divide-white/10 dark:border-white/10 dark:bg-white/[0.04]">
+            {planPlaces(accounts).map((account) => {
+              const id = String(account._id);
+              const on = draft.linkedAccountIds[0] === id;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setDraft({ ...draft, linkedAccountIds: on ? [] : [id], openingBalance: on ? draft.openingBalance : '' })}
+                  className={cn('flex w-full items-center gap-3 px-3.5 py-3 text-left', on && 'bg-indigo-50/80 dark:bg-white/10')}
+                >
+                  <PlatformLogo name={account.platform || account.name} size={22} />
+                  <span className={cn('min-w-0 flex-1 truncate text-sm font-semibold', on ? 'text-indigo-700 dark:text-white' : 'text-slate-800 dark:text-slate-100')}>{account.name}</span>
+                  <span className="shrink-0 text-[12px] font-medium tabular-nums text-slate-400">{accountMoney(account)}</span>
+                  {on && <Check size={15} className="shrink-0 text-indigo-600" />}
+                </button>
+              );
+            })}
+            <button
+              type="button"
+              onClick={() => setDraft({ ...draft, linkedAccountIds: [] })}
+              className={cn('flex w-full items-center gap-3 px-3.5 py-3 text-left', draft.linkedAccountIds.length === 0 && 'bg-indigo-50/80 dark:bg-white/10')}
+            >
+              <span className={cn('min-w-0 flex-1 text-sm font-semibold', draft.linkedAccountIds.length === 0 ? 'text-indigo-700 dark:text-white' : 'text-slate-500')}>Sin cuenta</span>
+              {draft.linkedAccountIds.length === 0 && <Check size={15} className="shrink-0 text-indigo-600" />}
+            </button>
+          </div>
+        )}
+        {step === 'partida' && (
+          <Input type="number" min="0" step="any" value={draft.openingBalance} onChange={(event) => setDraft({ ...draft, openingBalance: event.target.value })} placeholder="0" autoFocus />
+        )}
+        {step === 'nomina' && (
+          <Input type="number" min="0" step="any" value={draft.salary} onChange={(event) => setDraft({ ...draft, salary: event.target.value })} placeholder="Si no entra, vacío" autoFocus />
+        )}
+        {step === 'aportado' && (
+          <Input type="number" min="0" step="any" value={draft.contributed} onChange={(event) => setDraft({ ...draft, contributed: event.target.value })} placeholder="0" autoFocus />
+        )}
+        {step === 'ritmo' && (
+          <div className="grid grid-cols-[1fr_5.5rem] gap-2">
+            <Input label="Al mes" type="number" min="0" step="any" value={draft.monthlySavings} onChange={(event) => setDraft({ ...draft, monthlySavings: event.target.value })} />
+            <Input label="Día" type="number" min="1" max="31" value={draft.savingsDay} onChange={(event) => setDraft({ ...draft, savingsDay: event.target.value })} />
+          </div>
+        )}
+        {step === 'meta' && (
+          <Input type="number" min="0" step="any" value={draft.targetAmount} onChange={(event) => setDraft({ ...draft, targetAmount: event.target.value })} placeholder="10000" autoFocus />
+        )}
+        {step === 'fechas' && (
+          <div className="grid gap-2">
+            <Input label="Empieza" type="date" value={draft.startDate} onChange={(event) => setDraft({ ...draft, startDate: event.target.value })} />
+            <Input label="Fecha del objetivo" type="date" value={draft.targetDate} onChange={(event) => setDraft({ ...draft, targetDate: event.target.value })} />
+          </div>
+        )}
+        {step === 'apuntes' && (
+          <div className="grid max-h-52 gap-2 overflow-y-auto">
+            {draft.plannedExpenses.map((item, row) => (
+              <ApunteRow key={`e-${row}`} kind="Gasto" name={item.name} amount={item.amount} when={item.date} whenType="date" image={item.image} onName={(name) => patchList(draft, setDraft, 'plannedExpenses', row, { name })} onAmount={(amount) => patchList(draft, setDraft, 'plannedExpenses', row, { amount })} onWhen={(date) => patchList(draft, setDraft, 'plannedExpenses', row, { date })} onImage={(image) => patchList(draft, setDraft, 'plannedExpenses', row, { image })} onRemove={() => setDraft({ ...draft, plannedExpenses: draft.plannedExpenses.filter((_, itemIndex) => itemIndex !== row) })} />
+            ))}
+            {draft.recurring.map((item, row) => (
+              <ApunteRow key={`r-${row}`} kind="Cada mes" name={item.name} amount={item.amount} when={item.dayOfMonth} whenType="day" onName={(name) => patchList(draft, setDraft, 'recurring', row, { name })} onAmount={(amount) => patchList(draft, setDraft, 'recurring', row, { amount })} onWhen={(dayOfMonth) => patchList(draft, setDraft, 'recurring', row, { dayOfMonth })} onRemove={() => setDraft({ ...draft, recurring: draft.recurring.filter((_, itemIndex) => itemIndex !== row) })} />
+            ))}
+            {draft.intervals.map((item, row) => (
+              <ApunteRow key={`w-${row}`} kind="Semanas" name={item.name} amount={item.amount} when={item.everyWeeks} whenType="weeks" extra={item.startDate} onName={(name) => patchList(draft, setDraft, 'intervals', row, { name })} onAmount={(amount) => patchList(draft, setDraft, 'intervals', row, { amount })} onWhen={(everyWeeks) => patchList(draft, setDraft, 'intervals', row, { everyWeeks })} onExtra={(startDate) => patchList(draft, setDraft, 'intervals', row, { startDate })} onRemove={() => setDraft({ ...draft, intervals: draft.intervals.filter((_, itemIndex) => itemIndex !== row) })} />
+            ))}
+            {draft.incomes.map((item, row) => (
+              <ApunteRow key={`i-${row}`} kind="Ingreso" name={item.name} amount={item.amount} when={item.date} whenType="date" status={item.status} image={item.image} onStatus={(status) => patchList(draft, setDraft, 'incomes', row, { status })} onName={(name) => patchList(draft, setDraft, 'incomes', row, { name })} onAmount={(amount) => patchList(draft, setDraft, 'incomes', row, { amount })} onWhen={(date) => patchList(draft, setDraft, 'incomes', row, { date })} onImage={(image) => patchList(draft, setDraft, 'incomes', row, { image })} onRemove={() => setDraft({ ...draft, incomes: draft.incomes.filter((_, itemIndex) => itemIndex !== row) })} />
+            ))}
+            <div className="flex flex-wrap gap-1.5">
+              <button type="button" onClick={() => setDraft({ ...draft, plannedExpenses: [...draft.plannedExpenses, { name: '', amount: '', date: draft.startDate, paid: false }] })} className="rounded-full border border-slate-200 px-2.5 py-1 text-[11px] font-semibold text-slate-500 dark:border-white/10">+ Gasto</button>
+              <button type="button" onClick={() => setDraft({ ...draft, recurring: [...draft.recurring, { name: '', amount: '', dayOfMonth: '1', paidDates: [] }] })} className="rounded-full border border-slate-200 px-2.5 py-1 text-[11px] font-semibold text-slate-500 dark:border-white/10">+ Cada mes</button>
+              <button type="button" onClick={() => setDraft({ ...draft, intervals: [...draft.intervals, { name: '', amount: '', everyWeeks: '2', startDate: draft.startDate, paidDates: [] }] })} className="rounded-full border border-slate-200 px-2.5 py-1 text-[11px] font-semibold text-slate-500 dark:border-white/10">+ Cada X sem.</button>
+              <button type="button" onClick={() => setDraft({ ...draft, incomes: [...draft.incomes, { name: '', amount: '', date: draft.startDate, status: 'expected', paid: false }] })} className="rounded-full border border-slate-200 px-2.5 py-1 text-[11px] font-semibold text-slate-500 dark:border-white/10">+ Ingreso</button>
+            </div>
+          </div>
+        )}
+        </div>
+        {(note || error) && <p className="mt-3 text-[12px] font-medium text-rose-600">{note || error}</p>}
+        {(index > 0 || step !== 'tipo' || picked) && (
+        <div className="mt-5 flex items-center justify-between gap-2">
+          {index > 0 ? (
+            <button type="button" onClick={() => go(-1)} className="inline-flex items-center gap-1 rounded-full px-1 py-2 text-[13px] font-semibold text-slate-500">
+              <ChevronLeft size={15} /> Atrás
+            </button>
+          ) : <span />}
+          {(step !== 'tipo' || picked) && (
+            <button type="submit" disabled={busy} className="rounded-full bg-indigo-600 px-4 py-2 text-[13px] font-semibold text-white disabled:opacity-50">
+              {last ? (busy ? 'Guardando…' : editing ? 'Guardar' : 'Crear plan') : 'Siguiente'}
+            </button>
+          )}
+        </div>
+        )}
+      </form>
+    </Overlay>
   );
 }
 

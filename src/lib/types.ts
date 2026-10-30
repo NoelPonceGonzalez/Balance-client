@@ -124,7 +124,7 @@ export interface MarketPending {
 
 export interface MarketTapeItem {
   key: string;
-  kind: 'crypto' | 'etf' | 'stock' | 'gold' | 'cs2' | 'tf2';
+  kind: 'crypto' | 'etf' | 'stock' | 'gold' | 'silver' | 'oil' | 'copper' | 'index' | 'cs2' | 'tf2';
   name: string;
   symbol: string;
   image: string | null;
@@ -155,6 +155,10 @@ export interface MarketBoard {
   etfs: MarketTapeItem[];
   stocks?: MarketTapeItem[];
   gold?: MarketTapeItem[];
+  silver?: MarketTapeItem[];
+  oil?: MarketTapeItem[];
+  copper?: MarketTapeItem[];
+  indices?: MarketTapeItem[];
   cs2?: MarketTapeItem[];
   tf2?: MarketTapeItem[];
   icons?: { cs2: string | null; tf2: string | null };
@@ -238,10 +242,76 @@ export interface PlanMonthView {
   lines: PlanMonthLine[];
 }
 
+export interface TripPerson {
+  id: string;
+  name: string;
+  color: string;
+  contributed: number;
+  spent: number;
+  share: number;
+  net: number;
+}
+
+export interface TripSplit {
+  totalSpent: number;
+  people: TripPerson[];
+  transfers: { fromId: string; from: string; toId: string; to: string; amount: number }[];
+}
+
+export interface TripExpense {
+  _id?: string;
+  name: string;
+  amount: number;
+  paidBy: string;
+  paidByName?: string;
+  category?: string;
+  splitAmong?: string[];
+  date: string;
+  receipt?: string;
+  charge?: 'none' | 'pending' | 'done';
+  chargeAccountId?: string | null;
+}
+
+export interface TripSettlement {
+  _id?: string;
+  fromId: string;
+  toId: string;
+  amount: number;
+  status: 'pending' | 'awaiting_confirmation' | 'confirmed' | 'disputed';
+  openedAt?: string;
+  statusAt?: string;
+  paymentReportedAt?: string;
+  confirmedAt?: string;
+  events?: { at?: string; userId?: string; action: string; note?: string }[];
+}
+
+export interface TripActivity {
+  _id?: string;
+  at?: string;
+  title: string;
+  body: string;
+  kind?: string;
+  settlementId?: string | null;
+}
+
+export interface TripMember {
+  userId: string;
+  name: string;
+  color: string;
+  contributed: number;
+}
+
 export interface PlanRow {
   _id: string;
+  userId?: string;
   name: string;
-  kind?: 'patrimonio' | 'liquidez' | 'inversion';
+  kind?: 'patrimonio' | 'liquidez' | 'inversion' | 'gastos';
+  joinCode?: string;
+  members?: TripMember[];
+  tripExpenses?: TripExpense[];
+  tripStatus?: 'active' | 'settling' | 'done';
+  settlements?: TripSettlement[];
+  tripActivity?: TripActivity[];
   field?: string;
   salary?: number;
   salaryAccountId?: string | null;

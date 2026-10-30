@@ -62,16 +62,17 @@ export function PasswordReset({
 
   return (
     <form onSubmit={sent ? confirm : send} className="space-y-4">
-      <Input
-        label="Correo"
-        type="email"
-        value={address}
-        onChange={(event) => setAddress(event.target.value)}
-        required
-        readOnly={lockEmail}
-        autoComplete="email"
-        placeholder="tu@email.com"
-      />
+      {!lockEmail && (
+        <Input
+          label="Correo"
+          type="email"
+          value={address}
+          onChange={(event) => setAddress(event.target.value)}
+          required
+          autoComplete="email"
+          placeholder="tu@email.com"
+        />
+      )}
       {sent && (
         <>
           <Input label="Código" inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(event) => setCode(event.target.value)} required pattern="[0-9]{6}" maxLength={6} placeholder="6 números" className="tracking-[0.35em]" />
@@ -95,14 +96,26 @@ export function PasswordReset({
       )}
       {error && <p className="text-sm font-medium text-rose-700">{error}</p>}
       {info && <p className="text-sm font-medium text-slate-500">{info}</p>}
-      <div className="flex flex-wrap gap-2">
-        <Button type="submit" className="w-full sm:w-auto" disabled={loading}>
-          {loading ? 'Un momento…' : sent ? 'Guardar contraseña' : 'Enviar código'}
-        </Button>
-        {sent && (
-          <Button type="button" variant="outline" className="w-full sm:w-auto" disabled={loading} onClick={() => { setSent(false); setCode(''); setError(''); setInfo(''); }}>
-            Pedir otro
+      <div className="flex flex-wrap items-center gap-2">
+        {lockEmail ? (
+          <button type="submit" disabled={loading} className="rounded-full border border-slate-200/90 bg-white px-4 py-2 text-[13px] font-semibold text-slate-700 disabled:opacity-50 dark:border-white/15 dark:bg-white/5 dark:text-slate-200">
+            {loading ? 'Un momento…' : sent ? 'Guardar contraseña' : 'Enviar código'}
+          </button>
+        ) : (
+          <Button type="submit" className="w-full sm:w-auto" disabled={loading}>
+            {loading ? 'Un momento…' : sent ? 'Guardar contraseña' : 'Enviar código'}
           </Button>
+        )}
+        {sent && (
+          lockEmail ? (
+            <button type="button" disabled={loading} onClick={() => { setSent(false); setCode(''); setError(''); setInfo(''); }} className="px-2 py-2 text-[13px] font-semibold text-slate-400 disabled:opacity-50">
+              Pedir otro
+            </button>
+          ) : (
+            <Button type="button" variant="outline" className="w-full sm:w-auto" disabled={loading} onClick={() => { setSent(false); setCode(''); setError(''); setInfo(''); }}>
+              Pedir otro
+            </Button>
+          )
         )}
       </div>
     </form>

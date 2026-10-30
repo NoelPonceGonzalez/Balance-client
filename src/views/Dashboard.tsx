@@ -22,7 +22,6 @@ import { OriginPicker } from '@/components/OriginMark';
 import { glide, jelly, quickOut, softSpring, SPRING_EASE } from '@/lib/motion';
 const HIDE_KEY = 'pat_hide_money';
 const SORT_KEY = 'pat_dash_sort';
-const CYCLE_MS = 5000;
 
 type SortMode = 'amount' | 'profit-desc' | 'profit-asc';
 
@@ -352,6 +351,34 @@ function toneClass(value: number): string {
   if (value > 0) return 'text-[#16c784]';
   if (value < 0) return 'text-[#ea3943]';
   return 'text-slate-400';
+}
+
+function foldDetail(detail?: string): string {
+  if (!detail) return '';
+  const float = detail.match(/Float\s+\d+(?:[.,]\d+)?/i);
+  return float ? float[0] : detail;
+}
+
+function pieceMove(item: AccountPart): { text: string; className: string } | null {
+  if (item.costEur == null || !(item.costEur > 0)) return null;
+  const gain = item.eur - item.costEur;
+  const pct = (gain / item.costEur) * 100;
+  if (Math.abs(pct) < 0.05) return null;
+  return { text: formatPct(pct), className: toneClass(gain) };
+}
+
+function FoldShare({ sides, color }: { sides: Side[]; color: string }) {
+  const parts = sides.filter((side) => side.total > 0);
+  const total = parts.reduce((sum, side) => sum + side.total, 0);
+  if (parts.length < 2 || total <= 0) return null;
+  const ink = isLight(color) ? '#1C1C1E' : color;
+  return (
+    <div className="flex h-1.5 gap-1" aria-hidden>
+      {parts.map((side) => (
+        <span key={side.group} className="h-full min-w-1 rounded-full" style={{ flex: side.total, background: ink }} />
+      ))}
+    </div>
+  );
 }
 
 function framesFor(gain: number | null, gainPct: number | null): Frame[] {
@@ -848,7 +875,7 @@ function ExtraDialog({ draft, error, setDraft, onClose, onSave, onDelete }: { dr
   );
 }
 
-export function Dashboard({ home, books }: { heroMs: number; home: number; books: number }) {
+export function Dashboard({ heroMs, home, books }: { heroMs: number; home: number; books: number }) {
   const [data, setData] = useState<DashboardData | null>(null);
   const [view, setView] = useState<'general' | 'cartera'>('general');
   const [openWallet, setOpenWallet] = useState<string | null>(null);
@@ -924,9 +951,9 @@ export function Dashboard({ home, books }: { heroMs: number; home: number; books
   }, [books]);
 
   useEffect(() => {
-    const timer = window.setInterval(() => setBeat((value) => value + 1), CYCLE_MS);
+    const timer = window.setInterval(() => setBeat((value) => value + 1), heroMs);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [heroMs]);
 
   const rows = useMemo(() => {
     if (!data) return [];
@@ -1623,76 +1650,86 @@ export function Dashboard({ home, books }: { heroMs: number; home: number; books
                 )}
               </div>
               <AccountFold open={open}>
-                <ul className="mt-2 space-y-1 rounded-[28px] border border-white/70 bg-white/45 px-4 py-3 shadow-[0_8px_32px_rgba(15,23,42,0.06)] backdrop-blur-2xl dark:border-white/10 dark:bg-white/10">
-                    {row.sides.length === 0 && <li className="text-xs font-semibold text-slate-400">Sin desglose todavía.</li>}
-                    {row.sides.map((side) => (
-                      <li key={side.group} className="border-t border-slate-200/80 pt-2 first:border-t-0 first:pt-0 dark:border-white/10">
-                        {side.group === 'cash' ? (
-                          <div className="flex items-center justify-between gap-3 text-sm font-semibold text-slate-500">
-                            <span>{side.title}</span>
-                            <span className="font-black tabular-nums text-slate-800 dark:text-slate-100">
-                              <RisingAmount value={side.total} hidden={hidden} />
-                            </span>
-                          </div>
-                        ) : (
-                          <>
-                            <div className="flex items-center justify-between gap-3 text-sm font-bold text-slate-700 dark:text-slate-200">
-                              <span>{side.title}</span>
-                              <span className="text-right">
-                                <span className="block font-black tabular-nums text-slate-900 dark:text-white">
+                <ul className="mt-2 rounded-[28px] border border-white/70 bg-white/70 px-4 shadow-[0_8px_32px_rgba(15,23,42,0.04)] backdrop-blur-xl dark:border-white/10 dark:bg-white/10">
+                    {row.sides.length > 1 && (
+                      <li className="pt-4 pb-1">
+                        <FoldShare sides={row.sides} color={row.color} />
+                      </li>
+                    )}
+                    {row.sides.length === 0 && <li className="py-3 text-xs font-semibold text-slate-400">Sin desglose todavía.</li>}
+                    {row.sides.map((side) => {
+                      const alone = side.items.length === 1 ? side.items[0] : null;
+                      if (side.group === 'cash' || !alone) {
+                        return (
+                          <li key={side.group} className="border-t border-slate-200/80 first:border-t-0 dark:border-white/10">
+                            {side.group !== 'cash' && side.items.length > 1 && (
+                              <div className="flex items-baseline justify-between gap-3 pt-3.5">
+                                <span className="text-xs font-semibold text-slate-400">{side.title}</span>
+                                <span className="text-xs font-black tabular-nums text-slate-500">
                                   <RisingAmount value={side.total} hidden={hidden} />
                                 </span>
-                                {side.gain != null && side.invested != null && side.invested > 0 && (
-                                  <span className={cn('block text-xs font-black tabular-nums', toneClass(side.gain))}>
-                                    {formatPct((side.gain / side.invested) * 100)}
-                                  </span>
-                                )}
-                              </span>
-                            </div>
-                            <ul className="mt-1 space-y-1 border-l border-slate-200 pl-3 dark:border-white/15">
-                              {side.items.map((item) => (
-                                <li key={item.id || item.label}>
-                                  <button
-                                    type="button"
-                                    onClick={() => item.id && openPiece(row, item)}
-                                    className={cn('flex w-full items-start justify-between gap-3 text-left text-sm font-semibold text-slate-500', item.id && 'rounded-xl hover:bg-white/50 dark:hover:bg-white/5')}
-                                  >
-                                    <span className="min-w-0 break-words leading-snug">
-                                      {item.label}
-                                      {item.detail && <span className="mt-0.5 block text-[11px] font-medium text-slate-400">{item.detail}</span>}
-                                    </span>
-                                    <span className="shrink-0 font-black tabular-nums text-slate-800 dark:text-slate-100">
-                                      <RisingAmount value={item.eur} hidden={hidden} />
-                                    </span>
-                                  </button>
-                                </li>
-                              ))}
-                            </ul>
-                            {(side.invested != null || side.gain != null) && (
-                              <div className="mt-1.5 flex items-center justify-between gap-3 pl-3 text-xs font-semibold text-slate-400">
-                                {side.invested != null && (
-                                  <span>
-                                    Invertido{' '}
-                                    <span className="font-black tabular-nums text-slate-600 dark:text-slate-300">
-                                      <RisingAmount value={side.invested} hidden={hidden} />
-                                    </span>
-                                  </span>
-                                )}
-                                {side.gain != null && (
-                                  <span className={cn('font-black tabular-nums', toneClass(side.gain))}>
-                                    {side.gain >= 0 ? 'Por encima ' : 'Por debajo '}
-                                    <RisingAmount value={side.gain} hidden={hidden} signed />
-                                  </span>
-                                )}
                               </div>
                             )}
-                          </>
-                        )}
-                      </li>
-                    ))}
+                            {side.group === 'cash' && (
+                              <div className="flex items-center justify-between gap-3 py-3.5">
+                                <span className="text-[15px] font-bold">{side.title}</span>
+                                <span className="text-[15px] font-black tabular-nums">
+                                  <RisingAmount value={side.total} hidden={hidden} />
+                                </span>
+                              </div>
+                            )}
+                            {side.group !== 'cash' && side.items.map((item) => {
+                              const move = pieceMove(item);
+                              const detail = foldDetail(item.detail);
+                              return (
+                                <button
+                                  key={item.id || item.label}
+                                  type="button"
+                                  onClick={() => item.id && openPiece(row, item)}
+                                  className="flex w-full items-center gap-3 py-2.5 text-left"
+                                >
+                                  <span className="min-w-0 flex-1">
+                                    <span className="block truncate text-[15px] font-bold leading-tight">{item.label}</span>
+                                    {detail && <span className="mt-0.5 block truncate text-xs font-medium text-slate-400">{detail}</span>}
+                                  </span>
+                                  <span className="shrink-0 text-right">
+                                    <span className="block text-[15px] font-black tabular-nums">
+                                      <RisingAmount value={item.eur} hidden={hidden} />
+                                    </span>
+                                    {move && <span className={cn('mt-0.5 block text-xs font-black tabular-nums', move.className)}>{mask(move.text)}</span>}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </li>
+                        );
+                      }
+                      const move = pieceMove(alone);
+                      const caption = [side.title, foldDetail(alone.detail)].filter(Boolean).join(' · ');
+                      return (
+                        <li key={side.group} className="border-t border-slate-200/80 first:border-t-0 dark:border-white/10">
+                          <button
+                            type="button"
+                            onClick={() => alone.id && openPiece(row, alone)}
+                            className="flex w-full items-center gap-3 py-3.5 text-left"
+                          >
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate text-[15px] font-bold leading-tight">{alone.label}</span>
+                              <span className="mt-0.5 block truncate text-xs font-medium text-slate-400">{caption}</span>
+                            </span>
+                            <span className="shrink-0 text-right">
+                              <span className="block text-[15px] font-black tabular-nums">
+                                <RisingAmount value={alone.eur} hidden={hidden} />
+                              </span>
+                              {move && <span className={cn('mt-0.5 block text-xs font-black tabular-nums', move.className)}>{mask(move.text)}</span>}
+                            </span>
+                          </button>
+                        </li>
+                      );
+                    })}
                     {row.tracking === 'positions' && (
-                      <li className="border-t border-slate-200/80 pt-2 dark:border-white/10">
-                        <button type="button" onClick={() => openPiece(row)} className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-500">
+                      <li className="border-t border-slate-200/80 dark:border-white/10">
+                        <button type="button" onClick={() => openPiece(row)} className="inline-flex items-center gap-1.5 py-3.5 text-sm font-semibold text-slate-500">
                           <Plus size={14} /> Añadir
                         </button>
                       </li>
