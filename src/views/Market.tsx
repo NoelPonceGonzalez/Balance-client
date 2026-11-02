@@ -10,7 +10,7 @@ import { api } from '@/lib/api';
 import { formatAgo, formatDay, formatEur, formatNumber, formatPct, formatPrice } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { CashChart, type LinePoint } from '@/views/Wallets';
-import type { MarketBoard, MarketItem, MarketPending, MarketStory, MarketTapeItem, QuoteCandidate } from '@/lib/types';
+import type { MarketBoard, MarketItem, MarketPending, MarketStory, MarketTapeItem, PurchaseWatch, QuoteCandidate } from '@/lib/types';
 
 function fold(value: string): string {
   return value.toLocaleLowerCase('es').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -234,6 +234,25 @@ function TapeRow({ item, fallback, onOpen }: { item: MarketTapeItem; fallback?: 
   );
 }
 
+function PurchaseRow({ item }: { item: PurchaseWatch }) {
+  const hit = item.priceEur != null && item.priceEur <= item.belowEur;
+  return (
+    <article className="border-b border-slate-100 py-4 last:border-0 dark:border-slate-800">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="font-black">{item.label}</p>
+          <p className="text-[11px] font-bold uppercase text-slate-400">{item.market} · última venta{item.soldAt ? ` · ${formatAgo(item.soldAt)}` : ''}</p>
+        </div>
+        <div className="text-right">
+          <p className={cn('font-black tabular-nums', hit ? 'text-[#16c784]' : 'text-slate-900 dark:text-white')}>{item.priceEur == null ? '—' : formatEur(item.priceEur)}</p>
+          <p className="text-[11px] font-semibold text-slate-400">por debajo de {formatEur(item.belowEur)}</p>
+        </div>
+      </div>
+      <p className="mt-2 text-xs font-medium text-slate-500">{item.note}</p>
+    </article>
+  );
+}
+
 function TapeSection({ title, icon, items, onOpen }: { title: string; icon: string; items: MarketTapeItem[]; onOpen: (item: MarketTapeItem) => void }) {
   if (!items.length) return null;
   return (
@@ -448,6 +467,14 @@ export function Market() {
       </div>
       <p className="text-sm font-medium text-slate-500">Pulsa una cotización para ver cómo ha ido. El porcentaje de la gráfica es el de ese tramo. En la lista, el verde y el rojo son el día o la sesión.</p>
       {data.warning && <p className="rounded-2xl bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">{data.warning}</p>}
+      {(data.purchases || []).length > 0 && (
+        <section className="space-y-2">
+          <h2 className="text-lg font-black">Compras</h2>
+          <Card className="px-4 py-1">
+            {(data.purchases || []).map((item) => <PurchaseRow key={item.id} item={item} />)}
+          </Card>
+        </section>
+      )}
       {empty && <p className="rounded-2xl bg-slate-100 px-4 py-6 text-sm font-medium text-slate-500 dark:bg-slate-900">El mercado no ha respondido todavía. Cuando haya un precio real, se queda aunque la fuente falle después.</p>}
       {noMatch && <p className="rounded-2xl bg-slate-100 px-4 py-6 text-sm font-medium text-slate-500 dark:bg-slate-900">Ninguna cotización coincide con «{needle}».</p>}
       {visible.map((section) => <TapeSection key={section.id} title={section.title} icon={section.icon} items={section.items} onOpen={(item) => setOpen({ kind: item.kind, key: item.key, name: item.name, symbol: item.symbol, priceEur: item.priceEur, changePct: item.changePct, changeLabel: item.changeLabel, sparkline: item.sparkline })} />)}

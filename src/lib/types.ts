@@ -162,6 +162,17 @@ export interface MarketBoard {
   cs2?: MarketTapeItem[];
   tf2?: MarketTapeItem[];
   icons?: { cs2: string | null; tf2: string | null };
+  purchases?: PurchaseWatch[];
+}
+
+export interface PurchaseWatch {
+  id: string;
+  label: string;
+  market: string;
+  priceEur: number | null;
+  belowEur: number;
+  soldAt: string | null;
+  note: string;
 }
 
 export interface QuoteCandidate {
