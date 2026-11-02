@@ -12,6 +12,7 @@ import { Movements } from '@/views/Movements';
 import { Plans } from '@/views/Plans';
 import { Settings } from '@/views/Settings';
 import { JoinTrip } from '@/views/TripPlan';
+import { DeviceAccess } from '@/components/DeviceAccess';
 import { TicketCam } from '@/components/TicketCam';
 
 function applyTheme(theme: User['theme']) {
@@ -160,6 +161,7 @@ export default function App() {
           }}
         />
       )}
+      <DeviceAccess />
       {ticket && (
         <TicketCam
           userId={user.id}

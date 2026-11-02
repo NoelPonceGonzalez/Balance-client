@@ -79,6 +79,7 @@ export function TicketCam({
   const lineKey = useRef(1);
   const [photo, setPhoto] = useState('');
   const [cameraError, setCameraError] = useState('');
+  const [cameraTry, setCameraTry] = useState(0);
   const [lines, setLines] = useState<TicketLine[]>([{ key: '1', name: '', amount: '' }]);
   const [plans, setPlans] = useState<PlanRow[]>([]);
   const [accounts, setAccounts] = useState<Bank[]>([]);
@@ -128,8 +129,14 @@ export function TicketCam({
           videoRef.current.srcObject = stream;
           await videoRef.current.play();
         }
-      } catch {
-        if (!stop) setCameraError('No se ha podido usar la cámara. Revisa el permiso o elige la foto del tique.');
+      } catch (err) {
+        if (stop) return;
+        const name = err instanceof DOMException ? err.name : '';
+        if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+          setCameraError('El teléfono tiene la cámara bloqueada. En los ajustes del móvil, entra en Balance y permite la cámara. También puedes elegir la foto.');
+          return;
+        }
+        setCameraError('No se ha podido usar la cámara. Revisa el permiso o elige la foto del tique.');
       }
     };
     void boot();
@@ -138,7 +145,7 @@ export function TicketCam({
       streamRef.current?.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
     };
-  }, [photo]);
+  }, [photo, cameraTry]);
 
   const close = () => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -245,6 +252,7 @@ export function TicketCam({
           {cameraError && (
             <div className="absolute inset-x-4 top-20 rounded-3xl bg-white p-4 text-sm font-medium text-slate-700">
               <p>{cameraError}</p>
+              <button type="button" onClick={() => { setCameraError(''); setCameraTry((value) => value + 1); }} className={cn(quiet, 'mt-3 w-full rounded-2xl px-4 py-3 text-[15px] font-bold')}>Activar cámara</button>
               <label className={cn(quiet, 'mt-3 flex cursor-pointer items-center justify-center rounded-2xl px-4 py-3 text-[15px] font-bold')}>
                 Elegir foto
                 <input type="file" accept="image/*" capture="environment" className="sr-only" onChange={(event) => { const file = event.target.files?.[0]; if (file) void fromFile(file); }} />

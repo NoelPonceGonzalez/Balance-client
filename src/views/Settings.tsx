@@ -3,6 +3,7 @@ import { ChevronRight } from 'lucide-react';
 import { PasswordReset } from '@/components/PasswordReset';
 import { Input } from '@/components/ui/Input';
 import { api } from '@/lib/api';
+import { activateCamera, activatePush, phoneStatus, type Gate } from '@/lib/device';
 import { cn } from '@/lib/utils';
 import type { User } from '@/lib/types';
 
@@ -67,16 +68,39 @@ export function Settings({
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [erase, setErase] = useState<'idle' | 'confirm'>('idle');
   const [eraseText, setEraseText] = useState('');
+  const [pushGate, setPushGate] = useState<Gate>('ask');
+  const [cameraGate, setCameraGate] = useState<Gate>('ask');
+  const [deviceNote, setDeviceNote] = useState('');
   const [csfloat, setCsfloat] = useState(false);
   const [csfloatKey, setCsfloatKey] = useState('');
   const [csfloatNote, setCsfloatNote] = useState('');
   const dirty = name.trim() !== user.name.trim() && name.trim().length > 0;
 
+  const refreshDevice = () => {
+    void phoneStatus().then((next) => {
+      setPushGate(next.push);
+      setCameraGate(next.camera);
+    });
+  };
+
   useEffect(() => {
+    refreshDevice();
     api<{ connected: boolean }>('/api/market/csfloat')
       .then((data) => setCsfloat(data.connected))
       .catch(() => undefined);
   }, []);
+
+  const turnOn = async (kind: 'push' | 'camera') => {
+    setError('');
+    setDeviceNote('');
+    try {
+      const message = kind === 'push' ? await activatePush() : await activateCamera();
+      setDeviceNote(message);
+      refreshDevice();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se ha podido activar.');
+    }
+  };
 
   const saveCsfloat = async () => {
     setError('');
@@ -204,6 +228,32 @@ export function Settings({
             })}
           </div>
         </div>
+      </Group>
+
+      <Group title="Móvil">
+        <div className="divide-y divide-slate-100 dark:divide-white/10">
+          <div className="px-4 py-4">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-[15px] font-semibold">Avisos</p>
+              <p className="text-[13px] font-semibold text-slate-400">{pushGate === 'ready' ? 'Activos' : pushGate === 'blocked' ? 'Bloqueados' : pushGate === 'unsupported' ? 'No disponibles' : 'Apagados'}</p>
+            </div>
+            <p className="mt-1 text-xs font-medium text-slate-400">El guante y el precio llegan a este teléfono. En el iPhone hace falta tener Balance instalada.</p>
+            {pushGate !== 'ready' && pushGate !== 'unsupported' && (
+              <button type="button" onClick={() => void turnOn('push')} className="mt-3 text-sm font-semibold text-slate-800 dark:text-slate-100">Activar</button>
+            )}
+          </div>
+          <div className="px-4 py-4">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-[15px] font-semibold">Cámara</p>
+              <p className="text-[13px] font-semibold text-slate-400">{cameraGate === 'ready' ? 'Activa' : cameraGate === 'blocked' ? 'Bloqueada' : cameraGate === 'unsupported' ? 'No disponible' : 'Apagada'}</p>
+            </div>
+            <p className="mt-1 text-xs font-medium text-slate-400">Sirve para fotografiar un tique. Si el teléfono la bloqueó, permítela en sus ajustes.</p>
+            {cameraGate !== 'ready' && cameraGate !== 'unsupported' && (
+              <button type="button" onClick={() => void turnOn('camera')} className="mt-3 text-sm font-semibold text-slate-800 dark:text-slate-100">Activar</button>
+            )}
+          </div>
+        </div>
+        {deviceNote && <p className="px-4 pb-4 text-xs font-medium leading-5 text-slate-400">{deviceNote}</p>}
       </Group>
 
       <Group title="En cada sitio">
