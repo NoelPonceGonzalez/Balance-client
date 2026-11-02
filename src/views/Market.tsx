@@ -197,6 +197,60 @@ function TapeRow({ item, fallback, onOpen }: { item: MarketTapeItem; fallback?: 
   );
 }
 
+type SavedOffer = {
+  id: string;
+  label: string;
+  priceEur: number | null;
+  floatValue: number | null;
+  image: string | null;
+  url: string;
+};
+
+function SavedDesk({ needle }: { needle: string }) {
+  const [offers, setOffers] = useState<SavedOffer[]>([]);
+
+  const load = () => {
+    api<{ offers: SavedOffer[] }>('/api/market/saved')
+      .then((data) => setOffers(data.offers || []))
+      .catch(() => undefined);
+  };
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  const visible = offers.filter((offer) => matches(needle, [offer.label]));
+  if (needle && visible.length === 0) return null;
+  const remove = (id: string) => {
+    void api(`/api/market/saved/${id}`, { method: 'DELETE' }).then(load);
+  };
+
+  return (
+    <section className="space-y-2">
+      <h2 className="text-lg font-black">Me interesa</h2>
+      <Card className="px-4 py-4">
+        {visible.length === 0 ? (
+          <p className="text-sm font-medium text-slate-500">Cuando un guante te interese, se queda aquí. El enlace sigue abierto para entrar cuando quieras.</p>
+        ) : (
+          <div className="divide-y divide-slate-100 dark:divide-slate-800">
+            {visible.map((offer) => (
+              <article key={offer.id} className="flex items-center gap-3 py-3">
+                {offer.image && <img src={offer.image} alt="" referrerPolicy="no-referrer" className="h-14 w-20 shrink-0 object-contain" />}
+                <div className="min-w-0 flex-1">
+                  <p className="truncate font-black">{offer.label}</p>
+                  <p className="text-sm font-bold tabular-nums text-slate-500">{offer.priceEur == null ? '—' : formatEur(offer.priceEur)}{offer.floatValue == null ? '' : ` · float ${offer.floatValue.toFixed(4)}`}</p>
+                </div>
+                <a href={offer.url} target="_blank" rel="noopener noreferrer" className="shrink-0 rounded-full bg-slate-900 px-3 py-2 text-xs font-black text-white dark:bg-white dark:text-slate-900">Abrir</a>
+                <button type="button" onClick={() => remove(offer.id)} className="shrink-0 text-[11px] font-bold text-slate-400">Quitar</button>
+              </article>
+            ))}
+          </div>
+        )}
+      </Card>
+    </section>
+  );
+}
+
 type Picked =
   | { kind: 'quote'; source: 'coingecko' | 'yahoo'; externalId: string; name: string; priceEur: number | null }
   | { kind: 'skin'; name: string; wear: string; wears: string[] };
@@ -571,6 +625,7 @@ export function Market() {
       </div>
       <p className="text-sm font-medium text-slate-500">Pulsa una cotización para ver cómo ha ido. El porcentaje de la gráfica es el de ese tramo. En la lista, el verde y el rojo son el día o la sesión.</p>
       {data.warning && <p className="rounded-2xl bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">{data.warning}</p>}
+      {(market === 'all' || market === 'cs2') && <SavedDesk needle={needle} />}
       <AlertDesk items={data.signals || []} catalog={sections.flatMap((section) => section.items)} onChanged={load} />
       {empty && <p className="rounded-2xl bg-slate-100 px-4 py-6 text-sm font-medium text-slate-500 dark:bg-slate-900">El mercado no ha respondido todavía. Cuando haya un precio real, se queda aunque la fuente falle después.</p>}
       {noMatch && <p className="rounded-2xl bg-slate-100 px-4 py-6 text-sm font-medium text-slate-500 dark:bg-slate-900">Ninguna cotización coincide con «{needle}».</p>}
