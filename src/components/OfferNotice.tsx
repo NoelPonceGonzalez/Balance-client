@@ -9,6 +9,8 @@ import { cn } from '@/lib/utils';
 import type { AppNotification } from '@/lib/types';
 
 const SKIP = 'pat_offer_skip';
+const PASSED = 'pat_offer_passed';
+const ASIDE = 'pat_offer_aside';
 
 function skippedIds(): Set<string> {
   try {
@@ -23,6 +25,64 @@ function rememberSkip(id: string) {
   const next = skippedIds();
   next.add(id);
   localStorage.setItem(SKIP, JSON.stringify([...next]));
+}
+
+type PassedOffer = { listing: string; price: number };
+
+function readPassed(): PassedOffer[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(PASSED) || '[]') as unknown;
+    if (!Array.isArray(raw)) return [];
+    return raw.flatMap((row) => {
+      if (!row || typeof row !== 'object') return [];
+      const listing = (row as PassedOffer).listing;
+      const price = (row as PassedOffer).price;
+      return typeof listing === 'string' && typeof price === 'number' ? [{ listing, price }] : [];
+    });
+  } catch {
+    return [];
+  }
+}
+
+function rememberPassed(item: AppNotification) {
+  rememberSkip(item.id);
+  const listing = listingOf(item.quoteKey);
+  if (!listing || item.priceEur == null) return;
+  const next = [...readPassed(), { listing, price: item.priceEur }].slice(-200);
+  localStorage.setItem(PASSED, JSON.stringify(next));
+}
+
+function listingOf(quoteKey: string | null | undefined): string | null {
+  return quoteKey?.match(/csfloat:([^:]+)/)?.[1] ?? null;
+}
+
+function offerToken(item: AppNotification): string {
+  const listing = listingOf(item.quoteKey);
+  const price = item.priceEur == null ? '' : Math.round(item.priceEur);
+  return listing ? `${listing}:${price}` : item.id;
+}
+
+function dismissed(item: AppNotification, skip: Set<string>, passed: PassedOffer[]): boolean {
+  if (skip.has(item.id)) return true;
+  const listing = listingOf(item.quoteKey);
+  const price = item.priceEur;
+  if (!listing || price == null) return false;
+  return passed.some((row) => row.listing === listing && Math.abs(row.price - price) < 1);
+}
+
+function readAside(): Set<string> {
+  try {
+    const raw = JSON.parse(sessionStorage.getItem(ASIDE) || '[]') as unknown;
+    return new Set(Array.isArray(raw) ? raw.filter((item): item is string => typeof item === 'string') : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function rememberAside(token: string) {
+  const next = readAside();
+  next.add(token);
+  sessionStorage.setItem(ASIDE, JSON.stringify([...next].slice(-200)));
 }
 
 function saleMoment(item: AppNotification): string {
@@ -46,7 +106,8 @@ function wearOf(floatValue: number): string {
 export function OfferNotice() {
   const [items, setItems] = useState<AppNotification[]>([]);
   const [skip, setSkip] = useState<Set<string>>(() => skippedIds());
-  const [aside, setAside] = useState(false);
+  const [passed, setPassed] = useState<PassedOffer[]>(() => readPassed());
+  const [aside, setAside] = useState<Set<string>>(() => readAside());
   const [visit, setVisit] = useState(0);
 
   useEffect(() => {
@@ -65,7 +126,6 @@ export function OfferNotice() {
       if (document.visibilityState === 'hidden') away = true;
       if (document.visibilityState === 'visible' && away) {
         away = false;
-        setAside(false);
         setVisit((value) => value + 1);
       }
     };
@@ -73,22 +133,37 @@ export function OfferNotice() {
     return () => document.removeEventListener('visibilitychange', onHide);
   }, []);
 
-  const current = items.find((item) => item.quoteKey?.startsWith('listing:') && !skip.has(item.id));
+  const unique: AppNotification[] = [];
+  const buckets = new Set<string>();
+  for (const item of items) {
+    if (!item.quoteKey?.startsWith('listing:')) continue;
+    const token = offerToken(item);
+    if (buckets.has(token)) continue;
+    buckets.add(token);
+    unique.push(item);
+  }
+  const current = unique.find((item) => !dismissed(item, skip, passed) && !aside.has(offerToken(item)));
   const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const open = Boolean(current) && !aside;
+  const open = Boolean(current);
 
-  const leave = () => setAside(true);
+  const leave = () => {
+    for (const item of unique) {
+      if (!dismissed(item, skip, passed)) rememberAside(offerToken(item));
+    }
+    setAside(readAside());
+  };
   const pass = () => {
     if (!current) return;
     const id = current.id;
-    rememberSkip(id);
+    rememberPassed(current);
     setSkip(skippedIds());
+    setPassed(readPassed());
     void api(`/api/market/notifications/${id}/pass`, { method: 'POST' }).catch(() => undefined);
   };
   const openLink = () => {
     if (!current?.url) return;
     window.open(current.url, '_blank', 'noopener,noreferrer');
-    setAside(true);
+    leave();
   };
 
   if (!current) return null;
