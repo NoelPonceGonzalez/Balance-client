@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Bell } from 'lucide-react';
 import { api } from '@/lib/api';
+import { enablePhonePush } from '@/lib/push';
 import { formatAgo } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import type { AppNotification } from '@/lib/types';
@@ -10,6 +11,7 @@ export function NotificationsBell({ align = 'left', onDue, onPlan }: { align?: '
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<AppNotification[]>([]);
   const [permission, setPermission] = useState<NotificationPermission>(typeof Notification === 'undefined' ? 'denied' : Notification.permission);
+  const [phone, setPhone] = useState('');
   const [spot, setSpot] = useState<{ top: number; left: number } | null>(null);
   const announced = useRef<number | null>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -69,12 +71,14 @@ export function NotificationsBell({ align = 'left', onDue, onPlan }: { align?: '
   };
 
   const enableBrowser = async () => {
-    if (typeof Notification === 'undefined') return;
-    const result = await Notification.requestPermission();
-    setPermission(result);
+    const message = await enablePhonePush().catch((err: Error) => err.message);
+    setPermission(typeof Notification === 'undefined' ? 'denied' : Notification.permission);
+    setPhone(message);
   };
 
   const panel = open && spot ? (
+    <>
+    <button type="button" className="fixed inset-0 z-[65] cursor-default" aria-label="Cerrar avisos" onClick={() => setOpen(false)} />
     <div className="fixed z-[70] w-[min(20rem,calc(100vw-1.5rem))] rounded-3xl border border-slate-200 bg-white p-3 shadow-2xl dark:border-slate-800 dark:bg-slate-950" style={{ top: spot.top, left: spot.left }}>
       <div className="mb-2 flex items-center justify-between gap-2">
         <p className="font-black">Avisos</p>
@@ -82,9 +86,10 @@ export function NotificationsBell({ align = 'left', onDue, onPlan }: { align?: '
       </div>
       {permission !== 'granted' && (
         <button type="button" onClick={() => void enableBrowser()} className="mb-2 w-full rounded-2xl bg-slate-100 px-3 py-2 text-left text-xs font-bold text-slate-600 dark:bg-slate-900 dark:text-slate-300">
-          Activar avisos del sistema
+          Activar avisos en el móvil
         </button>
       )}
+      {phone && <p className="mb-2 px-1 text-xs font-medium text-slate-500">{phone}</p>}
       <div className="max-h-80 space-y-2 overflow-y-auto">
         {items.length === 0 && <p className="px-1 py-3 text-sm font-medium text-slate-500">Aquí salen los pagos y los ingresos que tocan, si una inversión cruza el umbral, y si alguien se sale de un reparto.</p>}
         {items.map((item) => {
@@ -123,6 +128,7 @@ export function NotificationsBell({ align = 'left', onDue, onPlan }: { align?: '
         })}
       </div>
     </div>
+    </>
   ) : null;
 
   return (

@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { api } from '@/lib/api';
+import { enablePhonePush } from '@/lib/push';
 import { formatAgo, formatDay, formatEur, formatNumber, formatPct, formatPrice } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { CashChart, type LinePoint } from '@/views/Wallets';
@@ -234,22 +235,113 @@ function TapeRow({ item, fallback, onOpen }: { item: MarketTapeItem; fallback?: 
   );
 }
 
-function PurchaseRow({ item }: { item: PurchaseWatch }) {
+function PurchaseRow({ item, onChanged }: { item: PurchaseWatch; onChanged: () => void }) {
   const hit = item.priceEur != null && item.priceEur <= item.belowEur;
   return (
     <article className="border-b border-slate-100 py-4 last:border-0 dark:border-slate-800">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="font-black">{item.label}</p>
-          <p className="text-[11px] font-bold uppercase text-slate-400">{item.market} · última venta{item.soldAt ? ` · ${formatAgo(item.soldAt)}` : ''}</p>
+          <p className="text-[11px] font-bold uppercase text-slate-400">{item.market} · activa{item.soldAt ? ` · última venta ${formatAgo(item.soldAt)}` : ''}</p>
         </div>
         <div className="text-right">
           <p className={cn('font-black tabular-nums', hit ? 'text-[#16c784]' : 'text-slate-900 dark:text-white')}>{item.priceEur == null ? '—' : formatEur(item.priceEur)}</p>
           <p className="text-[11px] font-semibold text-slate-400">por debajo de {formatEur(item.belowEur)}</p>
         </div>
       </div>
-      <p className="mt-2 text-xs font-medium text-slate-500">{item.note}</p>
+      <div className="mt-2 flex items-center justify-between gap-3">
+        <p className="text-xs font-medium text-slate-500">{item.note}</p>
+        <button type="button" onClick={() => void api(`/api/market/watch/${item.id}`, { method: 'DELETE' }).then(onChanged)} className="shrink-0 text-[11px] font-bold text-slate-400">Quitar</button>
+      </div>
     </article>
+  );
+}
+
+function PurchaseDesk({ items, onChanged }: { items: PurchaseWatch[]; onChanged: () => void }) {
+  const [query, setQuery] = useState('');
+  const [hits, setHits] = useState<{ name: string; wears: string[] }[]>([]);
+  const [picked, setPicked] = useState<{ name: string; wear: string } | null>(null);
+  const [below, setBelow] = useState('');
+  const [note, setNote] = useState('');
+  const [phone, setPhone] = useState('');
+
+  const search = async (value: string) => {
+    setQuery(value);
+    setPicked(null);
+    if (value.trim().length < 2) {
+      setHits([]);
+      return;
+    }
+    const data = await api<{ results: { name: string; wears: string[] }[] }>(`/api/market/skins?q=${encodeURIComponent(value.trim())}`).catch(() => ({ results: [] }));
+    setHits(data.results || []);
+  };
+
+  const save = async () => {
+    if (!picked) return;
+    const amount = Number(below.replace(',', '.'));
+    if (!(amount > 0)) {
+      setNote('Pon el precio en euros.');
+      return;
+    }
+    const marketHashName = picked.wear ? `${picked.name} (${picked.wear})` : picked.name;
+    setNote('');
+    try {
+      await api('/api/market/watch', {
+        method: 'POST',
+        body: JSON.stringify({ label: picked.name.replace(/^★\s*/, ''), marketHashName, below: amount }),
+      });
+      setPicked(null);
+      setQuery('');
+      setBelow('');
+      setHits([]);
+      onChanged();
+    } catch (err) {
+      setNote(err instanceof Error ? err.message : 'No se ha podido guardar el aviso.');
+    }
+  };
+
+  return (
+    <section className="space-y-2">
+      <h2 className="text-lg font-black">Compras</h2>
+      <Card className="px-4 py-4">
+        <p className="text-sm font-medium text-slate-500">Aquí se ponen y se ven los avisos de compra. Avisan cuando la última venta en CSFloat baja del precio.</p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button type="button" onClick={() => void enablePhonePush().then(setPhone).catch((err: Error) => setPhone(err.message))} className="rounded-full bg-slate-900 px-4 py-2 text-sm font-bold text-white dark:bg-white dark:text-slate-900">Avisos en el móvil</button>
+          {phone && <p className="self-center text-xs font-medium text-slate-500">{phone}</p>}
+        </div>
+        <p className="mt-2 text-xs font-medium text-slate-400">En el iPhone, Balance tiene que estar en la pantalla de inicio. Si no, el sistema no deja llegar el aviso.</p>
+        {items.length > 0 && (
+          <div className="mt-2">
+            {items.map((item) => <PurchaseRow key={item.id} item={item} onChanged={onChanged} />)}
+          </div>
+        )}
+        <div className="mt-4 grid gap-2">
+          <Input value={query} onChange={(event) => void search(event.target.value)} placeholder="Pandora, Talon, Printstream…" aria-label="Buscar una compra" />
+          {hits.length > 0 && !picked && (
+            <div className="grid gap-1">
+              {hits.map((hit) => (
+                <button key={hit.name} type="button" onClick={() => setPicked({ name: hit.name, wear: hit.wears[0] || '' })} className="rounded-2xl px-2 py-2 text-left text-sm font-bold hover:bg-slate-50 dark:hover:bg-white/5">{hit.name}</button>
+              ))}
+            </div>
+          )}
+          {picked && (
+            <div className="grid gap-2">
+              <p className="text-sm font-black">{picked.name}</p>
+              {picked.wear && (
+                <div className="flex flex-wrap gap-2">
+                  {hits.find((hit) => hit.name === picked.name)?.wears.map((wear) => (
+                    <button key={wear} type="button" onClick={() => setPicked({ ...picked, wear })} className={cn('rounded-full border px-3 py-1 text-xs font-bold', picked.wear === wear ? 'border-slate-900 text-slate-900 dark:border-white dark:text-white' : 'border-slate-200 text-slate-400')}>{wear}</button>
+                  ))}
+                </div>
+              )}
+              <Input label="Avisar por debajo de (€)" type="number" min="0" step="any" value={below} onChange={(event) => setBelow(event.target.value)} />
+              <Button type="button" onClick={() => void save()}>Poner aviso</Button>
+            </div>
+          )}
+          {note && <p className="text-xs font-medium text-rose-600">{note}</p>}
+        </div>
+      </Card>
+    </section>
   );
 }
 
@@ -467,14 +559,7 @@ export function Market() {
       </div>
       <p className="text-sm font-medium text-slate-500">Pulsa una cotización para ver cómo ha ido. El porcentaje de la gráfica es el de ese tramo. En la lista, el verde y el rojo son el día o la sesión.</p>
       {data.warning && <p className="rounded-2xl bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">{data.warning}</p>}
-      {(data.purchases || []).length > 0 && (
-        <section className="space-y-2">
-          <h2 className="text-lg font-black">Compras</h2>
-          <Card className="px-4 py-1">
-            {(data.purchases || []).map((item) => <PurchaseRow key={item.id} item={item} />)}
-          </Card>
-        </section>
-      )}
+      <PurchaseDesk items={data.purchases || []} onChanged={load} />
       {empty && <p className="rounded-2xl bg-slate-100 px-4 py-6 text-sm font-medium text-slate-500 dark:bg-slate-900">El mercado no ha respondido todavía. Cuando haya un precio real, se queda aunque la fuente falle después.</p>}
       {noMatch && <p className="rounded-2xl bg-slate-100 px-4 py-6 text-sm font-medium text-slate-500 dark:bg-slate-900">Ninguna cotización coincide con «{needle}».</p>}
       {visible.map((section) => <TapeSection key={section.id} title={section.title} icon={section.icon} items={section.items} onOpen={(item) => setOpen({ kind: item.kind, key: item.key, name: item.name, symbol: item.symbol, priceEur: item.priceEur, changePct: item.changePct, changeLabel: item.changeLabel, sparkline: item.sparkline })} />)}

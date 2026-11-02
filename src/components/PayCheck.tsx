@@ -84,8 +84,8 @@ export function PayCheck() {
     : `${current.otherName} dice que te ha pagado ${formatEur(current.amount)}`;
 
   return createPortal(
-    <div className={cn(modalOverlayClass, 'z-[75]')}>
-      <div className={cn(modalPanelClass, 'max-w-md')} role="dialog" aria-labelledby="pay-check-title">
+    <div className={cn(modalOverlayClass, 'z-[75]')} onClick={later}>
+      <div className={cn(modalPanelClass, 'max-w-md')} role="dialog" aria-labelledby="pay-check-title" onClick={(event) => event.stopPropagation()}>
         <p className="text-[11px] font-black uppercase tracking-widest text-slate-400">{current.planName}</p>
         <h2 id="pay-check-title" className="mt-1 text-xl font-black">{title}</h2>
         <p className="mt-3 text-base font-black">{detail}</p>

@@ -107,6 +107,7 @@ export function FixedCheck({ nonce, focusKey, onSettled }: { nonce: number; focu
       {open && (
         <motion.div
           className={cn(modalOverlayClass, 'z-[80]')}
+          onClick={() => setLater(true)}
           initial={still ? false : { opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={still ? undefined : { opacity: 0, transition: quickOut }}
@@ -116,6 +117,7 @@ export function FixedCheck({ nonce, focusKey, onSettled }: { nonce: number; focu
             className={cn(modalPanelClass, 'max-w-md')}
             role="dialog"
             aria-labelledby="fixed-check-title"
+            onClick={(event) => event.stopPropagation()}
             initial={still ? false : { opacity: 0, scaleX: 0.86, scaleY: 0.8, y: 28 }}
             animate={{ opacity: 1, scaleX: 1, scaleY: 1, y: 0 }}
             exit={still ? undefined : { opacity: 0, scale: 0.94, y: 16, transition: quickOut }}

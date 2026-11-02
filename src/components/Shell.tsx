@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { motion } from 'motion/react';
 import { LayoutDashboard, Target, Settings, ArrowLeftRight, LineChart, Camera } from 'lucide-react';
 import { FixedCheck } from '@/components/FixedCheck';
+import { OfferNotice } from '@/components/OfferNotice';
 import { InstallApp } from '@/components/InstallApp';
 import { NotificationsBell } from '@/components/NotificationsBell';
 import { cn } from '@/lib/utils';
@@ -134,6 +135,7 @@ export function Shell({
         </div>
       </header>
       <FixedCheck nonce={dueNonce} focusKey={dueKey} onSettled={onSettled} />
+      <OfferNotice />
       <main ref={scrollRef} className={cn('app-scroll min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-4 py-2 md:px-8', bare && 'pt-[max(0.75rem,env(safe-area-inset-top))]')}>
         <div ref={bandRef} className="origin-center will-change-transform">
           {children}

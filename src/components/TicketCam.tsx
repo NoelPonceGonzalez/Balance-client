@@ -83,6 +83,7 @@ export function TicketCam({
   const [plans, setPlans] = useState<PlanRow[]>([]);
   const [accounts, setAccounts] = useState<Bank[]>([]);
   const [where, setWhere] = useState('personal');
+  const [outside, setOutside] = useState(false);
   const [payer, setPayer] = useState(userId);
   const [accountId, setAccountId] = useState('');
   const [error, setError] = useState('');
@@ -220,6 +221,7 @@ export function TicketCam({
             paidBy: payer,
             splitAmong: [],
             category: '',
+            counts: !outside,
             receipt: photo,
             accountId: payer === userId ? accountId : undefined,
           }),
@@ -259,8 +261,8 @@ export function TicketCam({
         <div className="relative h-full">
           <img src={photo} alt="Tique" className="h-full w-full object-cover" />
           <div className="absolute inset-0 bg-slate-950/35 backdrop-blur-md" />
-          <div className="absolute inset-0 flex items-end justify-center p-3 sm:items-center">
-            <div role="dialog" aria-labelledby="ticket-read" className={cn(modalPanelClass, 'max-w-sm')}>
+          <div className="absolute inset-0 flex items-end justify-center p-3 sm:items-center" onClick={close}>
+            <div role="dialog" aria-labelledby="ticket-read" className={cn(modalPanelClass, 'max-w-sm')} onClick={(event) => event.stopPropagation()}>
               <div className="mb-4 flex items-start justify-between gap-3">
                 <div>
                   <p className="text-[13px] font-medium text-slate-500">He leído esto</p>
@@ -297,6 +299,16 @@ export function TicketCam({
                   ))}
                 </div>
               </div>
+              {where !== 'personal' && (
+                <div className="mt-4">
+                  <p className="text-[13px] font-medium text-slate-500">Presupuesto</p>
+                  <div className="mt-2 flex gap-2">
+                    <button type="button" onClick={() => setOutside(false)} className={cn('rounded-full border px-3 py-2 text-[13px] font-semibold', !outside ? chipOn : 'border-slate-200 bg-white/70 text-slate-600')}>Cuenta</button>
+                    <button type="button" onClick={() => setOutside(true)} className={cn('rounded-full border px-3 py-2 text-[13px] font-semibold', outside ? chipOn : 'border-slate-200 bg-white/70 text-slate-600')}>Fuera</button>
+                  </div>
+                  <p className="mt-2 text-[12px] font-medium text-slate-500">{outside ? 'No baja lo que lleváis allí.' : 'Baja lo que lleváis allí.'}</p>
+                </div>
+              )}
               {where !== 'personal' && (
                 <div className="mt-4">
                   <p className="text-[13px] font-medium text-slate-500">¿De quién es el tique?</p>

@@ -191,6 +191,10 @@ export interface AppNotification {
   body: string;
   direction: 'up' | 'down' | 'due';
   changePct: number | null;
+  priceEur?: number | null;
+  floatValue?: number | null;
+  image?: string | null;
+  url?: string | null;
   read: boolean;
   createdAt: string;
 }
@@ -263,10 +267,24 @@ export interface TripPerson {
   net: number;
 }
 
+export interface TripBudgetPerson {
+  id: string;
+  pocket: number;
+  used: number;
+  left: number;
+}
+
+export interface TripBudget {
+  budget: number;
+  left: number;
+  people: TripBudgetPerson[];
+}
+
 export interface TripSplit {
   totalSpent: number;
   people: TripPerson[];
   transfers: { fromId: string; from: string; toId: string; to: string; amount: number }[];
+  budget?: TripBudget;
 }
 
 export interface TripExpense {
@@ -276,6 +294,7 @@ export interface TripExpense {
   paidBy: string;
   paidByName?: string;
   category?: string;
+  counts?: boolean;
   splitAmong?: string[];
   date: string;
   receipt?: string;
@@ -310,6 +329,7 @@ export interface TripMember {
   name: string;
   color: string;
   contributed: number;
+  pocket?: number;
 }
 
 export interface PlanRow {
