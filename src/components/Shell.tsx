@@ -5,6 +5,7 @@ import { FixedCheck } from '@/components/FixedCheck';
 import { OfferNotice } from '@/components/OfferNotice';
 import { InstallApp } from '@/components/InstallApp';
 import { NotificationsBell } from '@/components/NotificationsBell';
+import { OfferFocusContext } from '@/components/offer-focus';
 import { cn } from '@/lib/utils';
 import type { AppNotification, User } from '@/lib/types';
 
@@ -118,6 +119,7 @@ export function Shell({
 
   return (
     <ChromeHidden.Provider value={hideChrome}>
+    <OfferFocusContext.Provider value={setFocusedOffer}>
     <div className="relative flex h-dvh flex-col overflow-hidden bg-[var(--app-bg)] text-[var(--app-text)]">
       <header aria-hidden={bare} className={cn('grid shrink-0 transition-[grid-template-rows,opacity] duration-300 ease-out', bare ? 'pointer-events-none grid-rows-[0fr] opacity-0' : 'grid-rows-[1fr] opacity-100')}>
         <div className="min-h-0 overflow-hidden">
@@ -195,6 +197,7 @@ export function Shell({
         </div>
       </div>
     </div>
+    </OfferFocusContext.Provider>
     </ChromeHidden.Provider>
   );
 }

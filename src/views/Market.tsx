@@ -3,6 +3,7 @@ import { Bell, Heart, Search, X } from 'lucide-react';
 import { Modal } from '@/components/Modal';
 import { QuietLoad } from '@/components/QuietLoad';
 import { Sparkline } from '@/components/Sparkline';
+import { useOpenOffer } from '@/components/offer-focus';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
@@ -11,7 +12,7 @@ import { enablePhonePush } from '@/lib/push';
 import { formatAgo, formatDay, formatEur, formatNumber, formatPct, formatPrice } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { CashChart, type LinePoint } from '@/views/Wallets';
-import type { MarketBoard, MarketItem, MarketPending, MarketSignal, MarketStory, MarketTapeItem, QuoteCandidate } from '@/lib/types';
+import type { AppNotification, MarketBoard, MarketItem, MarketPending, MarketSignal, MarketStory, MarketTapeItem, QuoteCandidate } from '@/lib/types';
 
 function fold(value: string): string {
   return value.toLocaleLowerCase('es').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -251,7 +252,14 @@ type Picked =
   | { kind: 'quote'; source: 'coingecko' | 'yahoo'; externalId: string; name: string; priceEur: number | null; image: string | null }
   | { kind: 'skin'; name: string; wear: string; wears: string[]; image: string | null };
 
+function sameAlert(item: MarketSignal, note: AppNotification): boolean {
+  if (!note.quoteKey) return false;
+  if (item.kind === 'compra') return note.quoteKey.startsWith(`listing:${item.id}:`);
+  return Boolean(item.quoteKey) && note.quoteKey === item.quoteKey;
+}
+
 function AlertDesk({ items, catalog, onChanged }: { items: MarketSignal[]; catalog: MarketTapeItem[]; onChanged: () => void }) {
+  const openOffer = useOpenOffer();
   const [query, setQuery] = useState('');
   const [quotes, setQuotes] = useState<QuoteCandidate[]>([]);
   const [skins, setSkins] = useState<{ name: string; wears: string[]; image: string | null }[]>([]);
@@ -260,6 +268,24 @@ function AlertDesk({ items, catalog, onChanged }: { items: MarketSignal[]; catal
   const [below, setBelow] = useState('');
   const [note, setNote] = useState('');
   const [phone, setPhone] = useState('');
+  const [history, setHistory] = useState<MarketSignal | null>(null);
+  const [notes, setNotes] = useState<AppNotification[] | null>(null);
+
+  useEffect(() => {
+    if (!history) {
+      setNotes(null);
+      return;
+    }
+    let cancel = false;
+    api<{ notifications: AppNotification[] }>('/api/market/notifications')
+      .then((data) => {
+        if (!cancel) setNotes((data.notifications || []).filter((note) => sameAlert(history, note)));
+      })
+      .catch(() => {
+        if (!cancel) setNotes([]);
+      });
+    return () => { cancel = true; };
+  }, [history]);
 
   const search = async (value: string) => {
     setQuery(value);
@@ -332,22 +358,56 @@ function AlertDesk({ items, catalog, onChanged }: { items: MarketSignal[]; catal
 
   return (
     <Card className="px-4 py-4">
-        {!adding && <p className="text-sm font-medium text-slate-500">Cada aviso se queda escuchando. Si el precio pasa por encima o por debajo del tuyo, llega en el momento. Vale para todo el mercado, no solo para CS2.</p>}
-        {!adding && items.length > 0 && (
+        {history && (
+          <div>
+            <button type="button" onClick={() => setHistory(null)} className="text-[13px] font-semibold text-slate-500">Volver</button>
+            <div className="mt-3 flex items-center gap-3">
+              <Mark image={history.image || null} symbol={history.name} contain={history.kind === 'compra'} fallback={history.kind === 'compra' ? '/platforms/cs2.svg' : null} />
+              <div className="min-w-0">
+                <p className="font-black">{history.name}</p>
+                <p className="text-[11px] font-bold uppercase text-slate-400">Escuchando{history.priceEur == null ? '' : ` · ahora ${formatEur(history.priceEur)}`}</p>
+              </div>
+            </div>
+            {notes == null && <p className="mt-4 text-sm font-medium text-slate-400">Cargando…</p>}
+            {notes && notes.length === 0 && <p className="mt-4 text-sm font-medium text-slate-500">Todavía no ha saltado ninguno.</p>}
+            {notes && notes.length > 0 && (
+              <div className="mt-2 divide-y divide-slate-100 dark:divide-slate-800">
+                {notes.map((note) => (
+                  <button
+                    key={note.id}
+                    type="button"
+                    onClick={() => { if (note.quoteKey?.startsWith('listing:')) openOffer(note); }}
+                    className="block w-full py-3 text-left"
+                  >
+                    <p className="font-black text-[#ea3943]">{note.priceEur == null ? note.title : formatEur(note.priceEur)}</p>
+                    <p className="text-xs font-medium text-slate-500">{note.body}</p>
+                    {note.floatValue != null && <p className="text-[11px] font-medium text-slate-400">Float {note.floatValue.toFixed(4)}</p>}
+                    <p className="mt-1 text-[11px] font-bold text-slate-400">{formatAgo(note.createdAt)}</p>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+        {!history && !adding && <p className="text-sm font-medium text-slate-500">Cada aviso se queda escuchando. Si el precio pasa por encima o por debajo del tuyo, llega en el momento. Vale para todo el mercado, no solo para CS2.</p>}
+        {!history && !adding && items.length > 0 && (
           <div className="mt-3 divide-y divide-slate-100 dark:divide-slate-800">
             {items.map((item) => (
               <article key={`${item.kind}:${item.id}`} className="flex items-center gap-3 py-3">
-                <Mark image={item.image || null} symbol={item.name} contain={item.kind === 'compra'} fallback={item.kind === 'compra' ? '/platforms/cs2.svg' : null} />
-                <div className="min-w-0 flex-1">
-                  <p className="font-black">{item.name}</p>
-                  <p className="text-[11px] font-bold uppercase text-slate-400">Escuchando{item.priceEur == null ? '' : ` · ahora ${formatEur(item.priceEur)}`}</p>
-                  <p className="mt-1 text-xs font-medium text-slate-500">{item.note}</p>
-                </div>
+                <button type="button" onClick={() => setHistory(item)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+                  <Mark image={item.image || null} symbol={item.name} contain={item.kind === 'compra'} fallback={item.kind === 'compra' ? '/platforms/cs2.svg' : null} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block font-black">{item.name}</span>
+                    <span className="block text-[11px] font-bold uppercase text-slate-400">Escuchando{item.priceEur == null ? '' : ` · ahora ${formatEur(item.priceEur)}`}</span>
+                    <span className="mt-1 block text-xs font-medium text-slate-500">{item.note}</span>
+                  </span>
+                </button>
                 <button type="button" onClick={() => remove(item)} className="shrink-0 text-[11px] font-bold text-slate-400">Quitar</button>
               </article>
             ))}
           </div>
         )}
+        {!history && (
         <div className={cn('grid gap-2', adding ? '' : 'mt-3')}>
           <Input value={query} onChange={(event) => void search(event.target.value)} placeholder="Bitcoin, oro, VWCE, Pandora…" aria-label="Buscar para un aviso" />
           {!picked && (local.length > 0 || quotes.length > 0 || skins.length > 0) && (
@@ -406,7 +466,8 @@ function AlertDesk({ items, catalog, onChanged }: { items: MarketSignal[]; catal
           )}
           {note && <p className="text-xs font-medium text-rose-600">{note}</p>}
         </div>
-        {!adding && <button type="button" onClick={() => void enablePhonePush().then(setPhone).catch((err: Error) => setPhone(err.message))} className="mt-4 text-xs font-bold text-slate-500">Avisos en el móvil</button>}
+        )}
+        {!history && !adding && <button type="button" onClick={() => void enablePhonePush().then(setPhone).catch((err: Error) => setPhone(err.message))} className="mt-4 text-xs font-bold text-slate-500">Avisos en el móvil</button>}
         {phone && <p className="mt-1 text-xs font-medium text-slate-500">{phone}</p>}
       </Card>
   );

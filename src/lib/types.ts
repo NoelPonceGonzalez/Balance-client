@@ -175,6 +175,7 @@ export interface MarketSignal {
   below: number | null;
   note: string;
   image?: string | null;
+  quoteKey?: string | null;
 }
 
 export interface PurchaseWatch {
