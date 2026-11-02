@@ -11,7 +11,7 @@ import { enablePhonePush } from '@/lib/push';
 import { formatAgo, formatDay, formatEur, formatNumber, formatPct, formatPrice } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { CashChart, type LinePoint } from '@/views/Wallets';
-import type { MarketBoard, MarketItem, MarketPending, MarketStory, MarketTapeItem, PurchaseWatch, QuoteCandidate } from '@/lib/types';
+import type { MarketBoard, MarketItem, MarketPending, MarketSignal, MarketStory, MarketTapeItem, QuoteCandidate } from '@/lib/types';
 
 function fold(value: string): string {
   return value.toLocaleLowerCase('es').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -112,47 +112,10 @@ function QuoteSearch({ assetClass, onPick }: { assetClass: string; onPick: (item
   );
 }
 
-function AlertForm({ item, onSaved }: { item: MarketItem; onSaved: () => void }) {
-  const [open, setOpen] = useState(false);
-  const [threshold, setThreshold] = useState(String(item.alert.thresholdPct));
-  const [above, setAbove] = useState(item.alert.above == null ? '' : String(item.alert.above));
-  const [below, setBelow] = useState(item.alert.below == null ? '' : String(item.alert.below));
-  const [error, setError] = useState('');
-
-  const save = async () => {
-    setError('');
-    try {
-      await api('/api/market/alert', {
-        method: 'PATCH',
-        body: JSON.stringify({
-          holdingId: item.holdingId,
-          thresholdPct: Number(threshold),
-          above: above === '' ? null : Number(above),
-          below: below === '' ? null : Number(below),
-          enabled: true,
-        }),
-      });
-      setOpen(false);
-      onSaved();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se ha podido guardar el aviso.');
-    }
-  };
-
-  return (
-    <div>
-      <button type="button" onClick={() => setOpen((value) => !value)} className="text-xs font-bold text-indigo-600">Aviso</button>
-      {open && (
-        <div className="mt-2 grid gap-2 sm:grid-cols-3">
-          <Input label="Avisar si el día se mueve más de (%)" type="number" min="0.1" step="0.1" value={threshold} onChange={(event) => setThreshold(event.target.value)} />
-          <Input label="O si el precio pasa de (€)" type="number" min="0" step="any" value={above} onChange={(event) => setAbove(event.target.value)} placeholder="Opcional" />
-          <Input label="O si baja de (€)" type="number" min="0" step="any" value={below} onChange={(event) => setBelow(event.target.value)} placeholder="Opcional" />
-          {error && <p className="text-xs font-medium text-rose-600 sm:col-span-3">{error}</p>}
-          <Button type="button" size="sm" onClick={() => void save()}>Guardar aviso</Button>
-        </div>
-      )}
-    </div>
-  );
+function quoteOf(key: string): { source: 'coingecko' | 'yahoo'; externalId: string } | null {
+  if (key.startsWith('coingecko:')) return { source: 'coingecko', externalId: key.slice('coingecko:'.length) };
+  if (key.startsWith('yahoo:')) return { source: 'yahoo', externalId: key.slice('yahoo:'.length) };
+  return null;
 }
 
 const STORY_SPANS = [
@@ -192,7 +155,6 @@ function QuoteRow({ item, onOpen, onChanged }: { item: MarketItem; onOpen: () =>
         </div>
       </button>
       <div className="mt-2 flex flex-wrap items-center gap-3">
-        <AlertForm item={item} onSaved={onChanged} />
         <button
           type="button"
           className="text-[11px] font-bold text-slate-400"
@@ -235,32 +197,16 @@ function TapeRow({ item, fallback, onOpen }: { item: MarketTapeItem; fallback?: 
   );
 }
 
-function PurchaseRow({ item, onChanged }: { item: PurchaseWatch; onChanged: () => void }) {
-  const hit = item.priceEur != null && item.priceEur <= item.belowEur;
-  return (
-    <article className="border-b border-slate-100 py-4 last:border-0 dark:border-slate-800">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="font-black">{item.label}</p>
-          <p className="text-[11px] font-bold uppercase text-slate-400">{item.market} · activa{item.soldAt ? ` · mirada ${formatAgo(item.soldAt)}` : ''}</p>
-        </div>
-        <div className="text-right">
-          <p className={cn('font-black tabular-nums', hit ? 'text-[#16c784]' : 'text-slate-900 dark:text-white')}>{item.priceEur == null ? 'Nadie la vende' : formatEur(item.priceEur)}</p>
-          <p className="text-[11px] font-semibold text-slate-400">por debajo de {formatEur(item.belowEur)}</p>
-        </div>
-      </div>
-      <div className="mt-2 flex items-center justify-between gap-3">
-        <p className="text-xs font-medium text-slate-500">{item.note}</p>
-        <button type="button" onClick={() => void api(`/api/market/watch/${item.id}`, { method: 'DELETE' }).then(onChanged)} className="shrink-0 text-[11px] font-bold text-slate-400">Quitar</button>
-      </div>
-    </article>
-  );
-}
+type Picked =
+  | { kind: 'quote'; source: 'coingecko' | 'yahoo'; externalId: string; name: string; priceEur: number | null }
+  | { kind: 'skin'; name: string; wear: string; wears: string[] };
 
-function PurchaseDesk({ items, onChanged }: { items: PurchaseWatch[]; onChanged: () => void }) {
+function AlertDesk({ items, catalog, onChanged }: { items: MarketSignal[]; catalog: MarketTapeItem[]; onChanged: () => void }) {
   const [query, setQuery] = useState('');
-  const [hits, setHits] = useState<{ name: string; wears: string[] }[]>([]);
-  const [picked, setPicked] = useState<{ name: string; wear: string } | null>(null);
+  const [quotes, setQuotes] = useState<QuoteCandidate[]>([]);
+  const [skins, setSkins] = useState<{ name: string; wears: string[] }[]>([]);
+  const [picked, setPicked] = useState<Picked | null>(null);
+  const [above, setAbove] = useState('');
   const [below, setBelow] = useState('');
   const [note, setNote] = useState('');
   const [phone, setPhone] = useState('');
@@ -268,78 +214,144 @@ function PurchaseDesk({ items, onChanged }: { items: PurchaseWatch[]; onChanged:
   const search = async (value: string) => {
     setQuery(value);
     setPicked(null);
-    if (value.trim().length < 2) {
-      setHits([]);
+    const text = value.trim();
+    if (text.length < 2) {
+      setQuotes([]);
+      setSkins([]);
       return;
     }
-    const data = await api<{ results: { name: string; wears: string[] }[] }>(`/api/market/skins?q=${encodeURIComponent(value.trim())}`).catch(() => ({ results: [] }));
-    setHits(data.results || []);
+    const [found, gloves] = await Promise.all([
+      api<{ results: QuoteCandidate[] }>(`/api/market/search?q=${encodeURIComponent(text)}`).catch(() => ({ results: [] })),
+      api<{ results: { name: string; wears: string[] }[] }>(`/api/market/skins?q=${encodeURIComponent(text)}`).catch(() => ({ results: [] })),
+    ]);
+    setQuotes(found.results || []);
+    setSkins(gloves.results || []);
+  };
+
+  const local = query.trim().length < 2 ? [] : catalog.filter((item) => matches(query, [item.name, item.symbol])).slice(0, 6);
+
+  const amount = (value: string) => {
+    const number = Number(value.replace(',', '.'));
+    return number > 0 ? number : null;
   };
 
   const save = async () => {
     if (!picked) return;
-    const amount = Number(below.replace(',', '.'));
-    if (!(amount > 0)) {
-      setNote('Pon el precio en euros.');
-      return;
-    }
-    const marketHashName = picked.wear ? `${picked.name} (${picked.wear})` : picked.name;
     setNote('');
     try {
-      await api('/api/market/watch', {
-        method: 'POST',
-        body: JSON.stringify({ label: picked.name.replace(/^★\s*/, ''), marketHashName, below: amount }),
-      });
+      if (picked.kind === 'skin') {
+        const price = amount(below);
+        if (price == null) {
+          setNote('Pon el precio por debajo del cual avisar.');
+          return;
+        }
+        const marketHashName = picked.wear ? `${picked.name} (${picked.wear})` : picked.name;
+        await api('/api/market/watch', {
+          method: 'POST',
+          body: JSON.stringify({ label: picked.name.replace(/^★\s*/, ''), marketHashName, below: price }),
+        });
+      } else {
+        const high = amount(above);
+        const low = amount(below);
+        if (high == null && low == null) {
+          setNote('Pon un precio por encima, por debajo, o los dos.');
+          return;
+        }
+        await api('/api/market/listen', {
+          method: 'POST',
+          body: JSON.stringify({ source: picked.source, externalId: picked.externalId, above: high, below: low }),
+        });
+      }
       setPicked(null);
       setQuery('');
+      setAbove('');
       setBelow('');
-      setHits([]);
+      setQuotes([]);
+      setSkins([]);
       onChanged();
     } catch (err) {
       setNote(err instanceof Error ? err.message : 'No se ha podido guardar el aviso.');
     }
   };
 
+  const remove = (item: MarketSignal) => {
+    const path = item.kind === 'compra' ? `/api/market/watch/${item.id}` : `/api/market/listen/${item.id}`;
+    void api(path, { method: 'DELETE' }).then(onChanged);
+  };
+
   return (
     <section className="space-y-2">
-      <h2 className="text-lg font-black">Compras</h2>
+      <h2 className="text-lg font-black">Avisos</h2>
       <Card className="px-4 py-4">
-        <p className="text-sm font-medium text-slate-500">Aquí se ponen y se ven los avisos de compra. Avisan cuando alguien publica la skin por debajo del precio, y se siguen mirando.</p>
-        <div className="mt-3 flex flex-wrap gap-2">
-          <button type="button" onClick={() => void enablePhonePush().then(setPhone).catch((err: Error) => setPhone(err.message))} className="rounded-full bg-slate-900 px-4 py-2 text-sm font-bold text-white dark:bg-white dark:text-slate-900">Avisos en el móvil</button>
-          {phone && <p className="self-center text-xs font-medium text-slate-500">{phone}</p>}
-        </div>
-        <p className="mt-2 text-xs font-medium text-slate-400">En el iPhone, Balance tiene que estar en la pantalla de inicio. Si no, el sistema no deja llegar el aviso.</p>
+        <p className="text-sm font-medium text-slate-500">Cada aviso se queda escuchando. Si el precio pasa por encima o por debajo del tuyo, llega en el momento. Vale para todo el mercado, no solo para CS2.</p>
         {items.length > 0 && (
-          <div className="mt-2">
-            {items.map((item) => <PurchaseRow key={item.id} item={item} onChanged={onChanged} />)}
+          <div className="mt-3 divide-y divide-slate-100 dark:divide-slate-800">
+            {items.map((item) => (
+              <article key={`${item.kind}:${item.id}`} className="flex items-start justify-between gap-3 py-3">
+                <div className="min-w-0">
+                  <p className="font-black">{item.name}</p>
+                  <p className="text-[11px] font-bold uppercase text-slate-400">Escuchando{item.priceEur == null ? '' : ` · ahora ${formatEur(item.priceEur)}`}</p>
+                  <p className="mt-1 text-xs font-medium text-slate-500">{item.note}</p>
+                </div>
+                <button type="button" onClick={() => remove(item)} className="shrink-0 text-[11px] font-bold text-slate-400">Quitar</button>
+              </article>
+            ))}
           </div>
         )}
-        <div className="mt-4 grid gap-2">
-          <Input value={query} onChange={(event) => void search(event.target.value)} placeholder="Pandora, Talon, Printstream…" aria-label="Buscar una compra" />
-          {hits.length > 0 && !picked && (
+        <div className="mt-3 grid gap-2">
+          <Input value={query} onChange={(event) => void search(event.target.value)} placeholder="Bitcoin, oro, VWCE, Pandora…" aria-label="Buscar para un aviso" />
+          {!picked && (local.length > 0 || quotes.length > 0 || skins.length > 0) && (
             <div className="grid gap-1">
-              {hits.map((hit) => (
-                <button key={hit.name} type="button" onClick={() => setPicked({ name: hit.name, wear: hit.wears[0] || '' })} className="rounded-2xl px-2 py-2 text-left text-sm font-bold hover:bg-slate-50 dark:hover:bg-white/5">{hit.name}</button>
+              {local.map((item) => {
+                const quote = quoteOf(item.key);
+                return (
+                  <button
+                    key={item.key}
+                    type="button"
+                    onClick={() => {
+                      if (quote) setPicked({ kind: 'quote', ...quote, name: item.name, priceEur: item.priceEur });
+                      else if (item.kind === 'cs2') setPicked({ kind: 'skin', name: item.name, wear: '', wears: [] });
+                    }}
+                    className="rounded-2xl px-2 py-2 text-left text-sm font-bold hover:bg-slate-50 dark:hover:bg-white/5"
+                  >
+                    {item.name}
+                    <span className="ml-2 text-[11px] font-bold uppercase text-slate-400">{item.priceEur == null ? item.symbol : formatEur(item.priceEur)}</span>
+                  </button>
+                );
+              })}
+              {quotes.filter((item) => !local.some((row) => row.key === `${item.source}:${item.externalId}`)).map((item) => (
+                <button key={`${item.source}:${item.externalId}`} type="button" onClick={() => setPicked({ kind: 'quote', source: item.source, externalId: item.externalId, name: item.name, priceEur: null })} className="rounded-2xl px-2 py-2 text-left text-sm font-bold hover:bg-slate-50 dark:hover:bg-white/5">
+                  {item.name}
+                  <span className="ml-2 text-[11px] font-bold uppercase text-slate-400">{item.symbol}</span>
+                </button>
+              ))}
+              {skins.map((item) => (
+                <button key={item.name} type="button" onClick={() => setPicked({ kind: 'skin', name: item.name, wear: item.wears[0] || '', wears: item.wears })} className="rounded-2xl px-2 py-2 text-left text-sm font-bold hover:bg-slate-50 dark:hover:bg-white/5">
+                  {item.name}
+                  <span className="ml-2 text-[11px] font-bold uppercase text-slate-400">a la venta</span>
+                </button>
               ))}
             </div>
           )}
           {picked && (
             <div className="grid gap-2">
-              <p className="text-sm font-black">{picked.name}</p>
-              {picked.wear && (
+              <p className="text-sm font-black">{picked.name}{picked.kind === 'quote' && picked.priceEur != null ? ` · ${formatEur(picked.priceEur)}` : ''}</p>
+              {picked.kind === 'skin' && picked.wears.length > 0 && (
                 <div className="flex flex-wrap gap-2">
-                  {hits.find((hit) => hit.name === picked.name)?.wears.map((wear) => (
+                  {picked.wears.map((wear) => (
                     <button key={wear} type="button" onClick={() => setPicked({ ...picked, wear })} className={cn('rounded-full border px-3 py-1 text-xs font-bold', picked.wear === wear ? 'border-slate-900 text-slate-900 dark:border-white dark:text-white' : 'border-slate-200 text-slate-400')}>{wear}</button>
                   ))}
                 </div>
               )}
-              <Input label="Avisar por debajo de (€)" type="number" min="0" step="any" value={below} onChange={(event) => setBelow(event.target.value)} />
-              <Button type="button" onClick={() => void save()}>Poner aviso</Button>
+              {picked.kind === 'quote' && <Input label="Avisar si pasa por encima de (€)" type="number" min="0" step="any" value={above} onChange={(event) => setAbove(event.target.value)} placeholder="Opcional" />}
+              <Input label={picked.kind === 'skin' ? 'Avisar si alguien lo pone por debajo de (€)' : 'Avisar si baja de (€)'} type="number" min="0" step="any" value={below} onChange={(event) => setBelow(event.target.value)} placeholder={picked.kind === 'quote' ? 'Opcional' : ''} />
+              <Button type="button" onClick={() => void save()}>Escuchar</Button>
             </div>
           )}
           {note && <p className="text-xs font-medium text-rose-600">{note}</p>}
         </div>
+        <button type="button" onClick={() => void enablePhonePush().then(setPhone).catch((err: Error) => setPhone(err.message))} className="mt-4 text-xs font-bold text-slate-500">Avisos en el móvil</button>
+        {phone && <p className="mt-1 text-xs font-medium text-slate-500">{phone}</p>}
       </Card>
     </section>
   );
@@ -559,7 +571,7 @@ export function Market() {
       </div>
       <p className="text-sm font-medium text-slate-500">Pulsa una cotización para ver cómo ha ido. El porcentaje de la gráfica es el de ese tramo. En la lista, el verde y el rojo son el día o la sesión.</p>
       {data.warning && <p className="rounded-2xl bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">{data.warning}</p>}
-      <PurchaseDesk items={data.purchases || []} onChanged={load} />
+      <AlertDesk items={data.signals || []} catalog={sections.flatMap((section) => section.items)} onChanged={load} />
       {empty && <p className="rounded-2xl bg-slate-100 px-4 py-6 text-sm font-medium text-slate-500 dark:bg-slate-900">El mercado no ha respondido todavía. Cuando haya un precio real, se queda aunque la fuente falle después.</p>}
       {noMatch && <p className="rounded-2xl bg-slate-100 px-4 py-6 text-sm font-medium text-slate-500 dark:bg-slate-900">Ninguna cotización coincide con «{needle}».</p>}
       {visible.map((section) => <TapeSection key={section.id} title={section.title} icon={section.icon} items={section.items} onOpen={(item) => setOpen({ kind: item.kind, key: item.key, name: item.name, symbol: item.symbol, priceEur: item.priceEur, changePct: item.changePct, changeLabel: item.changeLabel, sparkline: item.sparkline })} />)}

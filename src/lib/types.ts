@@ -163,6 +163,17 @@ export interface MarketBoard {
   tf2?: MarketTapeItem[];
   icons?: { cs2: string | null; tf2: string | null };
   purchases?: PurchaseWatch[];
+  signals?: MarketSignal[];
+}
+
+export interface MarketSignal {
+  id: string;
+  kind: 'precio' | 'compra';
+  name: string;
+  priceEur: number | null;
+  above: number | null;
+  below: number | null;
+  note: string;
 }
 
 export interface PurchaseWatch {
