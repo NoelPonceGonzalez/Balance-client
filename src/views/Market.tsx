@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Search, X } from 'lucide-react';
+import { Bell, Heart, Search, X } from 'lucide-react';
 import { Modal } from '@/components/Modal';
 import { QuietLoad } from '@/components/QuietLoad';
 import { Sparkline } from '@/components/Sparkline';
@@ -226,9 +226,7 @@ function SavedDesk({ needle }: { needle: string }) {
   };
 
   return (
-    <section className="space-y-2">
-      <h2 className="text-lg font-black">Me interesa</h2>
-      <Card className="px-4 py-4">
+    <Card className="px-4 py-4">
         {visible.length === 0 ? (
           <p className="text-sm font-medium text-slate-500">Cuando un guante te interese, se queda aquí. El enlace sigue abierto para entrar cuando quieras.</p>
         ) : (
@@ -247,10 +245,8 @@ function SavedDesk({ needle }: { needle: string }) {
           </div>
         )}
       </Card>
-    </section>
   );
 }
-
 type Picked =
   | { kind: 'quote'; source: 'coingecko' | 'yahoo'; externalId: string; name: string; priceEur: number | null }
   | { kind: 'skin'; name: string; wear: string; wears: string[] };
@@ -334,9 +330,7 @@ function AlertDesk({ items, catalog, onChanged }: { items: MarketSignal[]; catal
   };
 
   return (
-    <section className="space-y-2">
-      <h2 className="text-lg font-black">Avisos</h2>
-      <Card className="px-4 py-4">
+    <Card className="px-4 py-4">
         <p className="text-sm font-medium text-slate-500">Cada aviso se queda escuchando. Si el precio pasa por encima o por debajo del tuyo, llega en el momento. Vale para todo el mercado, no solo para CS2.</p>
         {items.length > 0 && (
           <div className="mt-3 divide-y divide-slate-100 dark:divide-slate-800">
@@ -407,7 +401,6 @@ function AlertDesk({ items, catalog, onChanged }: { items: MarketSignal[]; catal
         <button type="button" onClick={() => void enablePhonePush().then(setPhone).catch((err: Error) => setPhone(err.message))} className="mt-4 text-xs font-bold text-slate-500">Avisos en el móvil</button>
         {phone && <p className="mt-1 text-xs font-medium text-slate-500">{phone}</p>}
       </Card>
-    </section>
   );
 }
 
@@ -534,6 +527,7 @@ export function Market() {
   const [query, setQuery] = useState('');
   const [market, setMarket] = useState('all');
   const [open, setOpen] = useState<{ kind: string; key: string; name: string; symbol: string; priceEur: number | null; changePct: number | null; changeLabel: string; sparkline: number[] } | null>(null);
+  const [desk, setDesk] = useState<'saved' | 'alerts' | null>(null);
   const [, setTick] = useState(0);
 
   const load = () => {
@@ -593,10 +587,20 @@ export function Market() {
           <p className="text-xs font-black uppercase tracking-widest text-indigo-500">Cotizaciones</p>
           <h1 className="text-2xl font-black tracking-tight sm:text-3xl">Mercado</h1>
         </div>
-        <p className="flex items-center gap-2 text-xs font-bold text-slate-500">
-          <i className={cn('h-2 w-2 rounded-full', fresh ? 'bg-[#16c784]' : 'bg-amber-500')} />
-          {fresh ? `En vivo · ${formatAgo(data.updatedAt)}` : `Último intento ${formatAgo(data.updatedAt)}`}
-        </p>
+        <div className="flex flex-col items-end gap-2">
+          <p className="flex items-center gap-2 text-xs font-bold text-slate-500">
+            <i className={cn('h-2 w-2 rounded-full', fresh ? 'bg-[#16c784]' : 'bg-amber-500')} />
+            {fresh ? `En vivo · ${formatAgo(data.updatedAt)}` : `Último intento ${formatAgo(data.updatedAt)}`}
+          </p>
+          <div className="flex gap-2">
+            <button type="button" aria-label="Me interesa" onClick={() => setDesk('saved')} className={cn('grid h-10 w-10 place-items-center rounded-full', desk === 'saved' ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900' : 'bg-white text-slate-700 dark:bg-white/10 dark:text-white')}>
+              <Heart size={18} />
+            </button>
+            <button type="button" aria-label="Avisos" onClick={() => setDesk('alerts')} className={cn('grid h-10 w-10 place-items-center rounded-full', desk === 'alerts' ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900' : 'bg-white text-slate-700 dark:bg-white/10 dark:text-white')}>
+              <Bell size={18} />
+            </button>
+          </div>
+        </div>
       </div>
       <div className="sticky top-0 z-10 -mx-1 bg-[var(--app-bg)]/85 px-1 py-2 backdrop-blur-xl">
         <Input
@@ -614,7 +618,7 @@ export function Market() {
           }
         />
       </div>
-      <div className="market-pills -mx-4 flex gap-2 overflow-x-auto px-4">
+      <div className="market-pills -mx-4 flex w-full max-w-full flex-nowrap gap-2 overflow-x-auto px-4">
         <button type="button" onClick={() => setMarket('all')} className={cn('shrink-0 rounded-full px-3 py-1.5 text-sm font-bold', market === 'all' ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900' : 'bg-white text-slate-500 dark:bg-white/10')}>Todos</button>
         {chips.map((section) => (
           <button key={section.id} type="button" onClick={() => setMarket(section.id)} className={cn('inline-flex shrink-0 items-center gap-2 rounded-full py-1 pl-1 pr-3 text-sm font-bold', market === section.id ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900' : 'bg-white text-slate-600 dark:bg-white/10 dark:text-slate-200')}>
@@ -625,8 +629,16 @@ export function Market() {
       </div>
       <p className="text-sm font-medium text-slate-500">Pulsa una cotización para ver cómo ha ido. El porcentaje de la gráfica es el de ese tramo. En la lista, el verde y el rojo son el día o la sesión.</p>
       {data.warning && <p className="rounded-2xl bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">{data.warning}</p>}
-      {(market === 'all' || market === 'cs2') && <SavedDesk needle={needle} />}
-      <AlertDesk items={data.signals || []} catalog={sections.flatMap((section) => section.items)} onChanged={load} />
+      {desk === 'saved' && (
+        <Modal title="Me interesa" onClose={() => setDesk(null)}>
+          <SavedDesk needle={needle} />
+        </Modal>
+      )}
+      {desk === 'alerts' && (
+        <Modal title="Avisos" onClose={() => setDesk(null)}>
+          <AlertDesk items={data.signals || []} catalog={sections.flatMap((section) => section.items)} onChanged={load} />
+        </Modal>
+      )}
       {empty && <p className="rounded-2xl bg-slate-100 px-4 py-6 text-sm font-medium text-slate-500 dark:bg-slate-900">El mercado no ha respondido todavía. Cuando haya un precio real, se queda aunque la fuente falle después.</p>}
       {noMatch && <p className="rounded-2xl bg-slate-100 px-4 py-6 text-sm font-medium text-slate-500 dark:bg-slate-900">Ninguna cotización coincide con «{needle}».</p>}
       {visible.map((section) => <TapeSection key={section.id} title={section.title} icon={section.icon} items={section.items} onOpen={(item) => setOpen({ kind: item.kind, key: item.key, name: item.name, symbol: item.symbol, priceEur: item.priceEur, changePct: item.changePct, changeLabel: item.changeLabel, sparkline: item.sparkline })} />)}

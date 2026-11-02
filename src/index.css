@@ -56,11 +56,12 @@
   scrollbar-width: none;
   -ms-overflow-style: none;
   -webkit-overflow-scrolling: touch;
-  touch-action: pan-x pan-y;
+  overscroll-behavior-x: contain;
+  touch-action: pan-x;
 }
 
-.market-pills::-webkit-scrollbar {
-  display: none;
+.market-pills button {
+  touch-action: pan-x;
 }
 
 .app-scroll {
@@ -68,7 +69,7 @@
   scrollbar-color: rgba(100, 116, 139, 0.45) transparent;
   overscroll-behavior-y: auto;
   -webkit-overflow-scrolling: touch;
-  touch-action: pan-y;
+  touch-action: pan-x pan-y;
   padding-bottom: calc(7.25rem + env(safe-area-inset-bottom, 0px));
 }
 

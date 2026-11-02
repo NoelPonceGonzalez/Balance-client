@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } f
 import { bindHold, HoldMenu, holdItemClass, placeMenu } from '@/components/HoldMenu';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'motion/react';
-import { Banknote, Check, ChevronLeft, ChevronRight, GripVertical, ImageIcon, MoreHorizontal, Pencil, Plus, Trash2 } from 'lucide-react';
+import { Banknote, Check, ChevronLeft, ChevronRight, Copy, GripVertical, ImageIcon, MoreHorizontal, Pencil, Plus, Trash2 } from 'lucide-react';
 import { ModalClose, modalPanelClass, Overlay } from '@/components/Modal';
 import { OriginGlyph, OriginPicker } from '@/components/OriginMark';
 import { PlatformLogo } from '@/components/PlatformLogo';
@@ -10,7 +10,7 @@ import { QuietLoad } from '@/components/QuietLoad';
 import { Button } from '@/components/ui/Button';
 import { Input, fieldClass } from '@/components/ui/Input';
 import { api } from '@/lib/api';
-import { jelly, quickOut } from '@/lib/motion';
+import { jelly, quickOut, softSpring } from '@/lib/motion';
 import { formatDay, formatEur, formatSignedEur } from '@/lib/format';
 import { planImageFileName, renderPlanPng } from '@/lib/plan-image';
 import { cn, docId } from '@/lib/utils';
@@ -177,6 +177,87 @@ function kindLabel(plan: { kind?: string; linkedAccountIds?: unknown[] }): strin
   return 'Patrimonio';
 }
 
+function planAsText(item: PlanItem, place?: string): string {
+  const plan = item.plan;
+  const forecast = item.forecast;
+  const months = forecast.months || [];
+  const opening = months[0]?.lines[0]?.balance ?? plan.openingBalance ?? 0;
+  const today = forecast.today ? balanceAsOf(months, forecast.today, opening) : opening;
+  const done = forecast.today ? completion(months, forecast.today, opening, plan.targetAmount) : null;
+  const lines = [
+    plan.name,
+    [kindLabel(plan), place].filter(Boolean).join(' · '),
+    '',
+    done ? `Completado el ${formatDay(done.day)}` : `Hoy ${formatEur(today)}`,
+  ];
+  if (plan.targetAmount > 0) lines.push(`Meta ${formatEur(plan.targetAmount)}`);
+  if (!done && forecast.estimatedDate) lines.push(`Llegas el ${formatDay(forecast.estimatedDate)}`);
+  if ((plan.salary || 0) > 0) lines.push(`Nómina ${formatEur(plan.salary)}`);
+  if (plan.monthlySavings) lines.push(`Apartas ${formatEur(plan.monthlySavings)} el día ${plan.savingsDay || Number(String(plan.startDate || '').slice(8, 10))}`);
+  lines.push('');
+  for (const month of months) {
+    const rows = month.lines.filter((line) => line.label && line.amount != null && line.tone !== 'final');
+    if (rows.length === 0) continue;
+    lines.push(month.title);
+    for (const line of rows) lines.push(`· ${line.label}  ${formatSignedEur(line.amount)}${line.paid ? ' ✓' : ''}`);
+    const close = [...month.lines].reverse().find((line) => line.tone === 'final');
+    if (close) lines.push(`Queda ${formatEur(close.balance)}`);
+    lines.push('');
+  }
+  return lines.join('\n').trim();
+}
+
+type PlanTextView = {
+  text: string;
+  name: string;
+  subtitle: string;
+  todayLabel: string;
+  today: string;
+  meta: string | null;
+  arrival: { text: string; className: string } | null;
+  share: number;
+  notes: string[];
+  months: { title: string; rows: { label: string; amount: string; up: boolean; paid: boolean }[]; close: string | null }[];
+};
+
+function planTextView(item: PlanItem, place?: string): PlanTextView {
+  const plan = item.plan;
+  const forecast = item.forecast;
+  const months = forecast.months || [];
+  const opening = months[0]?.lines[0]?.balance ?? plan.openingBalance ?? 0;
+  const today = forecast.today ? balanceAsOf(months, forecast.today, opening) : opening;
+  const done = forecast.today ? completion(months, forecast.today, opening, plan.targetAmount) : null;
+  const notes: string[] = [];
+  if ((plan.salary || 0) > 0) notes.push(`Nómina ${formatEur(plan.salary)}`);
+  if (plan.monthlySavings) notes.push(`Apartas ${formatEur(plan.monthlySavings)} el día ${plan.savingsDay || Number(String(plan.startDate || '').slice(8, 10))}`);
+  return {
+    text: planAsText(item, place),
+    name: plan.name,
+    subtitle: [kindLabel(plan), place].filter(Boolean).join(' · '),
+    todayLabel: done ? 'Completado' : 'Hoy',
+    today: done ? formatDay(done.day) : formatEur(today),
+    meta: plan.targetAmount > 0 ? formatEur(plan.targetAmount) : null,
+    arrival: done ? null : arrivalNote(forecast.estimatedDate, plan.targetDate),
+    share: plan.targetAmount > 0 ? Math.max(0, Math.min(100, (today / plan.targetAmount) * 100)) : 0,
+    notes,
+    months: months.flatMap((month) => {
+      const rows = month.lines.filter((line) => line.label && line.amount != null && line.tone !== 'final');
+      if (rows.length === 0) return [];
+      const close = [...month.lines].reverse().find((line) => line.tone === 'final');
+      return [{
+        title: month.title,
+        rows: rows.map((line) => ({
+          label: line.label,
+          amount: formatSignedEur(line.amount),
+          up: (line.amount || 0) > 0,
+          paid: line.paid === true,
+        })),
+        close: close ? formatEur(close.balance) : null,
+      }];
+    }),
+  };
+}
+
 function formatShare(value: number): string {
   return `${new Intl.NumberFormat('es-ES', { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(value)} %`;
 }
@@ -290,10 +371,8 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
   const [monthOpen, setMonthOpen] = useState<Record<string, boolean>>({});
   const [draft, setDraft] = useState<Draft | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState('');
   const [editor, setEditor] = useState<EditorDraft | null>(null);
-  const [menu, setMenu] = useState<{ line: PlanMonthLine; top: number; left: number } | null>(null);
   const [drag, setDrag] = useState<{ line: PlanMonthLine; x: number; y: number; over: string | null } | null>(null);
   const dragRef = useRef<{ line: PlanMonthLine; x: number; y: number; moved: boolean } | null>(null);
   const [extra, setExtra] = useState<{ month: string; name: string; amount: string; date: string; direction: 'in' | 'out'; image: string } | null>(null);
@@ -301,6 +380,8 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
   const [beat, setBeat] = useState(0);
   const [cardMenu, setCardMenu] = useState<{ id: string; top: number; left: number; confirm: boolean } | null>(null);
   const [makingId, setMakingId] = useState<string | null>(null);
+  const [copiedPlan, setCopiedPlan] = useState(false);
+  const [textSheet, setTextSheet] = useState<PlanTextView | null>(null);
   const [sheet, setSheet] = useState<{ url: string; blob: Blob; fileName: string } | null>(null);
   const [copied, setCopied] = useState(false);
   const [ready, setReady] = useState(false);
@@ -344,6 +425,14 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
     api<{ accounts: AccountRow[] }>('/api/accounts')
       .then((data) => setAccounts(data.accounts))
       .catch(() => setAccounts([]));
+  }, [books]);
+
+  useEffect(() => {
+    const refresh = () => {
+      if (document.visibilityState === 'visible') load().catch(() => undefined);
+    };
+    document.addEventListener('visibilitychange', refresh);
+    return () => document.removeEventListener('visibilitychange', refresh);
   }, [books]);
 
   const save = async () => {
@@ -439,14 +528,12 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
     }
   };
 
-  const openMenu = (line: PlanMonthLine, rect: DOMRect) => {
-    const place = placeMenu(rect.left + rect.width / 2, rect.top + 8);
-    setMenu({ line, ...place });
+  const openMenu = (line: PlanMonthLine) => {
+    beginEdit(line);
   };
 
   const onDragStart = (line: PlanMonthLine, x: number, y: number) => {
     dragRef.current = { line, x, y, moved: false };
-    setMenu(null);
   };
 
   const onDragMove = (x: number, y: number) => {
@@ -492,26 +579,11 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
     setDrag(null);
     if (!current) return;
     if (!current.moved) {
-      if (!fromHandle) openMenu(current.line, rect);
+      if (!fromHandle) openMenu(current.line);
       return;
     }
     const month = document.elementFromPoint(x, y)?.closest('[data-drop-month]')?.getAttribute('data-drop-month');
     if (month) void moveToMonth(current.line, month);
-  };
-
-  const removeLine = async (line: PlanMonthLine) => {
-    if (!plan || !line.markKey) return;
-    setMenu(null);
-    setError('');
-    try {
-      await api(`/api/plans/${docId(plan)}/entry`, {
-        method: 'POST',
-        body: JSON.stringify({ key: line.markKey, remove: true, name: line.label, amount: Math.abs(line.amount || 0), date: line.day || '', dayOfMonth: 1, everyWeeks: 1 }),
-      });
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se ha podido quitar el apunte.');
-    }
   };
 
   const addExtra = async () => {
@@ -611,6 +683,34 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
     });
   };
 
+  const copyPlan = (item: PlanItem, place?: string) => {
+    setTextSheet(planTextView(item, place));
+    setCopiedPlan(false);
+    setError('');
+  };
+
+  const copySheetText = async () => {
+    if (!textSheet) return;
+    setError('');
+    try {
+      window.focus();
+      await navigator.clipboard.writeText(textSheet.text);
+      setCopiedPlan(true);
+      return;
+    } catch {
+      const area = document.querySelector<HTMLTextAreaElement>('#plan-text');
+      if (area) {
+        area.focus();
+        area.select();
+        if (document.execCommand('copy')) {
+          setCopiedPlan(true);
+          return;
+        }
+      }
+      setError('Selecciona el texto y cópialo.');
+    }
+  };
+
   const makeImage = async (item: { plan: PlanRow; forecast: PlanForecast }) => {
     const id = docId(item.plan);
     setMakingId(id);
@@ -677,13 +777,6 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
     link.click();
   };
 
-  const remove = async () => {
-    if (!plan) return;
-    await api(`/api/plans/${docId(plan)}`, { method: 'DELETE' });
-    setConfirmDelete(false);
-    await load();
-  };
-
   if (plan?.kind === 'gastos') {
     return (
       <div className={embedded ? 'space-y-4' : 'mx-auto max-w-3xl space-y-4'}>
@@ -713,8 +806,8 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
               </span>
               <span className="text-slate-400">{formatEur(plan.targetAmount)}</span>
             </div>
-            <div className="h-1.5 overflow-hidden rounded-full bg-slate-900/10 dark:bg-white/15">
-              <div className="h-full rounded-full bg-slate-900/75 transition-[width] duration-700 ease-out dark:bg-white" style={{ width: `${barWidth(shownBalance, plan.targetAmount)}%` }} />
+            <div className="mt-2 h-3 w-36 overflow-hidden rounded-full bg-slate-900/10 dark:bg-white/15">
+              <div className="h-full rounded-full bg-slate-900/80 transition-[width] duration-700 ease-out dark:bg-white" style={{ width: `${barWidth(shownBalance, plan.targetAmount)}%` }} />
             </div>
             {finished ? (
               <p className="mt-2 inline-flex items-center gap-1 text-xs font-black text-[#16c784]"><Check size={13} strokeWidth={3} /> Completado el {shortDay(finished.day)}</p>
@@ -752,7 +845,6 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
                       return;
                     }
                     setSelected(id);
-                    setConfirmDelete(false);
                   }}
                   className="hold-target plan-rise cursor-pointer rounded-2xl border border-white/70 bg-white/70 p-3 text-left shadow-lg shadow-slate-900/5 backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/60"
                 >
@@ -786,7 +878,6 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
                     return;
                   }
                   setSelected(id);
-                  setConfirmDelete(false);
                 }}
                 className="hold-target plan-rise cursor-pointer rounded-2xl border border-white/70 bg-white/70 p-3 text-left shadow-lg shadow-slate-900/5 backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/60"
               >
@@ -822,28 +913,13 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
                 <span className="mt-3 block h-1.5 overflow-hidden rounded-full bg-slate-200/80 dark:bg-white/10">
                   <span className={cn('block h-full rounded-full transition-[width] duration-700', done ? 'bg-[#16c784]' : 'bg-slate-800 dark:bg-white')} style={{ width: `${barWidth(balance, item.plan.targetAmount)}%` }} />
                 </span>
-                <span className="mt-2 flex items-center justify-between gap-2">
-                  <span className="text-[11px] font-semibold text-slate-400">{done ? `Llegó el ${shortDay(done.day)}` : `de ${formatEur(item.plan.targetAmount)}`}</span>
-                  <button
-                    type="button"
-                    onPointerDown={(event) => event.stopPropagation()}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      void makeImage(item);
-                    }}
-                    disabled={makingId === id}
-                    className="inline-flex items-center gap-1 rounded-full border border-slate-200/90 bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-slate-500 disabled:opacity-50 dark:border-white/15 dark:bg-white/5 dark:text-slate-300"
-                  >
-                    <ImageIcon size={12} />
-                    {makingId === id ? 'Creando…' : 'Imagen'}
-                  </button>
-                </span>
+                <span className="mt-2 block text-[11px] font-semibold text-slate-400">{done ? `Llegó el ${shortDay(done.day)}` : `de ${formatEur(item.plan.targetAmount)}`}</span>
               </div>
             );
           })}
           <button
             type="button"
-            onClick={() => { setEditing(null); setDraft(blank()); setConfirmDelete(false); }}
+            onClick={() => { setEditing(null); setDraft(blank()); }}
             className="flex min-h-28 flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-slate-300 bg-white/40 text-sm font-bold text-slate-500 transition-colors hover:bg-white/70 dark:border-white/15 dark:bg-white/5"
           >
             <Plus size={18} />
@@ -853,6 +929,34 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
       )}
       {cardMenu && (
         <HoldMenu top={cardMenu.top} left={cardMenu.left} onClose={() => setCardMenu(null)}>
+          {menuPlan && menuPlan.plan.kind !== 'gastos' && (
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  const item = menuPlan;
+                  const place = accounts.find((account) => (item.plan.linkedAccountIds || []).map(String).includes(String(account._id)) && !account.archived);
+                  setCardMenu(null);
+                  copyPlan(item, place?.name);
+                }}
+                className={cn(holdItemClass, 'text-slate-800 dark:text-slate-100')}
+              >
+                <Copy size={14} /> Texto
+              </button>
+              <button
+                type="button"
+                disabled={makingId === cardMenu.id}
+                onClick={() => {
+                  const item = menuPlan;
+                  setCardMenu(null);
+                  void makeImage(item);
+                }}
+                className={cn(holdItemClass, 'text-slate-800 dark:text-slate-100 disabled:opacity-50')}
+              >
+                <ImageIcon size={14} /> {makingId === cardMenu.id ? 'Creando…' : 'Imagen'}
+              </button>
+            </>
+          )}
           <button
             type="button"
             onClick={() => {
@@ -883,9 +987,8 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
       )}
       {plan && forecast && (
         <article className="rounded-[28px] border border-white/60 bg-white/55 p-4 shadow-2xl shadow-slate-900/10 backdrop-blur-2xl dark:border-white/10 dark:bg-slate-900/55 sm:p-5">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <h3 className="text-base font-black tracking-tight">{planTitle(plan)}</h3>
+          <div>
+            <h3 className="text-base font-black tracking-tight">{planTitle(plan)}</h3>
               <p className="mt-1 text-xs font-medium text-slate-500">
                 {(plan.salary || 0) > 0 && <span className="inline-flex items-center gap-1"><Banknote size={12} /> Nómina {formatEur(plan.salary)}{payday ? ` va a ${payday.name}` : ''} · </span>}
                 Apartas {formatEur(plan.monthlySavings)} el día {plan.savingsDay || Number(plan.startDate.slice(8, 10))}
@@ -897,18 +1000,6 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
                 )}
                 <span className="mt-1 block">Marcar suma o resta ese importe, aunque el día no haya llegado. Quitar la marca lo devuelve. Lo que ya está en el efectivo no se mueve otra vez.</span>
               </p>
-            </div>
-            <div className="flex shrink-0 gap-2">
-              <button type="button" disabled={makingId === docId(plan)} onClick={() => current && void makeImage(current)} className="inline-flex items-center gap-1 text-xs font-bold text-slate-500 disabled:opacity-50">
-                <ImageIcon size={13} /> {makingId === docId(plan) ? 'Creando…' : 'Imagen'}
-              </button>
-              <button type="button" onClick={() => { setEditing(docId(plan)); setDraft(fromPlan(plan)); }} className="text-xs font-bold text-slate-500">Editar</button>
-              {confirmDelete ? (
-                <button type="button" onClick={() => void remove()} className="text-xs font-bold text-[#ea3943]">Confirmar</button>
-              ) : (
-                <button type="button" onClick={() => setConfirmDelete(true)} className="text-xs font-bold text-slate-400">Borrar</button>
-              )}
-            </div>
           </div>
           <div className="mt-5 space-y-5">
             {shownMonths.map((month) => {
@@ -916,7 +1007,7 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
               const dropping = drag != null && drag.over === month.month && drag.line.day?.slice(0, 7) !== month.month;
               const todayMonth = (forecast.today || '').slice(0, 7);
               const open = monthOpen[month.month] ?? month.month >= todayMonth;
-              const shown = open || extra?.month === month.month || dropping;
+              const shown = open || dropping;
               return (
               <section
                 key={month.month}
@@ -950,43 +1041,18 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
                     />
                   ))}
                   {dropping && <p className="border-t border-indigo-200 px-3 py-2 text-xs font-bold text-indigo-600">Soltar en {month.title}</p>}
-                  {extra?.month === month.month ? (
-                    <div className="plan-rise grid gap-2 border-t border-slate-200/70 px-3 py-3 dark:border-white/10">
-                      <Input placeholder="Qué es" value={extra.name} onChange={(event) => setExtra({ ...extra, name: event.target.value })} />
-                      <OriginPicker name={extra.name} image={extra.image} onImage={(image) => setExtra({ ...extra, image })} />
-                      <div className="grid grid-cols-2 gap-2">
-                        <Input type="number" min="0" step="any" placeholder="Importe" value={extra.amount} onChange={(event) => setExtra({ ...extra, amount: event.target.value })} />
-                        <Input type="date" min={`${month.month}-01`} max={monthEnd(month.month)} value={extra.date} onChange={(event) => setExtra({ ...extra, date: event.target.value })} />
-                      </div>
-                      <div className="flex gap-2">
-                        <button type="button" onClick={() => setExtra({ ...extra, direction: 'out' })} className={cn('flex-1 rounded-full border py-2 text-sm font-semibold transition-colors', extra.direction === 'out' ? 'border-[#ea3943] text-[#ea3943]' : 'border-slate-200 text-slate-400')}>Sale</button>
-                        <button type="button" onClick={() => setExtra({ ...extra, direction: 'in' })} className={cn('flex-1 rounded-full border py-2 text-sm font-semibold transition-colors', extra.direction === 'in' ? 'border-[#16c784] text-[#16c784]' : 'border-slate-200 text-slate-400')}>Entra</button>
-                      </div>
-                      <div className="flex gap-2">
-                        <Button className="flex-1" onClick={() => void addExtra()}>Añadir</Button>
-                        <Button variant="secondary" onClick={() => setExtra(null)}>Cancelar</Button>
-                      </div>
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setExtra({ month: month.month, name: '', amount: '', date: dayInMonth(month.month, forecast.today || month.month + '-15'), direction: 'out', image: '' })}
-                      className="flex w-full items-center gap-2 border-t border-slate-200/70 px-3 py-2.5 text-sm font-semibold text-slate-500 transition-colors hover:text-slate-800 dark:border-white/10"
-                    >
-                      <Plus size={15} /> Añadir extra
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => { setError(''); setExtra({ month: month.month, name: '', amount: '', date: dayInMonth(month.month, forecast.today || month.month + '-15'), direction: 'out', image: '' }); }}
+                    className="flex w-full items-center gap-2 border-t border-slate-200/70 px-3 py-2.5 text-sm font-semibold text-slate-500 transition-colors hover:text-slate-800 dark:border-white/10"
+                  >
+                    <Plus size={15} /> Añadir extra
+                  </button>
                 </div>}
               </section>
               );
             })}
           </div>
-          {menu && (
-            <HoldMenu top={menu.top} left={menu.left} onClose={() => setMenu(null)}>
-              <button type="button" onClick={() => { const line = menu.line; setMenu(null); beginEdit(line); }} className={cn(holdItemClass, 'text-slate-800 dark:text-slate-100')}><Pencil size={14} /> Editar</button>
-              <button type="button" onClick={() => void removeLine(menu.line)} className={cn(holdItemClass, 'text-[#ea3943]')}><Trash2 size={14} /> Eliminar</button>
-            </HoldMenu>
-          )}
           {drag && createPortal(
             <div
               className="pointer-events-none fixed z-[70] flex w-52 -translate-x-1/2 -translate-y-1/2 items-center gap-2 rounded-xl bg-white px-2.5 py-2 text-[13px] shadow-lg ring-2 ring-indigo-300 dark:bg-slate-900 dark:ring-indigo-400/60"
@@ -1013,6 +1079,71 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
               <Button variant="secondary" onClick={() => setKeepAsk(null)}>No, era un gasto</Button>
             </div>
           </div>
+        </Overlay>
+      )}
+      {textSheet && (
+        <Overlay onClose={() => setTextSheet(null)}>
+          <motion.div
+            role="dialog"
+            aria-labelledby="plan-text-title"
+            className={cn(modalPanelClass, 'flex max-w-sm flex-col')}
+            onClick={(event) => event.stopPropagation()}
+            initial={{ opacity: 0, y: 24, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            transition={{ ...softSpring, opacity: { duration: 0.18 } }}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h3 id="plan-text-title" className="truncate text-[17px] font-black tracking-tight">{textSheet.name}</h3>
+                {textSheet.subtitle && <p className="mt-0.5 text-[12px] font-semibold text-slate-400">{textSheet.subtitle}</p>}
+              </div>
+              <ModalClose onClose={() => setTextSheet(null)} />
+            </div>
+            <div className="mt-4 grid grid-cols-2 items-end gap-3">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">{textSheet.todayLabel}</p>
+                <p className="mt-0.5 text-[22px] font-black tabular-nums leading-none tracking-tight">{textSheet.today}</p>
+              </div>
+              {textSheet.meta && (
+                <div className="text-right">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Meta</p>
+                  <p className="mt-0.5 text-[22px] font-black tabular-nums leading-none tracking-tight text-slate-400">{textSheet.meta}</p>
+                </div>
+              )}
+            </div>
+            {textSheet.meta && (
+              <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-slate-900/10 dark:bg-white/15">
+                <div className="h-full rounded-full bg-slate-900/80 dark:bg-white" style={{ width: `${textSheet.share}%` }} />
+              </div>
+            )}
+            {textSheet.arrival && <p className={cn('mt-2 text-[13px] font-semibold', textSheet.arrival.className)}>{textSheet.arrival.text}</p>}
+            {textSheet.notes.length > 0 && <p className="mt-2 text-[13px] font-medium text-slate-500">{textSheet.notes.join(' · ')}</p>}
+            <div className="mt-4 max-h-[38dvh] space-y-4 overflow-y-auto rounded-2xl bg-slate-50/90 px-3 py-3 dark:bg-white/[0.04]">
+              {textSheet.months.map((month) => (
+                <section key={month.title}>
+                  <h4 className="text-[11px] font-black uppercase tracking-wide text-slate-400">{month.title}</h4>
+                  <div className="mt-1">
+                    {month.rows.map((row, index) => (
+                      <div key={`${month.title}-${index}`} className="flex items-baseline justify-between gap-3 border-t border-slate-200/70 py-1.5 first:border-t-0 dark:border-white/10">
+                        <span className="flex min-w-0 items-center gap-1.5 text-[13px] font-medium text-slate-700 dark:text-slate-200">
+                          {row.paid && <Check size={12} strokeWidth={3} className="shrink-0 text-[#16c784]" />}
+                          <span className="truncate">{row.label}</span>
+                        </span>
+                        <span className={cn('shrink-0 text-[13px] font-semibold tabular-nums', row.up ? 'text-[#16c784]' : 'text-[#ea3943]')}>{row.amount}</span>
+                      </div>
+                    ))}
+                  </div>
+                  {month.close && <p className="mt-1 text-right text-[11px] font-semibold text-slate-400">Queda {month.close}</p>}
+                </section>
+              ))}
+            </div>
+            <textarea id="plan-text" readOnly tabIndex={-1} value={textSheet.text} className="pointer-events-none absolute h-px w-px opacity-0" />
+            {error && <p className="mt-3 text-sm font-medium text-rose-600">{error}</p>}
+            <Button className={cn('mt-4 w-full', copiedPlan && 'bg-[#16c784] shadow-none hover:bg-[#16c784]')} onClick={() => void copySheetText()}>
+              {copiedPlan ? <Check size={16} /> : <Copy size={16} />} {copiedPlan ? 'Copiado' : 'Copiar'}
+            </Button>
+            <p className="mt-2 text-center text-[12px] font-medium text-slate-400">Se pega tal cual en WhatsApp.</p>
+          </motion.div>
         </Overlay>
       )}
       {sheet && (
@@ -1044,11 +1175,35 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
           onClose={() => { setDraft(null); setEditing(null); }}
         />
       )}
+      {extra && (
+        <Overlay onClose={() => setExtra(null)}>
+          <div className={cn(modalPanelClass, 'max-w-md')} onClick={(event) => event.stopPropagation()}>
+            <div className="mb-4 flex items-center justify-between gap-4">
+              <h3 className="text-[17px] font-semibold">Añadir extra</h3>
+              <ModalClose onClose={() => setExtra(null)} />
+            </div>
+            <div className="grid gap-3">
+              <Input label="Qué es" value={extra.name} onChange={(event) => setExtra({ ...extra, name: event.target.value })} />
+              <OriginPicker name={extra.name} image={extra.image} onImage={(image) => setExtra({ ...extra, image })} />
+              <div className="grid grid-cols-2 gap-2">
+                <Input label="Importe" type="number" min="0" step="any" value={extra.amount} onChange={(event) => setExtra({ ...extra, amount: event.target.value })} />
+                <Input label="Fecha" type="date" min={`${extra.month}-01`} max={monthEnd(extra.month)} value={extra.date} onChange={(event) => setExtra({ ...extra, date: event.target.value })} />
+              </div>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setExtra({ ...extra, direction: 'out' })} className={cn('flex-1 rounded-full border py-2 text-sm font-semibold transition-colors', extra.direction === 'out' ? 'border-[#ea3943] text-[#ea3943]' : 'border-slate-200 text-slate-400')}>Sale</button>
+                <button type="button" onClick={() => setExtra({ ...extra, direction: 'in' })} className={cn('flex-1 rounded-full border py-2 text-sm font-semibold transition-colors', extra.direction === 'in' ? 'border-[#16c784] text-[#16c784]' : 'border-slate-200 text-slate-400')}>Entra</button>
+              </div>
+              {error && <p className="text-sm font-medium text-rose-600">{error}</p>}
+              <Button onClick={() => void addExtra()}>Añadir</Button>
+            </div>
+          </div>
+        </Overlay>
+      )}
       {editor && (
         <Overlay onClose={() => setEditor(null)}>
           <div className={cn(modalPanelClass, 'max-w-md')} onClick={(event) => event.stopPropagation()}>
             <div className="mb-4 flex items-center justify-between gap-4">
-              <h3 className="text-[17px] font-semibold">Apunte</h3>
+              <h3 className="text-[17px] font-semibold">{editor.name || 'Apunte'}</h3>
               <ModalClose onClose={() => setEditor(null)} />
             </div>
             <div className="grid gap-3">
