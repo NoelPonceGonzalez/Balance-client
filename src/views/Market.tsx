@@ -248,13 +248,13 @@ function SavedDesk({ needle }: { needle: string }) {
   );
 }
 type Picked =
-  | { kind: 'quote'; source: 'coingecko' | 'yahoo'; externalId: string; name: string; priceEur: number | null }
-  | { kind: 'skin'; name: string; wear: string; wears: string[] };
+  | { kind: 'quote'; source: 'coingecko' | 'yahoo'; externalId: string; name: string; priceEur: number | null; image: string | null }
+  | { kind: 'skin'; name: string; wear: string; wears: string[]; image: string | null };
 
 function AlertDesk({ items, catalog, onChanged }: { items: MarketSignal[]; catalog: MarketTapeItem[]; onChanged: () => void }) {
   const [query, setQuery] = useState('');
   const [quotes, setQuotes] = useState<QuoteCandidate[]>([]);
-  const [skins, setSkins] = useState<{ name: string; wears: string[] }[]>([]);
+  const [skins, setSkins] = useState<{ name: string; wears: string[]; image: string | null }[]>([]);
   const [picked, setPicked] = useState<Picked | null>(null);
   const [above, setAbove] = useState('');
   const [below, setBelow] = useState('');
@@ -272,13 +272,14 @@ function AlertDesk({ items, catalog, onChanged }: { items: MarketSignal[]; catal
     }
     const [found, gloves] = await Promise.all([
       api<{ results: QuoteCandidate[] }>(`/api/market/search?q=${encodeURIComponent(text)}`).catch(() => ({ results: [] })),
-      api<{ results: { name: string; wears: string[] }[] }>(`/api/market/skins?q=${encodeURIComponent(text)}`).catch(() => ({ results: [] })),
+      api<{ results: { name: string; wears: string[]; image: string | null }[] }>(`/api/market/skins?q=${encodeURIComponent(text)}`).catch(() => ({ results: [] })),
     ]);
     setQuotes(found.results || []);
     setSkins(gloves.results || []);
   };
 
   const local = query.trim().length < 2 ? [] : catalog.filter((item) => matches(query, [item.name, item.symbol])).slice(0, 6);
+  const adding = query.trim().length > 0 || picked != null;
 
   const amount = (value: string) => {
     const number = Number(value.replace(',', '.'));
@@ -331,12 +332,13 @@ function AlertDesk({ items, catalog, onChanged }: { items: MarketSignal[]; catal
 
   return (
     <Card className="px-4 py-4">
-        <p className="text-sm font-medium text-slate-500">Cada aviso se queda escuchando. Si el precio pasa por encima o por debajo del tuyo, llega en el momento. Vale para todo el mercado, no solo para CS2.</p>
-        {items.length > 0 && (
+        {!adding && <p className="text-sm font-medium text-slate-500">Cada aviso se queda escuchando. Si el precio pasa por encima o por debajo del tuyo, llega en el momento. Vale para todo el mercado, no solo para CS2.</p>}
+        {!adding && items.length > 0 && (
           <div className="mt-3 divide-y divide-slate-100 dark:divide-slate-800">
             {items.map((item) => (
-              <article key={`${item.kind}:${item.id}`} className="flex items-start justify-between gap-3 py-3">
-                <div className="min-w-0">
+              <article key={`${item.kind}:${item.id}`} className="flex items-center gap-3 py-3">
+                <Mark image={item.image || null} symbol={item.name} contain={item.kind === 'compra'} fallback={item.kind === 'compra' ? '/platforms/cs2.svg' : null} />
+                <div className="min-w-0 flex-1">
                   <p className="font-black">{item.name}</p>
                   <p className="text-[11px] font-bold uppercase text-slate-400">Escuchando{item.priceEur == null ? '' : ` · ahora ${formatEur(item.priceEur)}`}</p>
                   <p className="mt-1 text-xs font-medium text-slate-500">{item.note}</p>
@@ -346,7 +348,7 @@ function AlertDesk({ items, catalog, onChanged }: { items: MarketSignal[]; catal
             ))}
           </div>
         )}
-        <div className="mt-3 grid gap-2">
+        <div className={cn('grid gap-2', adding ? '' : 'mt-3')}>
           <Input value={query} onChange={(event) => void search(event.target.value)} placeholder="Bitcoin, oro, VWCE, Pandora…" aria-label="Buscar para un aviso" />
           {!picked && (local.length > 0 || quotes.length > 0 || skins.length > 0) && (
             <div className="grid gap-1">
@@ -357,33 +359,39 @@ function AlertDesk({ items, catalog, onChanged }: { items: MarketSignal[]; catal
                     key={item.key}
                     type="button"
                     onClick={() => {
-                      if (quote) setPicked({ kind: 'quote', ...quote, name: item.name, priceEur: item.priceEur });
-                      else if (item.kind === 'cs2') setPicked({ kind: 'skin', name: item.name, wear: '', wears: [] });
+                      if (quote) setPicked({ kind: 'quote', ...quote, name: item.name, priceEur: item.priceEur, image: item.image });
+                      else if (item.kind === 'cs2') setPicked({ kind: 'skin', name: item.name, wear: '', wears: [], image: item.image });
                     }}
-                    className="rounded-2xl px-2 py-2 text-left text-sm font-bold hover:bg-slate-50 dark:hover:bg-white/5"
+                    className="flex items-center gap-3 rounded-2xl px-2 py-2 text-left text-sm font-bold hover:bg-slate-50 dark:hover:bg-white/5"
                   >
-                    {item.name}
-                    <span className="ml-2 text-[11px] font-bold uppercase text-slate-400">{item.priceEur == null ? item.symbol : formatEur(item.priceEur)}</span>
+                    <Mark image={item.image} symbol={item.symbol} contain={item.kind === 'cs2' || item.kind === 'tf2'} />
+                    <span className="min-w-0">
+                      {item.name}
+                      <span className="ml-2 text-[11px] font-bold uppercase text-slate-400">{item.priceEur == null ? item.symbol : formatEur(item.priceEur)}</span>
+                    </span>
                   </button>
                 );
               })}
               {quotes.filter((item) => !local.some((row) => row.key === `${item.source}:${item.externalId}`)).map((item) => (
-                <button key={`${item.source}:${item.externalId}`} type="button" onClick={() => setPicked({ kind: 'quote', source: item.source, externalId: item.externalId, name: item.name, priceEur: null })} className="rounded-2xl px-2 py-2 text-left text-sm font-bold hover:bg-slate-50 dark:hover:bg-white/5">
-                  {item.name}
-                  <span className="ml-2 text-[11px] font-bold uppercase text-slate-400">{item.symbol}</span>
+                <button key={`${item.source}:${item.externalId}`} type="button" onClick={() => setPicked({ kind: 'quote', source: item.source, externalId: item.externalId, name: item.name, priceEur: null, image: item.image })} className="flex items-center gap-3 rounded-2xl px-2 py-2 text-left text-sm font-bold hover:bg-slate-50 dark:hover:bg-white/5">
+                  <Mark image={item.image} symbol={item.symbol} />
+                  <span className="min-w-0">{item.name}<span className="ml-2 text-[11px] font-bold uppercase text-slate-400">{item.symbol}</span></span>
                 </button>
               ))}
               {skins.map((item) => (
-                <button key={item.name} type="button" onClick={() => setPicked({ kind: 'skin', name: item.name, wear: item.wears[0] || '', wears: item.wears })} className="rounded-2xl px-2 py-2 text-left text-sm font-bold hover:bg-slate-50 dark:hover:bg-white/5">
-                  {item.name}
-                  <span className="ml-2 text-[11px] font-bold uppercase text-slate-400">a la venta</span>
+                <button key={item.name} type="button" onClick={() => setPicked({ kind: 'skin', name: item.name, wear: item.wears[0] || '', wears: item.wears, image: item.image })} className="flex items-center gap-3 rounded-2xl px-2 py-2 text-left text-sm font-bold hover:bg-slate-50 dark:hover:bg-white/5">
+                  <Mark image={item.image} symbol="CS2" contain fallback="/platforms/cs2.svg" />
+                  <span className="min-w-0">{item.name}<span className="ml-2 text-[11px] font-bold uppercase text-slate-400">a la venta</span></span>
                 </button>
               ))}
             </div>
           )}
           {picked && (
             <div className="grid gap-2">
-              <p className="text-sm font-black">{picked.name}{picked.kind === 'quote' && picked.priceEur != null ? ` · ${formatEur(picked.priceEur)}` : ''}</p>
+              <p className="flex items-center gap-3 text-sm font-black">
+                <Mark image={picked.image} symbol={picked.name} contain={picked.kind === 'skin'} fallback={picked.kind === 'skin' ? '/platforms/cs2.svg' : null} />
+                <span>{picked.name}{picked.kind === 'quote' && picked.priceEur != null ? ` · ${formatEur(picked.priceEur)}` : ''}</span>
+              </p>
               {picked.kind === 'skin' && picked.wears.length > 0 && (
                 <div className="flex flex-wrap gap-2">
                   {picked.wears.map((wear) => (
@@ -398,7 +406,7 @@ function AlertDesk({ items, catalog, onChanged }: { items: MarketSignal[]; catal
           )}
           {note && <p className="text-xs font-medium text-rose-600">{note}</p>}
         </div>
-        <button type="button" onClick={() => void enablePhonePush().then(setPhone).catch((err: Error) => setPhone(err.message))} className="mt-4 text-xs font-bold text-slate-500">Avisos en el móvil</button>
+        {!adding && <button type="button" onClick={() => void enablePhonePush().then(setPhone).catch((err: Error) => setPhone(err.message))} className="mt-4 text-xs font-bold text-slate-500">Avisos en el móvil</button>}
         {phone && <p className="mt-1 text-xs font-medium text-slate-500">{phone}</p>}
       </Card>
   );
