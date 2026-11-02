@@ -242,10 +242,10 @@ function PurchaseRow({ item, onChanged }: { item: PurchaseWatch; onChanged: () =
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="font-black">{item.label}</p>
-          <p className="text-[11px] font-bold uppercase text-slate-400">{item.market} · activa{item.soldAt ? ` · última venta ${formatAgo(item.soldAt)}` : ''}</p>
+          <p className="text-[11px] font-bold uppercase text-slate-400">{item.market} · activa{item.soldAt ? ` · mirada ${formatAgo(item.soldAt)}` : ''}</p>
         </div>
         <div className="text-right">
-          <p className={cn('font-black tabular-nums', hit ? 'text-[#16c784]' : 'text-slate-900 dark:text-white')}>{item.priceEur == null ? '—' : formatEur(item.priceEur)}</p>
+          <p className={cn('font-black tabular-nums', hit ? 'text-[#16c784]' : 'text-slate-900 dark:text-white')}>{item.priceEur == null ? 'Nadie la vende' : formatEur(item.priceEur)}</p>
           <p className="text-[11px] font-semibold text-slate-400">por debajo de {formatEur(item.belowEur)}</p>
         </div>
       </div>
@@ -304,7 +304,7 @@ function PurchaseDesk({ items, onChanged }: { items: PurchaseWatch[]; onChanged:
     <section className="space-y-2">
       <h2 className="text-lg font-black">Compras</h2>
       <Card className="px-4 py-4">
-        <p className="text-sm font-medium text-slate-500">Aquí se ponen y se ven los avisos de compra. Avisan cuando la última venta en CSFloat baja del precio.</p>
+        <p className="text-sm font-medium text-slate-500">Aquí se ponen y se ven los avisos de compra. Avisan cuando alguien publica la skin por debajo del precio, y se siguen mirando.</p>
         <div className="mt-3 flex flex-wrap gap-2">
           <button type="button" onClick={() => void enablePhonePush().then(setPhone).catch((err: Error) => setPhone(err.message))} className="rounded-full bg-slate-900 px-4 py-2 text-sm font-bold text-white dark:bg-white dark:text-slate-900">Avisos en el móvil</button>
           {phone && <p className="self-center text-xs font-medium text-slate-500">{phone}</p>}

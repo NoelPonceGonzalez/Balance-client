@@ -73,7 +73,7 @@ export function OfferNotice() {
     return () => document.removeEventListener('visibilitychange', onHide);
   }, []);
 
-  const current = items.find((item) => item.quoteKey?.startsWith('csfloat:') && !skip.has(item.id));
+  const current = items.find((item) => item.quoteKey?.startsWith('listing:') && !skip.has(item.id));
   const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const open = Boolean(current) && !aside;
 
@@ -131,7 +131,7 @@ export function OfferNotice() {
               <p className="text-sm font-medium text-slate-400">{formatDay(when)}</p>
             </div>
             <p className="mt-3 text-sm font-medium text-slate-500">
-              Última venta en CSFloat{below ? ` · por debajo de ${below}` : ''}.
+              Alguien lo ha puesto a la venta{below ? ` por debajo de ${below}` : ''}.
             </p>
             {floatValue != null && (
               <p className="mt-1 text-xs font-medium text-slate-400">Float {floatValue.toFixed(4)} · {wearOf(floatValue)}</p>
@@ -142,7 +142,7 @@ export function OfferNotice() {
               disabled={!current.url}
               className="mt-5 w-full rounded-full bg-slate-900 py-3 text-sm font-black text-white disabled:opacity-40 dark:bg-white dark:text-slate-900"
             >
-              Ir a CSFloat
+              {current.url?.includes('skinport.com') ? 'Ir a Skinport' : 'Ir a la oferta'}
             </button>
             <button type="button" onClick={pass} className="mt-2 w-full py-2 text-sm font-bold text-slate-400">No me interesa</button>
           </motion.div>
