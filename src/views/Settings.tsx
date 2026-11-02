@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { ChevronRight } from 'lucide-react';
 import { PasswordReset } from '@/components/PasswordReset';
 import { Input } from '@/components/ui/Input';
@@ -67,7 +67,37 @@ export function Settings({
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [erase, setErase] = useState<'idle' | 'confirm'>('idle');
   const [eraseText, setEraseText] = useState('');
+  const [csfloat, setCsfloat] = useState(false);
+  const [csfloatKey, setCsfloatKey] = useState('');
+  const [csfloatNote, setCsfloatNote] = useState('');
   const dirty = name.trim() !== user.name.trim() && name.trim().length > 0;
+
+  useEffect(() => {
+    api<{ connected: boolean }>('/api/market/csfloat')
+      .then((data) => setCsfloat(data.connected))
+      .catch(() => undefined);
+  }, []);
+
+  const saveCsfloat = async () => {
+    setError('');
+    setCsfloatNote('');
+    try {
+      await api('/api/market/csfloat', { method: 'PUT', body: JSON.stringify({ key: csfloatKey.trim() }) });
+      setCsfloatKey('');
+      setCsfloat(true);
+      setCsfloatNote('Guardada. No se vuelve a mostrar.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se ha podido guardar la clave.');
+    }
+  };
+
+  const clearCsfloat = async () => {
+    setError('');
+    await api('/api/market/csfloat', { method: 'DELETE' });
+    setCsfloat(false);
+    setCsfloatKey('');
+    setCsfloatNote('Clave quitada.');
+  };
 
   const saveProfile = async () => {
     setError('');
@@ -193,6 +223,34 @@ export function Settings({
             aria-label="Cada cuánto se turnan el porcentaje y los euros"
             onChange={(event) => onHero(Number(event.target.value))}
           />
+        </div>
+      </Group>
+
+      <Group title="CSFloat">
+        <div className="px-4 py-4">
+          <p className="text-[15px] font-semibold">{csfloat ? 'Clave guardada' : 'Sin clave'}</p>
+          <p className="mt-1 text-xs font-medium text-slate-400">Solo se usa para leer anuncios nuevos. Se guarda cifrada y no vuelve a salir. La copia de los datos no la incluye. Al borrar la cuenta, se borra.</p>
+          <div className="mt-3">
+            <Input
+              label={csfloat ? 'Cambiar clave' : 'Clave de Developer'}
+              type="password"
+              autoComplete="off"
+              autoCorrect="off"
+              spellCheck={false}
+              value={csfloatKey}
+              onChange={(event) => { setCsfloatKey(event.target.value); setCsfloatNote(''); }}
+              placeholder="Pégala una vez"
+            />
+          </div>
+          <div className="mt-3 flex items-center gap-4">
+            {csfloatKey.trim().length >= 20 && (
+              <button type="button" onClick={() => void saveCsfloat()} className="text-sm font-semibold text-slate-800 dark:text-slate-100">Guardar</button>
+            )}
+            {csfloat && (
+              <button type="button" onClick={() => void clearCsfloat()} className="text-sm font-semibold text-slate-500">Quitar</button>
+            )}
+          </div>
+          {csfloatNote && <p className="mt-2 text-xs font-medium text-slate-400">{csfloatNote}</p>}
         </div>
       </Group>
 
