@@ -6,7 +6,7 @@ import { OfferNotice } from '@/components/OfferNotice';
 import { InstallApp } from '@/components/InstallApp';
 import { NotificationsBell } from '@/components/NotificationsBell';
 import { cn } from '@/lib/utils';
-import type { User } from '@/lib/types';
+import type { AppNotification, User } from '@/lib/types';
 
 const ITEMS = [
   { id: 'dashboard', label: 'Resumen', short: 'Resumen', icon: LayoutDashboard },
@@ -42,6 +42,7 @@ export function Shell({
 }) {
   const [dueNonce, setDueNonce] = useState(0);
   const [dueKey, setDueKey] = useState<string | null>(null);
+  const [focusedOffer, setFocusedOffer] = useState<AppNotification | null>(null);
   const [bare, setBare] = useState(false);
   const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const hideChrome = useCallback((hidden: boolean) => setBare(hidden), []);
@@ -122,7 +123,7 @@ export function Shell({
         <div className="min-h-0 overflow-hidden">
           <div className="flex items-center justify-end gap-0.5 px-3 pb-1 pt-[max(0.35rem,env(safe-area-inset-top))] md:px-8">
             <InstallApp compact />
-            <NotificationsBell align="right" onPlan={onPlan} onDue={(quoteKey) => { setDueKey(quoteKey); setDueNonce((value) => value + 1); }} />
+            <NotificationsBell align="right" onPlan={onPlan} onOffer={setFocusedOffer} onDue={(quoteKey) => { setDueKey(quoteKey); setDueNonce((value) => value + 1); }} />
             <button
               type="button"
               onClick={() => onChange('settings')}
@@ -135,7 +136,7 @@ export function Shell({
         </div>
       </header>
       <FixedCheck nonce={dueNonce} focusKey={dueKey} onSettled={onSettled} />
-      <OfferNotice />
+      <OfferNotice focused={focusedOffer} onFocusedClose={() => setFocusedOffer(null)} />
       <main ref={scrollRef} className={cn('app-scroll min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-4 py-2 md:px-8', bare && 'pt-[max(0.75rem,env(safe-area-inset-top))]')}>
         <div ref={bandRef} className="origin-center will-change-transform">
           {children}

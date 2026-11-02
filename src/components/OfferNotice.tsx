@@ -81,7 +81,7 @@ function wearOf(floatValue: number): string {
   return 'Veterana de guerra';
 }
 
-export function OfferNotice() {
+export function OfferNotice({ focused = null, onFocusedClose }: { focused?: AppNotification | null; onFocusedClose?: () => void }) {
   const [items, setItems] = useState<AppNotification[]>([]);
   const [skip, setSkip] = useState<Set<string>>(() => skippedIds());
   const [passed, setPassed] = useState<PassedOffer[]>(() => readPassed());
@@ -123,32 +123,39 @@ export function OfferNotice() {
     unique.push(item);
   }
   const current = unique.find((item) => !dismissed(item, skip, passed));
+  const picked = focused?.quoteKey?.startsWith('listing:') ? focused : null;
+  const shown = picked || current;
   const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const open = Boolean(current) && !aside;
+  const open = Boolean(shown) && (Boolean(picked) || !aside);
 
-  const leave = () => setAside(true);
+  const leave = () => {
+    if (picked) onFocusedClose?.();
+    setAside(true);
+  };
   const pass = () => {
-    if (!current) return;
-    const id = current.id;
-    rememberPassed(current);
+    if (!shown) return;
+    const id = shown.id;
+    rememberPassed(shown);
     setSkip(skippedIds());
     setPassed(readPassed());
+    if (picked) onFocusedClose?.();
     void api(`/api/market/notifications/${id}/pass`, { method: 'POST' }).catch(() => undefined);
   };
   const interest = () => {
-    if (!current?.url) return;
-    const id = current.id;
-    const url = current.url;
+    if (!shown?.url) return;
+    const id = shown.id;
+    const url = shown.url;
     window.open(url, '_blank', 'noopener,noreferrer');
     void api(`/api/market/notifications/${id}/keep`, { method: 'POST' }).catch(() => undefined);
+    if (picked) onFocusedClose?.();
     setAside(true);
   };
 
-  if (!current) return null;
-  const { name, below } = offerName(current.title);
-  const when = saleMoment(current);
-  const price = current.priceEur;
-  const floatValue = current.floatValue;
+  if (!shown) return null;
+  const { name, below } = offerName(shown.title);
+  const when = saleMoment(shown);
+  const price = shown.priceEur;
+  const floatValue = shown.floatValue;
 
   return createPortal(
     <AnimatePresence>
@@ -161,7 +168,7 @@ export function OfferNotice() {
           exit={still ? undefined : { opacity: 0, transition: quickOut }}
         >
           <motion.div
-            key={current.id}
+            key={shown.id}
             role="dialog"
             aria-labelledby="offer-notice-title"
             className={cn(modalPanelClass, 'max-w-sm')}
@@ -175,9 +182,9 @@ export function OfferNotice() {
               <h2 id="offer-notice-title" className="min-w-0 text-[17px] font-black tracking-tight">{name}</h2>
               <ModalClose onClose={leave} />
             </div>
-            {current.image && (
+            {shown.image && (
               <div className="mt-4 grid place-items-center">
-                <img src={current.image} alt="" referrerPolicy="no-referrer" className="h-40 w-56 object-contain" />
+                <img src={shown.image} alt="" referrerPolicy="no-referrer" className="h-40 w-56 object-contain" />
               </div>
             )}
             <div className="mt-4 flex items-end justify-between gap-3">
@@ -193,7 +200,7 @@ export function OfferNotice() {
             <button
               type="button"
               onClick={interest}
-              disabled={!current.url}
+              disabled={!shown.url}
               className="mt-5 w-full rounded-full bg-slate-900 py-3 text-sm font-black text-white disabled:opacity-40 dark:bg-white dark:text-slate-900"
             >
               Me interesa

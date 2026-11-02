@@ -7,7 +7,7 @@ import { formatAgo } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import type { AppNotification } from '@/lib/types';
 
-export function NotificationsBell({ align = 'left', onDue, onPlan }: { align?: 'left' | 'right'; onDue?: (quoteKey: string) => void; onPlan?: (planId: string) => void }) {
+export function NotificationsBell({ align = 'left', onDue, onPlan, onOffer }: { align?: 'left' | 'right'; onDue?: (quoteKey: string) => void; onPlan?: (planId: string) => void; onOffer?: (item: AppNotification) => void }) {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<AppNotification[]>([]);
   const [permission, setPermission] = useState<NotificationPermission>(typeof Notification === 'undefined' ? 'denied' : Notification.permission);
@@ -116,6 +116,13 @@ export function NotificationsBell({ align = 'left', onDue, onPlan }: { align?: '
           if (openDue) {
             return (
               <button key={item.id} type="button" onClick={() => { setOpen(false); onDue(item.quoteKey as string); }} className={cn('block w-full rounded-2xl px-3 py-2 text-left', item.read ? 'bg-transparent' : 'bg-slate-50 dark:bg-slate-900')}>
+                {body}
+              </button>
+            );
+          }
+          if (item.quoteKey?.startsWith('listing:') && onOffer) {
+            return (
+              <button key={item.id} type="button" onClick={() => { setOpen(false); onOffer(item); }} className={cn('block w-full rounded-2xl px-3 py-2 text-left', item.read ? 'bg-transparent' : 'bg-slate-50 dark:bg-slate-900')}>
                 {body}
               </button>
             );
