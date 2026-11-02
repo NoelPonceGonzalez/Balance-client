@@ -1353,9 +1353,9 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
   const pin = (
     <div className="sticky top-0 z-30 -mx-4 flex flex-col gap-2 bg-[var(--app-bg)] px-4 py-2 md:-mx-8 md:px-8">
       <div className="order-2 min-w-0">
-        <div className="flex items-center justify-between gap-x-3 gap-y-2">
-          <div className="flex min-w-0 items-center gap-1">
-            <p className={cn('min-w-0 whitespace-nowrap text-[clamp(1.45rem,7.2vw,2rem)] font-black leading-none tabular-nums', hidden || inAccount ? 'text-slate-900 dark:text-white' : totalClass)}>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <div className="flex shrink-0 items-center gap-2">
+            <p className={cn('whitespace-nowrap text-[clamp(1.45rem,7.2vw,2rem)] font-black leading-none tabular-nums', hidden || inAccount ? 'text-slate-900 dark:text-white' : totalClass)}>
               {barValue == null ? '—' : inAccount ? (hidden ? '*****' : formatEur(barValue)) : <RisingAmount value={barValue} hidden={hidden} card />}
             </p>
             <button
@@ -1368,8 +1368,8 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
               {hidden ? <EyeOff size={16} /> : <Eye size={16} />}
             </button>
           </div>
-          {!inAccount && <ViewSwitch value={view} onChange={chooseView} />}
-          {inAccount && <div ref={setPaneSlot} className="shrink-0" />}
+          {!inAccount && <div className="ml-auto"><ViewSwitch value={view} onChange={chooseView} /></div>}
+          {inAccount && <div ref={setPaneSlot} className="ml-auto shrink-0" />}
         </div>
         {inAccount && liveDay && (
           <motion.p
