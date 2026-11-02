@@ -80,9 +80,10 @@ export function OfferNotice() {
   const leave = () => setAside(true);
   const pass = () => {
     if (!current) return;
-    rememberSkip(current.id);
+    const id = current.id;
+    rememberSkip(id);
     setSkip(skippedIds());
-    setAside(true);
+    void api(`/api/market/notifications/${id}/pass`, { method: 'POST' }).catch(() => undefined);
   };
   const openLink = () => {
     if (!current?.url) return;
