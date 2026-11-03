@@ -174,8 +174,8 @@ export function OfferNotice({ focused = null, onFocusedClose }: { focused?: AppN
     else void animate(dragX, 0, { type: 'spring', stiffness: 420, damping: 32 });
   };
   const turn = (step: number) => {
-    const next = place + step;
-    if (next < 0 || next >= unique.length) return;
+    if (unique.length < 2) return;
+    const next = (place + step + unique.length) % unique.length;
     dragX.set(0);
     setNudge(step);
     setIndex(next);
