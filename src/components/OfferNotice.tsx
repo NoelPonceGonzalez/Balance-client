@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { AnimatePresence, motion } from 'motion/react';
+import { AnimatePresence, animate, motion, useMotionValue, useTransform } from 'motion/react';
 import { ModalClose, modalOverlayClass, modalPanelClass } from '@/components/Modal';
 import { api } from '@/lib/api';
 import { formatDay, formatEur } from '@/lib/format';
@@ -87,6 +87,12 @@ export function OfferNotice({ focused = null, onFocusedClose }: { focused?: AppN
   const [passed, setPassed] = useState<PassedOffer[]>(() => readPassed());
   const [aside, setAside] = useState(false);
   const [visit, setVisit] = useState(0);
+  const [index, setIndex] = useState(0);
+  const [nudge, setNudge] = useState(0);
+  const dragX = useMotionValue(0);
+  const dragRotate = useTransform(dragX, [-180, 180], [-8, 8]);
+  const dragOrigin = useRef<number | null>(null);
+  const deckReady = useRef('');
 
   useEffect(() => {
     let cancelled = false;
@@ -122,23 +128,73 @@ export function OfferNotice({ focused = null, onFocusedClose }: { focused?: AppN
     buckets.add(token);
     unique.push(item);
   }
-  const current = unique.find((item) => !dismissed(item, skip, passed));
   const picked = focused?.quoteKey?.startsWith('listing:') ? focused : null;
-  const shown = picked || current;
+  if (picked && !unique.some((item) => item.id === picked.id)) unique.unshift(picked);
+  const deckKey = unique.map((item) => item.id).join('|');
+  const focusId = picked?.id || '';
+  const place = unique.length === 0 ? 0 : Math.min(index, unique.length - 1);
+  const shown = unique[place] || null;
+  const fresh = unique.some((item) => !dismissed(item, skip, passed));
   const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const open = Boolean(shown) && (Boolean(picked) || !aside);
+  const open = Boolean(shown) && (Boolean(picked) || (!aside && fresh));
+
+  useEffect(() => {
+    if (focusId) {
+      const at = unique.findIndex((item) => item.id === focusId);
+      if (at >= 0) setIndex(at);
+      return;
+    }
+    const token = `${visit}:${deckKey}`;
+    if (!deckKey || deckReady.current === token) return;
+    const at = unique.findIndex((item) => !dismissed(item, skip, passed));
+    if (at < 0) return;
+    deckReady.current = token;
+    setIndex(at);
+  }, [visit, deckKey, focusId]);
 
   const leave = () => {
     if (picked) onFocusedClose?.();
     setAside(true);
   };
+  const grab = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if ((event.target as HTMLElement).closest('button')) return;
+    dragOrigin.current = event.clientX;
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+  const pull = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (dragOrigin.current == null) return;
+    dragX.set(event.clientX - dragOrigin.current);
+  };
+  const drop = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (dragOrigin.current == null) return;
+    const delta = event.clientX - dragOrigin.current;
+    dragOrigin.current = null;
+    if (delta <= -60) turn(1);
+    else if (delta >= 60) turn(-1);
+    else void animate(dragX, 0, { type: 'spring', stiffness: 420, damping: 32 });
+  };
+  const turn = (step: number) => {
+    const next = place + step;
+    if (next < 0 || next >= unique.length) return;
+    dragX.set(0);
+    setNudge(step);
+    setIndex(next);
+  };
   const pass = () => {
     if (!shown) return;
     const id = shown.id;
     rememberPassed(shown);
-    setSkip(skippedIds());
-    setPassed(readPassed());
-    if (picked) onFocusedClose?.();
+    const nextSkip = skippedIds();
+    const nextPassed = readPassed();
+    setSkip(nextSkip);
+    setPassed(nextPassed);
+    const later = unique.findIndex((item, at) => at > place && !dismissed(item, nextSkip, nextPassed));
+    const earlier = unique.findIndex((item) => !dismissed(item, nextSkip, nextPassed));
+    if (later >= 0) turn(later - place);
+    else if (earlier >= 0) {
+      setNudge(-1);
+      setIndex(earlier);
+    } else leave();
     void api(`/api/market/notifications/${id}/pass`, { method: 'POST' }).catch(() => undefined);
   };
   const interest = () => {
@@ -171,20 +227,27 @@ export function OfferNotice({ focused = null, onFocusedClose }: { focused?: AppN
             key={shown.id}
             role="dialog"
             aria-labelledby="offer-notice-title"
-            className={cn(modalPanelClass, 'max-w-sm')}
+            aria-roledescription="Mazo de ofertas"
+            style={{ x: dragX, rotate: still ? 0 : dragRotate }}
+            onPointerDown={grab}
+            onPointerMove={pull}
+            onPointerUp={drop}
+            onPointerCancel={drop}
+            className={cn(modalPanelClass, 'max-w-sm cursor-grab touch-none active:cursor-grabbing')}
             onClick={(event) => event.stopPropagation()}
-            initial={still ? false : { opacity: 0, scaleX: 0.86, scaleY: 0.8, y: 28 }}
-            animate={{ opacity: 1, scaleX: 1, scaleY: 1, y: 0 }}
+            initial={still ? false : { opacity: 0, x: nudge > 0 ? 72 : nudge < 0 ? -72 : 0, scale: nudge === 0 ? 0.92 : 1 }}
+            animate={{ opacity: 1, x: 0, scale: 1 }}
             exit={still ? undefined : { opacity: 0, scale: 0.94, y: 16, transition: quickOut }}
             transition={{ ...softSpring, opacity: { duration: 0.18 } }}
           >
             <div className="flex items-start justify-between gap-3">
               <h2 id="offer-notice-title" className="min-w-0 text-[17px] font-black tracking-tight">{name}</h2>
-              <ModalClose onClose={leave} />
+              <span onPointerDown={(event) => event.stopPropagation()}><ModalClose onClose={leave} /></span>
             </div>
+            <p className="mt-2 text-center text-[13px] font-black tabular-nums tracking-wide text-slate-400" aria-label={`Oferta ${place + 1} de ${unique.length}`}>{place + 1}/{unique.length}</p>
             {shown.image && (
-              <div className="mt-4 grid place-items-center">
-                <img src={shown.image} alt="" referrerPolicy="no-referrer" className="h-40 w-56 object-contain" />
+              <div className="mt-3 grid place-items-center">
+                <img src={shown.image} alt="" draggable={false} referrerPolicy="no-referrer" className="h-40 w-56 object-contain" />
               </div>
             )}
             <div className="mt-4 flex items-end justify-between gap-3">
@@ -199,13 +262,14 @@ export function OfferNotice({ focused = null, onFocusedClose }: { focused?: AppN
             )}
             <button
               type="button"
+              onPointerDown={(event) => event.stopPropagation()}
               onClick={interest}
               disabled={!shown.url}
               className="mt-5 w-full rounded-full bg-slate-900 py-3 text-sm font-black text-white disabled:opacity-40 dark:bg-white dark:text-slate-900"
             >
               Me interesa
             </button>
-            <button type="button" onClick={pass} className="mt-2 w-full py-2 text-sm font-bold text-slate-400">No me interesa</button>
+            <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={pass} className="mt-2 w-full py-2 text-sm font-bold text-slate-400">No me interesa</button>
           </motion.div>
         </motion.div>
       )}
