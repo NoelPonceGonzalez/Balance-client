@@ -194,6 +194,8 @@ function planAsText(item: PlanItem, place?: string): string {
   if (!done && forecast.estimatedDate) lines.push(`Llegas el ${formatDay(forecast.estimatedDate)}`);
   if ((plan.salary || 0) > 0) lines.push(`Nómina ${formatEur(plan.salary)}`);
   if (plan.monthlySavings) lines.push(`Apartas ${formatEur(plan.monthlySavings)} el día ${plan.savingsDay || Number(String(plan.startDate || '').slice(8, 10))}`);
+  const spends = spendNotes(plan);
+  if (spends.length) lines.push(`Gastos: ${spends.join(' · ')}`);
   lines.push('');
   for (const month of months) {
     const rows = month.lines.filter((line) => line.label && line.amount != null && line.tone !== 'final');
@@ -230,6 +232,8 @@ function planTextView(item: PlanItem, place?: string): PlanTextView {
   const notes: string[] = [];
   if ((plan.salary || 0) > 0) notes.push(`Nómina ${formatEur(plan.salary)}`);
   if (plan.monthlySavings) notes.push(`Apartas ${formatEur(plan.monthlySavings)} el día ${plan.savingsDay || Number(String(plan.startDate || '').slice(8, 10))}`);
+  const spends = spendNotes(plan);
+  if (spends.length) notes.push(`Gastos: ${spends.join(' · ')}`);
   return {
     text: planAsText(item, place),
     name: plan.name,
@@ -290,6 +294,17 @@ function PlanCorner({ balance, target, delta, beat }: { balance: number; target:
 function barWidth(balance: number, target: number): number {
   if (!(target > 0)) return 0;
   return Math.max(0, Math.min(100, (balance / target) * 100));
+}
+
+function monthShortfall(series: { month: string; withExpected?: number; planned?: number }[], month: string, target: number): number | null {
+  if (!(target > 0)) return null;
+  const [year, index] = month.split('-').map(Number);
+  const previous = new Date(Date.UTC(year, index - 2, 1)).toISOString().slice(0, 7);
+  const row = series.find((item) => item.month === previous);
+  const base = row?.withExpected ?? row?.planned;
+  if (base == null) return null;
+  const gap = Math.round((target - base) * 100) / 100;
+  return gap > 0.004 ? gap : null;
 }
 
 function arrivalNote(hit: string | null | undefined, targetDate: string | undefined): { text: string; className: string } | null {
@@ -482,6 +497,7 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
   const linked = accounts.filter((account) => (plan?.linkedAccountIds || []).map(String).includes(String(account._id)) && !account.archived);
   const payday = accounts.find((account) => String(account._id) === String(plan?.salaryAccountId) && !account.archived) || (linked.length === 1 ? linked[0] : undefined);
   const liquidity = linked[0];
+  const spends = plan ? spendNotes(plan) : [];
 
   const beginEdit = (line: PlanMonthLine) => {
     if (!plan || !line.markKey) return;
@@ -998,6 +1014,7 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
                     El saldo es {forecast.anchor.label}
                   </span>
                 )}
+                {spends.length > 0 && <span className="mt-1 block">Gastos: {spends.join(' · ')}</span>}
                 <span className="mt-1 block">Marcar suma o resta ese importe, aunque el día no haya llegado. Quitar la marca lo devuelve. Lo que ya está en el efectivo no se mueve otra vez.</span>
               </p>
           </div>
@@ -1006,7 +1023,9 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
               const expected = forecast.series?.find((item) => item.month === month.month)?.withExpected;
               const dropping = drag != null && drag.over === month.month && drag.line.day?.slice(0, 7) !== month.month;
               const todayMonth = (forecast.today || '').slice(0, 7);
-              const open = monthOpen[month.month] ?? month.month >= todayMonth;
+              const hasSpend = month.lines.some((line) => line.tone === 'out' && line.amount != null);
+              const open = monthOpen[month.month] ?? (month.month >= todayMonth || hasSpend);
+              const gap = month.month === (forecast.estimatedDate || '').slice(0, 7) ? monthShortfall(forecast.series || [], month.month, plan.targetAmount) : null;
               const shown = open || dropping;
               return (
               <section
@@ -1020,10 +1039,10 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
                   className="mb-2 flex w-full items-baseline justify-between gap-3 px-1 text-left"
                 >
                   <h4 className="text-sm font-black">{month.title}</h4>
-                  {dropping ? <span className="text-[11px] font-bold text-indigo-600 dark:text-indigo-300">Soltar aquí</span> : <span className="text-[11px] font-semibold text-slate-400">{shown && expected != null ? `Cierre previsto ${formatEur(expected)}` : 'Ver el mes'}</span>}
+                  {dropping ? <span className="text-[11px] font-bold text-indigo-600 dark:text-indigo-300">Soltar aquí</span> : <span className="text-[11px] font-semibold text-slate-400">{gap != null ? `Solo hace falta ${formatEur(gap)} para llegar` : shown && expected != null ? `Cierre previsto ${formatEur(expected)}` : 'Ver el mes'}</span>}
                 </button>
                 {shown && <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white/70 transition-colors duration-300 dark:border-white/10 dark:bg-black/20">
-                  {month.lines.map((line, index) => (
+                  {month.lines.filter((line) => gap == null || line.tone === 'in' || line.tone === 'out').map((line, index) => (
                     <PlanLine
                       key={line.markKey || `${month.month}-${line.label}`}
                       line={line}
@@ -1040,6 +1059,9 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
                       image={plan ? eventImage(plan, line) : ''}
                     />
                   ))}
+                  {gap != null && (
+                    <p className="border-t border-slate-200/70 px-3 py-2.5 text-sm font-semibold text-slate-700 dark:border-white/10 dark:text-slate-200">Solo hace falta {formatEur(gap)} para llegar</p>
+                  )}
                   {dropping && <p className="border-t border-indigo-200 px-3 py-2 text-xs font-bold text-indigo-600">Soltar en {month.title}</p>}
                   <button
                     type="button"
@@ -1611,6 +1633,28 @@ function walkMonths(months: PlanMonthView[], until: string, opening: number): Pl
       return { ...line, paid: line.automatic ? inside : line.paid === true, balance };
     }),
   }));
+}
+
+function spendNotes(plan: {
+  recurring?: { name: string; amount: number; dayOfMonth: number; direction?: 'in' | 'out' }[];
+  intervals?: { name: string; amount: number; everyWeeks: number; direction?: 'in' | 'out' }[];
+  plannedExpenses?: { name: string; amount: number; date: string }[];
+}): string[] {
+  const rows: { sort: string; text: string }[] = [];
+  for (const item of plan.recurring || []) {
+    if (item.direction === 'in' || !(item.amount > 0)) continue;
+    rows.push({ sort: `0-${String(item.dayOfMonth).padStart(2, '0')}-${item.name}`, text: `${item.name} ${formatEur(item.amount)} el día ${item.dayOfMonth}` });
+  }
+  for (const item of plan.intervals || []) {
+    if (item.direction === 'in' || !(item.amount > 0)) continue;
+    const weeks = Math.max(1, Math.round(item.everyWeeks || 1));
+    rows.push({ sort: `1-${item.name}`, text: `${item.name} ${formatEur(item.amount)} cada ${weeks} ${weeks === 1 ? 'semana' : 'semanas'}` });
+  }
+  for (const item of plan.plannedExpenses || []) {
+    if (!(item.amount > 0) || !item.date) continue;
+    rows.push({ sort: `2-${item.date.slice(0, 10)}-${item.name}`, text: `${item.name} ${formatEur(item.amount)} el ${shortDay(item.date)}` });
+  }
+  return rows.sort((a, b) => a.sort.localeCompare(b.sort)).map((row) => row.text);
 }
 
 function shortDay(iso: string): string {

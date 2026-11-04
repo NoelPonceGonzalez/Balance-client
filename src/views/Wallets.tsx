@@ -1371,6 +1371,34 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
               </div>
             </section>
           )}
+          {showCash && cashSide && current.planId && (
+            <section className="px-1 pt-4">
+              <h3 className="text-xl font-black">Fijos</h3>
+              <p className="mt-1 text-[13px] font-medium text-slate-400">Cuando toca, te llega un aviso al móvil y se pregunta hasta que lo confirmes.</p>
+              <ul className="mt-2">
+                {current.fixed.map((rule) => (
+                  <li key={rule.key || `${rule.label}:${rule.rhythm}`} className="flex items-center gap-3 border-t border-slate-200/70 py-2.5 first:border-t-0 dark:border-white/10">
+                    <SpentMark label={rule.label} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[15px] font-bold">{rule.label}</span>
+                      <span className="block text-xs font-semibold text-slate-400">{rule.rhythm}</span>
+                    </span>
+                    <span className={cn('shrink-0 text-[15px] font-black tabular-nums', rule.amount >= 0 ? 'text-[#16c784]' : 'text-[#ea3943]')}>{hidden ? '*****' : formatSignedEur(rule.amount)}</span>
+                    {rule.key && (
+                      <button type="button" onClick={() => void removeFixed(rule.key || '')} className="shrink-0 text-[12px] font-semibold text-rose-600">Quitar</button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              <button
+                type="button"
+                onClick={() => { setError(''); setFixedDraft({ name: '', amount: '', direction: 'out', rhythm: 'weeks', dayOfMonth: '1', everyWeeks: '12', startDate: todayKey() }); }}
+                className="mt-2 inline-flex items-center gap-1 text-sm font-bold text-slate-500"
+              >
+                <Plus size={14} /> Añadir fijo
+              </button>
+            </section>
+          )}
           {showCash && cashSide && <div aria-hidden className="h-16" />}
           {showCash && cashSide && !entryDraft && !detail && !fixedDraft && (
             <CashDock onSearch={() => { setSearching(true); setLedger('cash'); }} onIn={() => openEntry('in')} onOut={() => openEntry('out')} />
@@ -1656,6 +1684,7 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
                 <Input label="Desde" type="date" value={fixedDraft.startDate} onChange={(event) => setFixedDraft({ ...fixedDraft, startDate: event.target.value })} />
               </>
             )}
+            {error && <p className="text-sm font-medium text-rose-600">{error}</p>}
             <Button onClick={() => void saveFixed()}>Guardar</Button>
           </div>
         </Modal>

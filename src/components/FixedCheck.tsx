@@ -80,12 +80,17 @@ export function FixedCheck({ nonce, focusKey, onSettled }: { nonce: number; focu
 
   const accept = async () => {
     if (!ready || saving) return;
+    if (answer === 'no') {
+      setPrompts(prompts.slice(1));
+      reset();
+      return;
+    }
     setSaving(true);
     setError('');
     try {
       await api(`/api/plans/${current.planId}/settle`, {
         method: 'POST',
-        body: JSON.stringify({ key: current.key, done: answer === 'yes', amount: actual() }),
+        body: JSON.stringify({ key: current.key, done: true, amount: actual() }),
       });
       const rest = prompts.slice(1);
       setPrompts(rest);
@@ -175,6 +180,7 @@ export function FixedCheck({ nonce, focusKey, onSettled }: { nonce: number; focu
                 </motion.div>
               )}
             </AnimatePresence>
+            {answer === 'no' && <p className="mt-3 text-sm font-medium text-slate-500">Te lo volveremos a preguntar hasta que lo marques.</p>}
             {error && <p className="mt-3 text-sm font-bold text-[#ea3943]">{error}</p>}
             <motion.button
               type="button"
