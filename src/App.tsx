@@ -33,6 +33,7 @@ export default function App() {
   const [ticket, setTicket] = useState(false);
   const [focusPlan, setFocusPlan] = useState<string | null>(null);
   const [focusTick, setFocusTick] = useState(0);
+  const [focusListing, setFocusListing] = useState<string | null>(null);
 
   const restoreSession = () => {
     const token = localStorage.getItem('pat_token');
@@ -130,6 +131,7 @@ export default function App() {
       section={section}
       onChange={(next) => { setSection(next); if (next === 'dashboard') setHome((value) => value + 1); }}
       onPlan={(id) => { setFocusPlan(id); setFocusTick((value) => value + 1); setSection('plans'); }}
+      onListing={(id) => { setFocusListing(id); setFocusTick((value) => value + 1); setSection('market'); }}
       onTicket={() => setTicket(true)}
       user={user}
       onSettled={() => setBooks((value) => value + 1)}
@@ -141,7 +143,7 @@ export default function App() {
         transition={glide}
       >
         {section === 'dashboard' && <Dashboard heroMs={heroMs} home={home} books={books} />}
-        {section === 'market' && <Market />}
+        {section === 'market' && <Market focusListing={focusListing} focusTick={focusTick} />}
         {section === 'plans' && <Plans books={books} userId={user.id} focusId={focusPlan} focusTick={focusTick} />}
         {section === 'movements' && <Movements />}
         {section === 'settings' && <Settings user={user} heroMs={heroMs} onHero={changeHero} onUser={setUser} onLogout={logout} />}

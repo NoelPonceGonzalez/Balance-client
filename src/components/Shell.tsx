@@ -29,6 +29,7 @@ export function Shell({
   section,
   onChange,
   onPlan,
+  onListing,
   onTicket,
   onSettled,
   children,
@@ -36,6 +37,7 @@ export function Shell({
   section: Section;
   onChange: (section: Section) => void;
   onPlan?: (planId: string) => void;
+  onListing?: (listingId: string) => void;
   onTicket: () => void;
   user: User;
   onSettled: () => void;
@@ -103,8 +105,15 @@ export function Shell({
         { duration: 900 },
       );
     };
-    const onTouchStart = (event: TouchEvent) => begin(event.touches[0]?.clientX ?? 0, event.touches[0]?.clientY ?? 0);
-    const onTouchMove = (event: TouchEvent) => move(event.touches[0]?.clientX ?? startX, event.touches[0]?.clientY ?? startY, event);
+    const onPills = (event: Event) => event.target instanceof Element && Boolean(event.target.closest('.market-pills'));
+    const onTouchStart = (event: TouchEvent) => {
+      if (onPills(event)) return;
+      begin(event.touches[0]?.clientX ?? 0, event.touches[0]?.clientY ?? 0);
+    };
+    const onTouchMove = (event: TouchEvent) => {
+      if (onPills(event)) return;
+      move(event.touches[0]?.clientX ?? startX, event.touches[0]?.clientY ?? startY, event);
+    };
     scroller.addEventListener('touchstart', onTouchStart, { passive: true });
     scroller.addEventListener('touchmove', onTouchMove, { passive: false });
     scroller.addEventListener('touchend', release);
@@ -125,7 +134,7 @@ export function Shell({
         <div className="min-h-0 overflow-hidden">
           <div className="flex items-center justify-end gap-0.5 px-3 pb-1 pt-[max(0.35rem,env(safe-area-inset-top))] md:px-8">
             <InstallApp compact />
-            <NotificationsBell align="right" onPlan={onPlan} onOffer={setFocusedOffer} onDue={(quoteKey) => { setDueKey(quoteKey); setDueNonce((value) => value + 1); }} />
+            <NotificationsBell align="right" onPlan={onPlan} onListing={onListing} onOffer={setFocusedOffer} onDue={(quoteKey) => { setDueKey(quoteKey); setDueNonce((value) => value + 1); }} />
             <button
               type="button"
               onClick={() => onChange('settings')}
@@ -139,8 +148,8 @@ export function Shell({
       </header>
       <FixedCheck nonce={dueNonce} focusKey={dueKey} onSettled={onSettled} />
       <OfferNotice focused={focusedOffer} onFocusedClose={() => setFocusedOffer(null)} />
-      <main ref={scrollRef} className={cn('app-scroll min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-4 py-2 md:px-8', bare && 'pt-[max(0.75rem,env(safe-area-inset-top))]')}>
-        <div ref={bandRef} className="origin-center will-change-transform">
+      <main ref={scrollRef} className={cn('app-scroll min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-4 py-2 md:px-8', bare && 'pt-[max(0.75rem,env(safe-area-inset-top))]')}>
+        <div ref={bandRef} className="min-w-0 origin-center will-change-transform">
           {children}
         </div>
       </main>

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Bell, Heart, Search, X } from 'lucide-react';
+import { Bell, Heart, Search, Star, X } from 'lucide-react';
+import { CsfloatFinder, CsfloatQuery } from '@/components/CsfloatFinder';
 import { Modal } from '@/components/Modal';
 import { QuietLoad } from '@/components/QuietLoad';
 import { Sparkline } from '@/components/Sparkline';
@@ -473,14 +474,21 @@ function AlertDesk({ items, catalog, onChanged }: { items: MarketSignal[]; catal
   );
 }
 
-function TapeSection({ title, icon, items, onOpen }: { title: string; icon: string; items: MarketTapeItem[]; onOpen: (item: MarketTapeItem) => void }) {
+function TapeSection({ title, icon, items, onOpen, onPick }: { title: string; icon: string; items: MarketTapeItem[]; onOpen: (item: MarketTapeItem) => void; onPick?: () => void }) {
   if (!items.length) return null;
+  const heading = (
+    <>
+      <img src={icon} alt="" width={32} height={32} referrerPolicy="no-referrer" className="h-8 w-8 rounded-xl bg-white object-cover" />
+      {title}
+    </>
+  );
   return (
     <section className="space-y-2">
-      <h2 className="flex items-center gap-2 text-lg font-black">
-        <img src={icon} alt="" width={32} height={32} referrerPolicy="no-referrer" className="h-8 w-8 rounded-xl bg-white object-cover" />
-        {title}
-      </h2>
+      {onPick ? (
+        <button type="button" onClick={onPick} className="flex items-center gap-2 text-lg font-black">{heading}</button>
+      ) : (
+        <h2 className="flex items-center gap-2 text-lg font-black">{heading}</h2>
+      )}
       <Card className="px-4 py-1">
         {items.map((item) => <TapeRow key={item.key} item={item} fallback={item.image ? null : icon} onOpen={() => onOpen(item)} />)}
       </Card>
@@ -590,13 +598,21 @@ function StoryDialog({ item, onClose }: { item: { kind: string; key: string; nam
   );
 }
 
-export function Market() {
+export function Market({ focusListing, focusTick = 0 }: { focusListing?: string | null; focusTick?: number }) {
   const [data, setData] = useState<MarketBoard | null>(null);
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
+  const [skinMatch, setSkinMatch] = useState(false);
   const [market, setMarket] = useState('all');
   const [open, setOpen] = useState<{ kind: string; key: string; name: string; symbol: string; priceEur: number | null; changePct: number | null; changeLabel: string; sparkline: number[] } | null>(null);
-  const [desk, setDesk] = useState<'saved' | 'alerts' | null>(null);
+  const [desk, setDesk] = useState<'saved' | 'alerts' | 'csfloat' | null>(focusListing ? 'csfloat' : null);
+  const [listingFocus, setListingFocus] = useState<string | null>(focusListing || null);
+
+  useEffect(() => {
+    if (!focusListing) return;
+    setListingFocus(focusListing);
+    setDesk('csfloat');
+  }, [focusListing, focusTick]);
   const [, setTick] = useState(0);
 
   const load = () => {
@@ -647,10 +663,10 @@ export function Market() {
   const tapes = sections.flatMap((section) => section.items);
   const fresh = [...tapes, ...data.items].some((item) => !item.stale && !item.error);
   const empty = sections.every((section) => !section.ready) && data.items.length === 0;
-  const noMatch = !empty && needle.length > 0 && tapes.length + investments.length + pending.length === 0;
+  const noMatch = !empty && needle.length > 0 && !skinMatch && tapes.length + investments.length + pending.length === 0;
 
   return (
-    <div className="mx-auto max-w-5xl space-y-5">
+    <div className="mx-auto min-w-0 max-w-5xl space-y-5">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="text-xs font-black uppercase tracking-widest text-indigo-500">Cotizaciones</p>
@@ -662,6 +678,9 @@ export function Market() {
             {fresh ? `En vivo · ${formatAgo(data.updatedAt)}` : `Último intento ${formatAgo(data.updatedAt)}`}
           </p>
           <div className="flex gap-2">
+            <button type="button" aria-label="CSFloat" onClick={() => setDesk('csfloat')} className={cn('grid h-10 w-10 place-items-center rounded-full', desk === 'csfloat' ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900' : 'bg-white text-slate-700 dark:bg-white/10 dark:text-white')}>
+              <Star size={18} />
+            </button>
             <button type="button" aria-label="Me interesa" onClick={() => setDesk('saved')} className={cn('grid h-10 w-10 place-items-center rounded-full', desk === 'saved' ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900' : 'bg-white text-slate-700 dark:bg-white/10 dark:text-white')}>
               <Heart size={18} />
             </button>
@@ -676,7 +695,7 @@ export function Market() {
           icon={<Search size={16} />}
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="Busca por nombre o símbolo"
+          placeholder="Bitcoin, VWCE o AK Redline"
           aria-label="Buscar en el mercado"
           trailing={
             query ? (
@@ -687,7 +706,7 @@ export function Market() {
           }
         />
       </div>
-      <div className="market-pills -mx-4 flex w-full max-w-full flex-nowrap gap-2 overflow-x-auto px-4">
+      <div className="market-pills -mx-4 flex max-w-full flex-nowrap gap-2 px-4 pb-1">
         <button type="button" onClick={() => setMarket('all')} className={cn('shrink-0 rounded-full px-3 py-1.5 text-sm font-bold', market === 'all' ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900' : 'bg-white text-slate-500 dark:bg-white/10')}>Todos</button>
         {chips.map((section) => (
           <button key={section.id} type="button" onClick={() => setMarket(section.id)} className={cn('inline-flex shrink-0 items-center gap-2 rounded-full py-1 pl-1 pr-3 text-sm font-bold', market === section.id ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900' : 'bg-white text-slate-600 dark:bg-white/10 dark:text-slate-200')}>
@@ -703,14 +722,20 @@ export function Market() {
           <SavedDesk needle={needle} />
         </Modal>
       )}
+      {desk === 'csfloat' && (
+        <Modal title="CSFloat" onClose={() => { setDesk(null); setListingFocus(null); }}>
+          <CsfloatFinder key={focusTick} focusId={listingFocus} />
+        </Modal>
+      )}
       {desk === 'alerts' && (
         <Modal title="Avisos" onClose={() => setDesk(null)}>
           <AlertDesk items={data.signals || []} catalog={sections.flatMap((section) => section.items)} onChanged={load} />
         </Modal>
       )}
+      {needle.length >= 2 && <CsfloatQuery query={needle} onMatch={setSkinMatch} />}
       {empty && <p className="rounded-2xl bg-slate-100 px-4 py-6 text-sm font-medium text-slate-500 dark:bg-slate-900">El mercado no ha respondido todavía. Cuando haya un precio real, se queda aunque la fuente falle después.</p>}
       {noMatch && <p className="rounded-2xl bg-slate-100 px-4 py-6 text-sm font-medium text-slate-500 dark:bg-slate-900">Ninguna cotización coincide con «{needle}».</p>}
-      {visible.map((section) => <TapeSection key={section.id} title={section.title} icon={section.icon} items={section.items} onOpen={(item) => setOpen({ kind: item.kind, key: item.key, name: item.name, symbol: item.symbol, priceEur: item.priceEur, changePct: item.changePct, changeLabel: item.changeLabel, sparkline: item.sparkline })} />)}
+      {visible.map((section) => <TapeSection key={section.id} title={section.title} icon={section.icon} items={section.items} onPick={market === 'all' ? () => setMarket(section.id) : undefined} onOpen={(item) => setOpen({ kind: item.kind, key: item.key, name: item.name, symbol: item.symbol, priceEur: item.priceEur, changePct: item.changePct, changeLabel: item.changeLabel, sparkline: item.sparkline })} />)}
       {market === 'all' && investments.length > 0 && (
         <section className="space-y-2">
           <h2 className="text-lg font-black">Tus inversiones</h2>
