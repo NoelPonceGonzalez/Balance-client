@@ -264,13 +264,15 @@ function AccountFold({ open, children }: { open: boolean; children: ReactNode })
   );
 }
 
-function useRise(target: number, play: boolean, duration = 1100, delay = 0) {
+function useRise(target: number, play: boolean, duration = 1100, delay = 0, stick = false) {
   const [value, setValue] = useState(() => (play && !prefersStill() ? 0 : target));
+  const rose = useRef(false);
   useEffect(() => {
-    if (!play || prefersStill()) {
+    if (!play || prefersStill() || (stick && rose.current)) {
       setValue(target);
       return;
     }
+    rose.current = true;
     let frame = 0;
     const start = performance.now() + delay;
     const tick = (now: number) => {
@@ -282,7 +284,7 @@ function useRise(target: number, play: boolean, duration = 1100, delay = 0) {
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [target, play, duration, delay]);
+  }, [target, play, duration, delay, stick]);
   return value;
 }
 
@@ -295,8 +297,8 @@ function formatRisingEur(value: number): string {
   }).format(value);
 }
 
-function RisingAmount({ value, hidden, signed = false, card = false, delay = 0 }: { value: number; hidden: boolean; signed?: boolean; card?: boolean; delay?: number }) {
-  const shown = useRise(Math.abs(value), !hidden, 680, delay);
+function RisingAmount({ value, hidden, signed = false, card = false, delay = 0, stick = false }: { value: number; hidden: boolean; signed?: boolean; card?: boolean; delay?: number; stick?: boolean }) {
+  const shown = useRise(Math.abs(value), !hidden, 680, delay, stick);
   if (hidden) return <>*****</>;
   const text = formatRisingEur(shown);
   if (!signed) return <>{text}</>;
@@ -1456,7 +1458,7 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <div className="flex shrink-0 items-center gap-2">
             <p className="whitespace-nowrap text-[clamp(1.65rem,7.2vw,2.15rem)] font-semibold leading-none tabular-nums tracking-tight text-slate-900 dark:text-white">
-              {barValue == null ? '—' : inAccount ? (hidden ? '*****' : formatEur(barValue)) : <RisingAmount value={barValue} hidden={hidden} card />}
+              {barValue == null ? '—' : inAccount ? (hidden ? '*****' : formatEur(barValue)) : <RisingAmount value={barValue} hidden={hidden} card stick />}
             </p>
             <button
               type="button"
