@@ -39,7 +39,7 @@ export async function enablePhonePush(ping = false): Promise<string> {
   }
   const permission = await Notification.requestPermission();
   if (permission !== 'granted') return 'El móvil no ha dejado mostrar avisos.';
-  const registration = await navigator.serviceWorker.register('/sw.js');
+  const registration = await navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' });
   await navigator.serviceWorker.ready;
   const key = await publicKey();
   if (!key) return 'El servidor todavía no puede mandar avisos al móvil.';

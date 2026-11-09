@@ -7,6 +7,17 @@ import { formatAgo } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import type { AppNotification } from '@/lib/types';
 
+function noticeKind(item: AppNotification): string {
+  const key = item.quoteKey || '';
+  if (key.startsWith('skin:')) return 'Skin';
+  if (key.startsWith('tracked:')) return 'Anuncio';
+  if (key.startsWith('plan-due:') || key.startsWith('plan-auto:')) return 'Plan';
+  if (key.startsWith('listing:')) return 'Oferta';
+  if (key.startsWith('reparto:') || key.startsWith('trip-remind:')) return 'Reparto';
+  if (item.direction === 'due') return 'Plan';
+  return 'Mercado';
+}
+
 export function NotificationsBell({ align = 'left', onDue, onPlan, onOffer, onListing }: { align?: 'left' | 'right'; onDue?: (quoteKey: string) => void; onPlan?: (planId: string) => void; onOffer?: (item: AppNotification) => void; onListing?: (listingId: string) => void }) {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<AppNotification[]>([]);
@@ -91,8 +102,9 @@ export function NotificationsBell({ align = 'left', onDue, onPlan, onOffer, onLi
       )}
       {phone && <p className="mb-2 px-1 text-xs font-medium text-slate-500">{phone}</p>}
       <div className="max-h-80 space-y-2 overflow-y-auto">
-        {items.length === 0 && <p className="px-1 py-3 text-sm font-medium text-slate-500">Aquí salen los pagos y los ingresos que tocan, si una inversión cruza el umbral, y si alguien se sale de un reparto.</p>}
+        {items.length === 0 && <p className="px-1 py-3 text-sm font-medium text-slate-500">Cada aviso es de una cosa distinta: un plan, un precio, una skin destacada, un anuncio o una oferta.</p>}
         {items.map((item) => {
+          const kind = noticeKind(item);
           const planId = item.quoteKey?.startsWith('reparto:')
             ? item.quoteKey.slice('reparto:'.length)
             : item.quoteKey?.startsWith('trip-remind:')
@@ -101,9 +113,10 @@ export function NotificationsBell({ align = 'left', onDue, onPlan, onOffer, onLi
           const openDue = item.direction === 'due' && item.quoteKey?.startsWith('plan-due:') && onDue;
           const body = (
             <>
-              <p className={cn('text-sm font-black', item.direction === 'up' ? 'text-[#16c784]' : item.direction === 'due' ? 'text-slate-800 dark:text-white' : 'text-[#ea3943]')}>{item.title}</p>
+              <p className="text-[11px] font-semibold text-slate-400">{kind}</p>
+              <p className={cn('text-sm font-semibold', kind === 'Mercado' ? (item.direction === 'up' ? 'text-[#16c784]' : 'text-[#ea3943]') : 'text-slate-900 dark:text-white')}>{item.title}</p>
               <p className="text-xs font-medium text-slate-500">{item.body}</p>
-              <p className="mt-1 text-[11px] font-bold text-slate-400">{formatAgo(item.createdAt)}</p>
+              <p className="mt-1 text-[11px] font-semibold text-slate-400">{formatAgo(item.createdAt)}</p>
             </>
           );
           if (planId && onPlan) {
@@ -118,6 +131,14 @@ export function NotificationsBell({ align = 'left', onDue, onPlan, onOffer, onLi
               <button key={item.id} type="button" onClick={() => { setOpen(false); onDue(item.quoteKey as string); }} className={cn('block w-full rounded-2xl px-3 py-2 text-left', item.read ? 'bg-transparent' : 'bg-slate-50 dark:bg-slate-900')}>
                 {body}
               </button>
+            );
+          }
+          if (item.quoteKey?.startsWith('skin:')) {
+            return (
+              <article key={item.id} className={cn('flex items-center gap-3 rounded-2xl px-3 py-2', item.read ? 'bg-transparent' : 'bg-slate-50 dark:bg-slate-900')}>
+                {item.image && <img src={item.image} alt="" referrerPolicy="no-referrer" className="h-10 w-14 shrink-0 object-contain" />}
+                <span className="min-w-0">{body}</span>
+              </article>
             );
           }
           const trackedId = item.quoteKey?.startsWith('tracked:') ? item.quoteKey.split(':')[1] || '' : '';

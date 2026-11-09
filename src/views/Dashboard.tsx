@@ -928,15 +928,15 @@ function WorthLine({ values }: { values: number[] }) {
   const max = Math.max(...clean);
   const span = max - min || 1;
   const width = 320;
-  const height = 36;
+  const height = 128;
   const xy: [number, number][] = clean.map((value, index) => {
     const x = (index / (clean.length - 1)) * width;
-    const y = height - ((value - min) / span) * (height - 4) - 2;
+    const y = height - ((value - min) / span) * (height - 16) - 8;
     return [x, y];
   });
   return (
-    <motion.svg viewBox={`0 0 ${width} ${height}`} className="mt-1 h-9 w-full text-slate-900 dark:text-white" aria-hidden initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={glide}>
-      <path d={smoothPath(xy)} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
+    <motion.svg viewBox={`0 0 ${width} ${height}`} className="h-32 w-full text-slate-900 dark:text-white" role="img" aria-label="Patrimonio en el tiempo" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={glide}>
+      <path d={smoothPath(xy)} fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinejoin="round" strokeLinecap="round" />
     </motion.svg>
   );
 }
@@ -945,12 +945,12 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
   const [data, setData] = useState<DashboardData | null>(null);
   const [view, setView] = useState<'general' | 'cartera'>('general');
   const [openWallet, setOpenWallet] = useState<string | null>(null);
-  const [live, setLive] = useState<number | null>(null);
   const [liveDay, setLiveDay] = useState<string | null>(null);
   const [liveMove, setLiveMove] = useState<{ amount: number; pct: number | null } | null>(null);
   const [paneSlot, setPaneSlot] = useState<HTMLDivElement | null>(null);
   const [error, setError] = useState('');
   const [hidden, setHidden] = useState(() => localStorage.getItem(HIDE_KEY) === '1');
+  const [chart, setChart] = useState<'line' | 'ring'>(() => (localStorage.getItem('pat_chart') === 'ring' ? 'ring' : 'line'));
   const [dueLine, setDueLine] = useState<{ label: string; amount: number; direction: 'in' | 'out' } | null>(null);
   const [markLine, setMarkLine] = useState<{ planId: string; label: string; amount: number } | null>(null);
   const [offerLine, setOfferLine] = useState<AppNotification | null>(null);
@@ -1020,7 +1020,7 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [books]);
+  }, [books, home]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1043,7 +1043,7 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
       .then((payload) => { if (!cancelled) setOfferLine(nextOffer(payload.notifications || [])); })
       .catch(() => { if (!cancelled) setOfferLine(null); });
     return () => { cancelled = true; };
-  }, [books]);
+  }, [books, home]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setBeat((value) => value + 1), heroMs);
@@ -1439,7 +1439,7 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
     }
     return () => hideChrome(false);
   }, [hideChrome, inAccount]);
-  const barValue = inAccount && openAccount ? (live ?? openAccount.value) : shownWorth;
+  const barValue = inAccount && openAccount ? openAccount.value : shownWorth;
   const chooseView = (next: 'general' | 'cartera') => {
     setView(next);
     setOpenWallet(null);
@@ -1494,7 +1494,6 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
             {formatDay(liveDay)}
           </motion.p>
         )}
-        {!inAccount && !hidden && (data?.series.length || 0) > 1 && <WorthLine values={data!.series.map((point) => point.eur)} />}
         {!inAccount && dueLine && (
           <button type="button" onClick={() => window.dispatchEvent(new Event('pat-due'))} className="text-left text-[13px] font-semibold text-slate-500">
             {dueLine.direction === 'in' ? 'Ha entrado' : 'Toca confirmar'} {dueLine.label}, {hidden ? '*****' : formatEur(dueLine.amount)}
@@ -1555,7 +1554,6 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
             openId={openWallet}
             paneSlot={paneSlot}
             onOpen={setOpenWallet}
-            onFigure={setLive}
             onDay={setLiveDay}
             onMove={setLiveMove}
             accounts={[...ordered.map((row) => ({
@@ -1698,10 +1696,44 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
         </button>
       </motion.section>
 
-      {slices.length > 0 && (
-        <motion.div className="grid place-items-center py-1" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.25 }}>
+      <div className="flex justify-center">
+        <div className="grid grid-cols-2 rounded-full bg-slate-900/5 p-0.5 dark:bg-white/10">
+          {([['line', 'General'], ['ring', 'Carteras']] as const).map(([id, label]) => {
+            const on = chart === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                aria-pressed={on}
+                onClick={() => {
+                  setChart(id);
+                  localStorage.setItem('pat_chart', id);
+                }}
+                className={cn('relative rounded-full px-4 py-1.5 text-[13px] font-semibold', on ? 'text-white dark:text-slate-900' : 'text-slate-500')}
+              >
+                {on && <motion.span layoutId="dash-chart-pill" transition={prefersStill() ? { duration: 0 } : softSpring} className="pointer-events-none absolute inset-0 rounded-full bg-slate-900 dark:bg-white" />}
+                <span className="relative z-10">{label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      {chart === 'line' ? (
+        (data.series.length > 1 ? <WorthLine values={data.series.map((point) => point.eur)} /> : <p className="text-center text-[13px] font-medium text-slate-400">La línea aparece cuando haya más de un día.</p>)
+      ) : slices.length > 0 ? (
+        <div className="grid gap-4 sm:grid-cols-[auto_1fr] sm:items-center">
           <Donut slices={slices} />
-        </motion.div>
+          <ul className="min-w-0">
+            {slices.map((slice) => (
+              <li key={slice.key} className="flex items-baseline justify-between gap-3 border-t border-slate-200/70 py-2 first:border-t-0 dark:border-white/10">
+                <span className="min-w-0 truncate text-[15px] font-semibold">{slice.name}</span>
+                <span className="shrink-0 text-[15px] font-semibold tabular-nums">{mask(formatEur(slice.eur))}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : (
+        <p className="text-center text-[13px] font-medium text-slate-400">El reparto aparece cuando haya saldo en algún sitio.</p>
       )}
 
       <section className="space-y-3">

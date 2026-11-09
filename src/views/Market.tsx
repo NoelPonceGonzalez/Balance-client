@@ -884,6 +884,79 @@ function StoryDialog({ item, onClose }: { item: { kind: string; key: string; nam
   );
 }
 
+function Followed({ onOpenListing }: { onOpenListing: (id: string) => void }) {
+  const [skins, setSkins] = useState<{ name: string; wear: string; label: string; image: string | null; lastBestEur: number | null }[]>([]);
+  const [ads, setAds] = useState<{ id: string; label: string; image: string | null; priceEur: number | null }[]>([]);
+
+  useEffect(() => {
+    let cancel = false;
+    Promise.all([
+      api<{ skins: { name: string; wear: string; label: string; image: string | null; lastBestEur: number | null }[] }>('/api/market/skin-stars').catch(() => ({ skins: [] })),
+      api<{ tracked: { id: string; label: string; image: string | null; priceEur: number | null }[] }>('/api/market/tracked').catch(() => ({ tracked: [] })),
+    ]).then(([stars, tracked]) => {
+      if (cancel) return;
+      setSkins(stars.skins || []);
+      setAds(tracked.tracked || []);
+    });
+    return () => { cancel = true; };
+  }, []);
+
+  const dropSkin = (row: { name: string; wear: string }) => {
+    const params = new URLSearchParams({ name: row.name, wear: row.wear });
+    void api(`/api/market/skin-stars?${params}`, { method: 'DELETE' }).then(() => {
+      setSkins((rows) => rows.filter((item) => !(item.name === row.name && item.wear === row.wear)));
+    });
+  };
+
+  const dropAd = (id: string) => {
+    void api(`/api/market/tracked/${id}`, { method: 'DELETE' }).then(() => {
+      setAds((rows) => rows.filter((item) => item.id !== id));
+    });
+  };
+
+  if (skins.length === 0 && ads.length === 0) return null;
+  return (
+    <div className="mb-4 space-y-4">
+      {skins.length > 0 && (
+        <div>
+          <p className="px-1 pb-1 text-[11px] font-semibold text-slate-400">Skins destacadas</p>
+          <div className="divide-y divide-slate-100 dark:divide-white/10">
+            {skins.map((row) => (
+              <div key={`${row.name}:${row.wear}`} className="flex items-center gap-3 py-2.5">
+                {row.image && <img src={row.image} alt="" referrerPolicy="no-referrer" className="h-10 w-14 shrink-0 object-contain" />}
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-semibold">{row.label}</span>
+                  <span className="block text-xs font-medium text-slate-500">{row.wear || 'Cualquier desgaste'}{row.lastBestEur == null ? '' : ` · más barata ${formatEur(row.lastBestEur)}`}</span>
+                </span>
+                <button type="button" onClick={() => dropSkin(row)} className="shrink-0 text-[11px] font-semibold text-slate-400">Quitar</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {ads.length > 0 && (
+        <div>
+          <p className="px-1 pb-1 text-[11px] font-semibold text-slate-400">Anuncios</p>
+          <div className="divide-y divide-slate-100 dark:divide-white/10">
+            {ads.map((row) => (
+              <div key={row.id} className="flex items-center gap-3 py-2.5">
+                <button type="button" onClick={() => onOpenListing(row.id)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+                  {row.image && <img src={row.image} alt="" referrerPolicy="no-referrer" className="h-10 w-14 shrink-0 object-contain" />}
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-semibold">{row.label}</span>
+                    <span className="block text-xs font-medium text-slate-500">{row.priceEur == null ? 'Anuncio seguido' : formatEur(row.priceEur)}</span>
+                  </span>
+                </button>
+                <button type="button" onClick={() => dropAd(row.id)} className="shrink-0 text-[11px] font-semibold text-slate-400">Quitar</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function Market({ focusListing, focusTick = 0 }: { focusListing?: string | null; focusTick?: number }) {
   const [data, setData] = useState<MarketBoard | null>(null);
   const [error, setError] = useState('');
@@ -1079,6 +1152,7 @@ export function Market({ focusListing, focusTick = 0 }: { focusListing?: string 
       )}
       {desk === 'alerts' && (
         <Modal title="Avisos" onClose={() => setDesk(null)}>
+          <Followed onOpenListing={(id) => { setListingFocus(id); setDesk('csfloat'); }} />
           <AlertDesk items={data.signals || []} catalog={sections.flatMap((section) => section.items)} onChanged={load} />
         </Modal>
       )}

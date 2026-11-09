@@ -335,7 +335,7 @@ export const PLATFORMS: PlatformPreset[] = [
     "kind": "broker",
     "tracking": "positions",
     "image": "png",
-    "hint": "El saldo es el efectivo sin invertir. Acciones, ETF y fondos se añaden como activos."
+    "hint": "La cuenta remunerada es el efectivo. Aparte van la cripto, las acciones, los ETF, los bonos y Private Markets."
   },
   {
     "id": "myinvestor",
@@ -344,7 +344,7 @@ export const PLATFORMS: PlatformPreset[] = [
     "kind": "broker",
     "tracking": "positions",
     "image": "png",
-    "hint": "El saldo es el efectivo sin invertir. Acciones, ETF y fondos se añaden como activos."
+    "hint": "La cuenta remunerada es el efectivo. Fondos, carteras, bróker, pensiones y alternativos van aparte."
   },
   {
     "id": "indexa",
@@ -353,7 +353,7 @@ export const PLATFORMS: PlatformPreset[] = [
     "kind": "broker",
     "tracking": "balance",
     "image": "png",
-    "hint": "Suele bastar el valor total de la cartera. Si más adelante separas los fondos, cambia el seguimiento."
+    "hint": "La cartera de fondos es el valor total. El plan de pensiones va aparte."
   },
   {
     "id": "xtb",
@@ -497,7 +497,7 @@ export const PLATFORMS: PlatformPreset[] = [
     "kind": "broker",
     "tracking": "positions",
     "image": "png",
-    "hint": "El saldo es el efectivo sin invertir. Acciones, ETF y fondos se añaden como activos."
+    "hint": "El saldo es el efectivo. Préstamos, bonos y ETF van aparte."
   },
   {
     "id": "plus500",
@@ -506,7 +506,7 @@ export const PLATFORMS: PlatformPreset[] = [
     "kind": "broker",
     "tracking": "positions",
     "image": "png",
-    "hint": "El saldo es el efectivo sin invertir. Acciones, ETF y fondos se añaden como activos."
+    "hint": "El saldo es el efectivo. Las posiciones abiertas se apuntan a mano."
   },
   {
     "id": "ig",
@@ -578,7 +578,7 @@ export const PLATFORMS: PlatformPreset[] = [
     "kind": "broker",
     "tracking": "positions",
     "image": "jpg",
-    "hint": "El saldo es el efectivo sin invertir. Acciones, ETF y fondos se añaden como activos."
+    "hint": "El saldo es el efectivo. Fondos y ETF van aparte."
   },
   {
     "id": "fidelity",
@@ -614,7 +614,7 @@ export const PLATFORMS: PlatformPreset[] = [
     "kind": "exchange",
     "tracking": "positions",
     "image": "png",
-    "hint": "El saldo es el efectivo. Cada criptomoneda se registra como activo."
+    "hint": "El saldo en euros es el efectivo. Las monedas van en Spot o en Earn."
   },
   {
     "id": "kraken",
@@ -623,7 +623,7 @@ export const PLATFORMS: PlatformPreset[] = [
     "kind": "exchange",
     "tracking": "positions",
     "image": "png",
-    "hint": "El saldo es el efectivo. Cada criptomoneda se registra como activo."
+    "hint": "El saldo en euros es el efectivo. Las monedas van en Spot o en Earn."
   },
   {
     "id": "coinbase",
@@ -632,7 +632,7 @@ export const PLATFORMS: PlatformPreset[] = [
     "kind": "exchange",
     "tracking": "positions",
     "image": "png",
-    "hint": "El saldo es el efectivo. Cada criptomoneda se registra como activo."
+    "hint": "El saldo en euros es el efectivo. Las monedas van en Spot o en Earn."
   },
   {
     "id": "bit2me",
@@ -641,7 +641,7 @@ export const PLATFORMS: PlatformPreset[] = [
     "kind": "exchange",
     "tracking": "positions",
     "image": "png",
-    "hint": "El saldo es el efectivo. Cada criptomoneda se registra como activo."
+    "hint": "El saldo en euros es el efectivo. Las monedas van en Spot o en Earn."
   },
   {
     "id": "cryptocom",
@@ -650,7 +650,7 @@ export const PLATFORMS: PlatformPreset[] = [
     "kind": "exchange",
     "tracking": "positions",
     "image": "png",
-    "hint": "El saldo es el efectivo. Cada criptomoneda se registra como activo."
+    "hint": "El saldo en euros es el efectivo. Las monedas van en Spot o en Earn."
   },
   {
     "id": "bybit",
@@ -659,7 +659,7 @@ export const PLATFORMS: PlatformPreset[] = [
     "kind": "exchange",
     "tracking": "positions",
     "image": "png",
-    "hint": "El saldo es el efectivo. Cada criptomoneda se registra como activo."
+    "hint": "El saldo en euros es el efectivo. Las monedas van en Spot o en Earn."
   },
   {
     "id": "okx",
@@ -668,7 +668,7 @@ export const PLATFORMS: PlatformPreset[] = [
     "kind": "exchange",
     "tracking": "positions",
     "image": "png",
-    "hint": "El saldo es el efectivo. Cada criptomoneda se registra como activo."
+    "hint": "El saldo en euros es el efectivo. Las monedas van en Spot o en Earn."
   },
   {
     "id": "bitstamp",
@@ -677,7 +677,7 @@ export const PLATFORMS: PlatformPreset[] = [
     "kind": "exchange",
     "tracking": "positions",
     "image": "png",
-    "hint": "El saldo es el efectivo. Cada criptomoneda se registra como activo."
+    "hint": "El saldo en euros es el efectivo. Las monedas van en Spot o en Earn."
   },
   {
     "id": "kucoin",
@@ -686,7 +686,7 @@ export const PLATFORMS: PlatformPreset[] = [
     "kind": "exchange",
     "tracking": "positions",
     "image": "png",
-    "hint": "El saldo es el efectivo. Cada criptomoneda se registra como activo."
+    "hint": "El saldo en euros es el efectivo. Las monedas van en Spot o en Earn."
   },
   {
     "id": "bitget",
@@ -695,7 +695,7 @@ export const PLATFORMS: PlatformPreset[] = [
     "kind": "exchange",
     "tracking": "positions",
     "image": "png",
-    "hint": "El saldo es el efectivo. Cada criptomoneda se registra como activo."
+    "hint": "El saldo en euros es el efectivo. Las monedas van en Spot o en Earn."
   },
   {
     "id": "gemini",
@@ -704,7 +704,7 @@ export const PLATFORMS: PlatformPreset[] = [
     "kind": "exchange",
     "tracking": "positions",
     "image": "png",
-    "hint": "El saldo es el efectivo. Cada criptomoneda se registra como activo."
+    "hint": "El saldo en euros es el efectivo. Las monedas van en Spot o en Earn."
   },
   {
     "id": "bitvavo",
@@ -713,7 +713,7 @@ export const PLATFORMS: PlatformPreset[] = [
     "kind": "exchange",
     "tracking": "positions",
     "image": "png",
-    "hint": "El saldo es el efectivo. Cada criptomoneda se registra como activo."
+    "hint": "El saldo en euros es el efectivo. Las monedas van en Spot o en Earn."
   },
   {
     "id": "gate",
@@ -722,7 +722,7 @@ export const PLATFORMS: PlatformPreset[] = [
     "kind": "exchange",
     "tracking": "positions",
     "image": "png",
-    "hint": "El saldo es el efectivo. Cada criptomoneda se registra como activo."
+    "hint": "El saldo en euros es el efectivo. Las monedas van en Spot o en Earn."
   },
   {
     "id": "htx",
@@ -731,7 +731,7 @@ export const PLATFORMS: PlatformPreset[] = [
     "kind": "exchange",
     "tracking": "positions",
     "image": "png",
-    "hint": "El saldo es el efectivo. Cada criptomoneda se registra como activo."
+    "hint": "El saldo en euros es el efectivo. Las monedas van en Spot o en Earn."
   },
   {
     "id": "mexc",
@@ -740,7 +740,7 @@ export const PLATFORMS: PlatformPreset[] = [
     "kind": "exchange",
     "tracking": "positions",
     "image": "png",
-    "hint": "El saldo es el efectivo. Cada criptomoneda se registra como activo."
+    "hint": "El saldo en euros es el efectivo. Las monedas van en Spot o en Earn."
   },
   {
     "id": "bingx",
@@ -749,7 +749,7 @@ export const PLATFORMS: PlatformPreset[] = [
     "kind": "exchange",
     "tracking": "positions",
     "image": "png",
-    "hint": "El saldo es el efectivo. Cada criptomoneda se registra como activo."
+    "hint": "El saldo en euros es el efectivo. Las monedas van en Spot o en Earn."
   },
   {
     "id": "bitfinex",
@@ -758,7 +758,7 @@ export const PLATFORMS: PlatformPreset[] = [
     "kind": "exchange",
     "tracking": "positions",
     "image": "png",
-    "hint": "El saldo es el efectivo. Cada criptomoneda se registra como activo."
+    "hint": "El saldo en euros es el efectivo. Las monedas van en Spot o en Earn."
   },
   {
     "id": "uphold",
@@ -767,7 +767,7 @@ export const PLATFORMS: PlatformPreset[] = [
     "kind": "exchange",
     "tracking": "positions",
     "image": "png",
-    "hint": "El saldo es el efectivo. Cada criptomoneda se registra como activo."
+    "hint": "El saldo en euros es el efectivo. Las monedas van en Spot o en Earn."
   },
   {
     "id": "nexo",
@@ -776,7 +776,7 @@ export const PLATFORMS: PlatformPreset[] = [
     "kind": "exchange",
     "tracking": "positions",
     "image": "png",
-    "hint": "El saldo es el efectivo. Cada criptomoneda se registra como activo."
+    "hint": "El saldo en euros es el efectivo. Las monedas van en Spot o en Earn."
   },
   {
     "id": "swissborg",
@@ -785,7 +785,7 @@ export const PLATFORMS: PlatformPreset[] = [
     "kind": "exchange",
     "tracking": "positions",
     "image": "png",
-    "hint": "El saldo es el efectivo. Cada criptomoneda se registra como activo."
+    "hint": "El saldo en euros es el efectivo. Las monedas van en Spot o en Earn."
   },
   {
     "id": "criptan",
@@ -794,7 +794,7 @@ export const PLATFORMS: PlatformPreset[] = [
     "kind": "exchange",
     "tracking": "positions",
     "image": "png",
-    "hint": "El saldo es el efectivo. Cada criptomoneda se registra como activo."
+    "hint": "El saldo en euros es el efectivo. Las monedas van en Spot o en Earn."
   },
   {
     "id": "whitebit",
@@ -803,7 +803,7 @@ export const PLATFORMS: PlatformPreset[] = [
     "kind": "exchange",
     "tracking": "positions",
     "image": "png",
-    "hint": "El saldo es el efectivo. Cada criptomoneda se registra como activo."
+    "hint": "El saldo en euros es el efectivo. Las monedas van en Spot o en Earn."
   },
   {
     "id": "metamask",

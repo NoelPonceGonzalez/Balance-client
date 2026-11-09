@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { PlatformLogo } from '@/components/PlatformLogo';
 import { QuietLoad } from '@/components/QuietLoad';
-import { Button } from '@/components/ui/Button';
 import { Field, Input, fieldClass } from '@/components/ui/Input';
 import { EntrySheet } from '@/components/EntrySheet';
 import { api, ApiError } from '@/lib/api';
@@ -214,82 +213,76 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
 
   return (
     <div className={embedded ? 'space-y-4' : 'mx-auto max-w-3xl space-y-5'}>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className={embedded ? 'text-lg font-semibold tracking-tight' : 'text-2xl font-semibold tracking-tight'}>Movimientos</h2>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={exportCsv}>Exportar</Button>
-          <Button onClick={() => { setEditing(null); setDuplicate(false); setFormMore(false); setDraft(emptyDraft(accounts[0] ? docId(accounts[0]) : '')); }}>Nuevo</Button>
+      <div className={embedded ? 'flex items-center justify-between gap-3' : 'sticky top-0 z-20 -mx-4 flex items-center justify-between gap-3 bg-[var(--app-bg)] px-4 py-2 md:-mx-8 md:px-8'}>
+        <h2 className={embedded ? 'text-lg font-semibold tracking-tight' : 'text-2xl font-semibold tracking-tight'}>Movimientos</h2>
+        <div className="flex items-center gap-3">
+          <button type="button" onClick={exportCsv} className="text-sm font-semibold text-slate-500">Exportar</button>
+          <button type="button" onClick={() => { setEditing(null); setDuplicate(false); setFormMore(false); setDraft(emptyDraft(accounts[0] ? docId(accounts[0]) : '')); }} className="rounded-full bg-slate-950 px-4 py-2 text-sm font-semibold text-white dark:bg-white dark:text-slate-950">Nuevo</button>
         </div>
       </div>
       {error && <p className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">{error}</p>}
-      <div className="rounded-[28px] bg-white px-4 py-4 ring-1 ring-slate-200/70 dark:bg-slate-900 dark:ring-white/10">
-        <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
-          <Field label="Sitio">
-            <select className={fieldClass} aria-label="Sitio" value={filters.accountId} onChange={(event) => setFilters({ ...filters, accountId: event.target.value })}>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+        <select className={fieldClass} aria-label="Sitio" value={filters.accountId} onChange={(event) => setFilters({ ...filters, accountId: event.target.value })}>
+          <option value="">Todos los sitios</option>
+          {accounts.map((account) => <option key={docId(account)} value={docId(account)}>{account.name}</option>)}
+        </select>
+        <select
+          className={fieldClass}
+          aria-label="Año"
+          value={year}
+          onChange={(event) => {
+            const next = event.target.value;
+            setYear(next);
+            setFilters({ ...filters, ...periodRange(next, next ? month : '') });
+          }}
+        >
+          <option value="">Todos los años</option>
+          {Array.from({ length: 8 }, (_, index) => now.getFullYear() - index).map((value) => (
+            <option key={value} value={String(value)}>{value}</option>
+          ))}
+        </select>
+        <select
+          className={cn(fieldClass, 'col-span-2 sm:col-span-1')}
+          aria-label="Mes"
+          value={month}
+          disabled={!year}
+          onChange={(event) => {
+            const next = event.target.value;
+            setMonth(next);
+            setFilters({ ...filters, ...periodRange(year, next) });
+          }}
+        >
+          <option value="">Todo el año</option>
+          {MONTHS.map((label, index) => (
+            <option key={label} value={String(index + 1).padStart(2, '0')}>{label}</option>
+          ))}
+        </select>
+      </div>
+      <details>
+        <summary className="cursor-pointer text-[13px] font-semibold text-slate-400">Buscar y fechas</summary>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <Input label="Buscar" value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} placeholder="Descripción o categoría" />
+          <Field label="Tipo">
+            <select className={fieldClass} value={filters.type} onChange={(e) => setFilters({ ...filters, type: e.target.value })}>
               <option value="">Todos</option>
-              {accounts.map((account) => <option key={docId(account)} value={docId(account)}>{account.name}</option>)}
+              {Object.entries(TYPE_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             </select>
           </Field>
-          <select
-            className={fieldClass}
-            aria-label="Año"
-            value={year}
-            onChange={(event) => {
-              const next = event.target.value;
-              setYear(next);
-              setFilters({ ...filters, ...periodRange(next, next ? month : '') });
-            }}
-          >
-            <option value="">Todos los años</option>
-            {Array.from({ length: 8 }, (_, index) => now.getFullYear() - index).map((value) => (
-              <option key={value} value={String(value)}>{value}</option>
-            ))}
-          </select>
-          <select
-            className={cn(fieldClass, 'col-span-2 sm:col-span-1')}
-            aria-label="Mes"
-            value={month}
-            disabled={!year}
-            onChange={(event) => {
-              const next = event.target.value;
-              setMonth(next);
-              setFilters({ ...filters, ...periodRange(year, next) });
-            }}
-          >
-            <option value="">Todo el año</option>
-            {MONTHS.map((label, index) => (
-              <option key={label} value={String(index + 1).padStart(2, '0')}>{label}</option>
-            ))}
-          </select>
+          <Input label="Desde" type="date" value={filters.from} onChange={(e) => setFilters({ ...filters, from: e.target.value })} />
+          <Input label="Hasta" type="date" value={filters.to} onChange={(e) => setFilters({ ...filters, to: e.target.value })} />
         </div>
-        <details className="mt-1">
-          <summary className="cursor-pointer text-xs font-semibold text-slate-400">Más filtros</summary>
-          <div className="mt-3 grid gap-3 sm:grid-cols-2">
-            <Input label="Buscar" value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} placeholder="Descripción o categoría" />
-            <Field label="Tipo">
-              <select className={fieldClass} value={filters.type} onChange={(e) => setFilters({ ...filters, type: e.target.value })}>
-                <option value="">Todos</option>
-                {Object.entries(TYPE_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-              </select>
-            </Field>
-            <Input label="Desde" type="date" value={filters.from} onChange={(e) => setFilters({ ...filters, from: e.target.value })} />
-            <Input label="Hasta" type="date" value={filters.to} onChange={(e) => setFilters({ ...filters, to: e.target.value })} />
-          </div>
-        </details>
-      </div>
+      </details>
       {!ready && <QuietLoad kind="rows" />}
       {ready && sections.length === 0 && (
         <div className="rounded-[28px] bg-white px-4 py-8 text-center text-sm text-slate-500 ring-1 ring-slate-200/70 dark:bg-slate-900 dark:ring-white/10">
           No hay movimientos en este periodo.
-          <button type="button" className="mt-3 block w-full font-semibold text-slate-900 dark:text-white" onClick={() => { setYear('2025'); setMonth(''); setFilters({ ...filters, ...periodRange('2025', '') }); }}>Ver 2025</button>
+          {year === initialYear && <button type="button" className="mt-3 block w-full font-semibold text-slate-900 dark:text-white" onClick={() => { const previous = String(Number(initialYear) - 1); setYear(previous); setMonth(''); setFilters({ ...filters, ...periodRange(previous, '') }); }}>Ver {Number(initialYear) - 1}</button>}
         </div>
       )}
-      <div className="space-y-5">
+      <div className="space-y-6">
         {sections.map((section) => (
           <section key={`${section.title}-${section.groups[0]?.id || ''}`}>
-            {section.title && <h3 className="px-1 pb-2 text-[13px] font-medium text-slate-400">{section.title}</h3>}
+            {section.title && <h3 className="px-1 pb-2 text-[13px] font-semibold text-slate-400">{section.title}</h3>}
             <ul className="overflow-hidden rounded-[28px] bg-white ring-1 ring-slate-200/70 dark:bg-slate-900 dark:ring-white/10">
               {section.groups.map((group) => {
                 const row = group.rows[0];
@@ -298,15 +291,15 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
                 const total = group.rows.reduce((sum, item) => sum + item.amount * moveSign(item), 0);
                 return (
                   <li key={group.id} className="border-t border-slate-100 first:border-t-0 dark:border-white/10">
-                    <button type="button" onClick={() => { if (many) setOpenGroup(open ? null : group.id); else openEdit(row); }} className="flex w-full items-center gap-3 px-4 py-3.5 text-left">
-                      <PlatformLogo name={accountOf(row.accountId)?.platform || nameOf(row.accountId)} size={32} />
+                    <button type="button" onClick={() => { if (many) setOpenGroup(open ? null : group.id); else openEdit(row); }} className="flex w-full items-center gap-3 px-4 py-3 text-left">
+                      <PlatformLogo name={accountOf(row.accountId)?.platform || nameOf(row.accountId)} size={36} />
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-semibold">{moveTitle(row)}</span>
-                        <span className="block truncate text-[11px] font-medium text-slate-400">
-                          {many ? `${group.rows.length} apuntes · ${nameOf(row.accountId)}` : `${TYPE_LABEL[row.type] || row.type} · ${nameOf(row.accountId)}`}
+                        <span className="block truncate text-[15px] font-semibold">{moveTitle(row)}</span>
+                        <span className="mt-0.5 block truncate text-[12px] font-medium text-slate-400">
+                          {many ? `${group.rows.length} apuntes · ${nameOf(row.accountId)}` : `${nameOf(row.accountId)} · ${TYPE_LABEL[row.type] || row.type}`}
                         </span>
                       </span>
-                      <span className={cn('shrink-0 text-right text-sm font-semibold tabular-nums', moveTone(row))}>
+                      <span className={cn('shrink-0 text-right text-[15px] font-semibold tabular-nums', moveTone(row))}>
                         {total > 0 ? '+' : total < 0 ? '−' : ''}{formatMove(total, row.currency)}
                       </span>
                     </button>

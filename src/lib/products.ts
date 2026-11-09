@@ -97,17 +97,41 @@ const SKIN_SECTIONS: ProductSection[] = [
   section('agentes', 'Agentes', 'Agentes y música.', ['skin'], ICON.skin),
 ];
 
-const CASH = { tab: 'Efectivo', title: 'Líquido', caption: 'Dinero normal' };
+const CASH = { tab: 'Efectivo', title: 'Efectivo', caption: 'Dinero sin invertir' };
 const ACCOUNT = { tab: 'Cuenta', title: 'Saldo', caption: 'La cuenta' };
+const YIELD = { tab: 'Efectivo', title: 'Efectivo con interés', caption: 'El dinero sin invertir' };
+const ETF = section('etf', 'ETF', 'Cada ETF, con lo que pagaste.', ['etf'], ICON.etf);
+const CFD = section('cfd', 'Posiciones', 'El valor de lo que tienes abierto. Se apunta a mano.', ['other']);
+const OPTIONS = section('opciones', 'Opciones y futuros', 'El valor de las posiciones abiertas.', ['other']);
 
 const CLASSIC_BANK = [S.depositos, S.fondos, S.carterasGestionadas, S.bolsa, S.pensiones, S.seguros];
 const DEPOSIT_BANK = [S.depositos];
 const GENERIC_BROKER = [S.accionesEtf, S.fondos, S.bonos];
 
+const RETAIL = [S.depositos, S.fondos, S.bolsa, S.pensiones];
+
 const BY_ID: Record<string, AccountProducts> = {
-  traderepublic: { cash: CASH, sections: [S.cryptoWallet, S.valores, S.rentaFija, S.private] },
+  traderepublic: { cash: { tab: 'Efectivo', title: 'Cuenta remunerada', caption: 'El efectivo que genera interés' }, sections: [S.cryptoWallet, S.accionesEtf, S.rentaFija, S.private] },
+  caixabank: { cash: ACCOUNT, sections: [] },
+  imagin: { cash: ACCOUNT, sections: [] },
+  santander: { cash: ACCOUNT, sections: [S.depositos, S.fondos, S.carterasGestionadas, S.bolsa, S.pensiones] },
+  bbva: { cash: ACCOUNT, sections: [S.depositos, S.fondos, { ...S.roboAdvisor, label: 'BBVA Invest' }, S.bolsa, S.pensiones] },
+  sabadell: { cash: ACCOUNT, sections: RETAIL },
+  unicaja: { cash: ACCOUNT, sections: RETAIL },
+  cajamar: { cash: ACCOUNT, sections: [S.depositos, S.fondos, S.pensiones] },
+  ibercaja: { cash: ACCOUNT, sections: [S.depositos, S.fondos, S.carterasGestionadas, S.bolsa, S.pensiones] },
+  kutxabank: { cash: ACCOUNT, sections: RETAIL },
+  abanca: { cash: ACCOUNT, sections: RETAIL },
+  bankinter: { cash: ACCOUNT, sections: [S.depositos, S.fondos, { ...S.accionesEtf, label: 'Broker' }, S.roboAdvisor, S.pensiones] },
+  deutsche: { cash: ACCOUNT, sections: RETAIL },
+  laboral: { cash: ACCOUNT, sections: RETAIL },
+  march: { cash: ACCOUNT, sections: [S.depositos, S.fondos, S.carterasGestionadas, S.bolsa, S.pensiones] },
+  rural: { cash: ACCOUNT, sections: [S.depositos, S.fondos, S.pensiones] },
+  andbank: { cash: ACCOUNT, sections: [S.depositos, S.fondos, S.carterasGestionadas, S.bolsa] },
+  mediolanum: { cash: ACCOUNT, sections: [S.fondos, S.carterasGestionadas, S.pensiones, S.seguros] },
+  ebn: { cash: ACCOUNT, sections: [S.depositos, S.fondos, S.accionesEtf] },
   myinvestor: { cash: { ...CASH, title: 'Cuenta remunerada' }, sections: [S.fondos, S.carterasIndexadas, S.accionesEtf, S.pensiones, S.alternativos, S.depositos] },
-  ing: { cash: ACCOUNT, sections: [S.fondos, { ...S.accionesEtf, label: 'Broker Naranja' }, S.pensiones] },
+  ing: { cash: { ...ACCOUNT, title: 'Cuenta Naranja' }, sections: [S.depositos, S.fondos, { ...S.accionesEtf, label: 'Broker Naranja' }, S.pensiones] },
   openbank: { cash: ACCOUNT, sections: [S.fondos, S.roboAdvisor, S.accionesEtf, S.pensiones, S.depositos] },
   revolut: { cash: ACCOUNT, sections: [S.accionesEtf, S.crypto, S.monetarios, S.materias, S.roboAdvisor] },
   n26: { cash: ACCOUNT, sections: [S.accionesEtf, S.crypto] },
@@ -126,28 +150,39 @@ const BY_ID: Record<string, AccountProducts> = {
   nickel: { cash: ACCOUNT, sections: [] },
   paypal: { cash: ACCOUNT, sections: [] },
   efectivo: { cash: { tab: 'Efectivo', title: 'En mano', caption: 'Dinero en metálico' }, sections: [] },
-  xtb: { cash: CASH, sections: [S.accionesEtf] },
+  xtb: { cash: CASH, sections: [S.accionesEtf, S.crypto] },
   degiro: { cash: CASH, sections: [S.accionesEtf, S.fondos, S.bonos] },
-  ibkr: { cash: CASH, sections: [S.accionesEtf, S.fondos, S.bonos, S.crypto] },
-  etoro: { cash: CASH, sections: [S.accionesEtf, S.crypto] },
-  scalable: { cash: CASH, sections: [S.accionesEtf, S.crypto] },
-  trading212: { cash: CASH, sections: [S.accionesEtf] },
-  lightyear: { cash: CASH, sections: [S.accionesEtf, S.monetarios] },
+  ibkr: { cash: CASH, sections: [S.accionesEtf, S.fondos, S.bonos, S.crypto, OPTIONS] },
+  etoro: { cash: CASH, sections: [S.accionesEtf, S.crypto, S.materias] },
+  scalable: { cash: YIELD, sections: [S.accionesEtf, S.crypto, { ...S.carterasGestionadas, label: 'Wealth' }] },
+  trading212: { cash: YIELD, sections: [S.accionesEtf] },
+  lightyear: { cash: YIELD, sections: [S.accionesEtf, S.monetarios] },
   freedom: { cash: CASH, sections: [S.accionesEtf, S.bonos] },
-  renta4: { cash: CASH, sections: [S.fondos, S.accionesEtf, S.pensiones, S.bonos] },
-  singular: { cash: CASH, sections: [S.fondos, S.accionesEtf, S.carterasGestionadas] },
+  renta4: { cash: { ...ACCOUNT, title: 'Cuenta' }, sections: [S.depositos, S.fondos, S.accionesEtf, S.carterasGestionadas, S.pensiones, S.bonos] },
+  singular: { cash: CASH, sections: [S.fondos, S.accionesEtf, S.carterasGestionadas, S.pensiones] },
   gvc: { cash: CASH, sections: [S.fondos, S.accionesEtf, S.pensiones] },
   heytrade: { cash: CASH, sections: [S.accionesEtf] },
-  popcoin: { cash: CASH, sections: [S.carterasIndexadas] },
+  popcoin: { cash: { tab: 'Cartera', title: 'Cartera indexada', caption: 'Valor total' }, sections: [] },
   bitpanda: { cash: CASH, sections: [S.crypto, S.accionesEtf, S.metales] },
   mintos: { cash: CASH, sections: [S.prestamos, S.bonos, { ...S.carterasIndexadas, label: 'ETF' }] },
-  indexa: { cash: { tab: 'Cartera', title: 'Cartera indexada', caption: 'Valor total' }, sections: [] },
-  finizens: { cash: { tab: 'Cartera', title: 'Cartera indexada', caption: 'Valor total' }, sections: [] },
-  inbestme: { cash: { tab: 'Cartera', title: 'Cartera gestionada', caption: 'Valor total' }, sections: [] },
+  plus500: { cash: CASH, sections: [CFD] },
+  ig: { cash: CASH, sections: [S.accionesEtf, CFD] },
+  saxo: { cash: CASH, sections: [S.accionesEtf, S.fondos, S.bonos, OPTIONS] },
+  swissquote: { cash: CASH, sections: [S.accionesEtf, S.fondos, S.bonos, S.crypto] },
+  robinhood: { cash: YIELD, sections: [S.accionesEtf, S.crypto] },
+  freetrade: { cash: CASH, sections: [S.accionesEtf] },
+  flatex: { cash: CASH, sections: [S.accionesEtf, S.fondos, S.bonos] },
+  comdirect: { cash: ACCOUNT, sections: [S.depositos, S.accionesEtf, S.fondos] },
+  vanguard: { cash: CASH, sections: [S.fondos, ETF] },
+  fidelity: { cash: CASH, sections: [S.fondos, S.accionesEtf] },
+  indexa: { cash: { tab: 'Cartera', title: 'Cartera de fondos', caption: 'Valor total' }, sections: [S.pensiones] },
+  finizens: { cash: { tab: 'Cartera', title: 'Cartera de fondos', caption: 'Valor total' }, sections: [S.pensiones] },
+  inbestme: { cash: { tab: 'Cartera', title: 'Cartera gestionada', caption: 'Valor total' }, sections: [S.pensiones] },
   urbanitae: { cash: { tab: 'Proyectos', title: 'Proyectos', caption: 'Valor de tus participaciones' }, sections: [] },
   pension: { cash: { tab: 'Plan', title: 'Plan de pensiones', caption: 'Valor del plan' }, sections: [] },
   vivienda: { cash: { tab: 'Vivienda', title: 'Vivienda', caption: 'Lo que vale ahora' }, sections: [] },
   oro: { cash: { tab: 'Metales', title: 'Oro y metales', caption: 'Lo que vale ahora' }, sections: [] },
+  otra: { cash: CASH, sections: [S.crypto, S.accionesEtf, S.fondos, S.bonos, S.pensiones, S.depositos] },
   cs2: { cash: null, sections: SKIN_SECTIONS, auto: true },
 };
 

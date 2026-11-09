@@ -381,7 +381,8 @@ export interface PlanForecast {
   balanceYesterday?: number;
   today?: string;
   realBalance: number | null;
-  anchor?: { amount: number; label: string } | null;
+  anchor?: { amount: number; label: string; pieces?: { group: string; eur: number }[] } | null;
+  site?: { group: string; eur: number }[];
   deviationEur: number;
   compliancePct: number | null;
   onTrack: boolean;

@@ -162,11 +162,11 @@ function ListingSheet({ id, onBack, onChanged }: { id: string; onBack: () => voi
           type="button"
           onClick={() => void toggle()}
           disabled={!detail || busy}
-          aria-label={detail?.tracked ? 'Dejar de seguir' : 'Seguir este anuncio'}
-          className={cn('flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-black', detail?.tracked ? 'bg-amber-400 text-slate-900' : 'bg-slate-100 text-slate-600 dark:bg-white/10 dark:text-white')}
+          aria-label={detail?.tracked ? 'Dejar de seguir el anuncio' : 'Seguir este anuncio'}
+          className={cn('flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold', detail?.tracked ? 'bg-amber-400 text-slate-900' : 'bg-slate-100 text-slate-600 dark:bg-white/10 dark:text-white')}
         >
           <Star size={15} fill={detail?.tracked ? 'currentColor' : 'none'} />
-          {detail?.tracked ? 'Siguiendo' : 'Seguir'}
+          {detail?.tracked ? 'Anuncio seguido' : 'Seguir anuncio'}
         </button>
       </div>
       {error && <p className="mt-3 text-sm font-medium text-rose-600">{error}</p>}
@@ -399,7 +399,50 @@ export function SkinMarket({ skin, wear }: { skin: SkinHit; wear: string }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [openId, setOpenId] = useState<string | null>(null);
+  const [starred, setStarred] = useState(false);
+  const [starring, setStarring] = useState(false);
+  const chosen = wear === 'all' ? '' : wear;
   const wears = wear === 'all' ? skin.wears.map((row) => row.wear) : [wear];
+
+  useEffect(() => {
+    let cancel = false;
+    api<{ skins: { name: string; wear: string }[] }>('/api/market/skin-stars')
+      .then((data) => {
+        if (!cancel) setStarred((data.skins || []).some((item) => item.name === skin.name && item.wear === chosen));
+      })
+      .catch(() => undefined);
+    return () => { cancel = true; };
+  }, [skin.name, chosen]);
+
+  const toggleStar = async () => {
+    if (starring) return;
+    setStarring(true);
+    setError('');
+    try {
+      if (starred) {
+        const params = new URLSearchParams({ name: skin.name, wear: chosen });
+        await api(`/api/market/skin-stars?${params}`, { method: 'DELETE' });
+        setStarred(false);
+      } else {
+        await api('/api/market/skin-stars', {
+          method: 'POST',
+          body: JSON.stringify({
+            name: skin.name,
+            wear: chosen,
+            label: skin.label,
+            image: skin.image,
+            paintIndex: skin.paintIndex,
+            wears: skin.wears.map((row) => row.wear),
+          }),
+        });
+        setStarred(true);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se ha podido destacar.');
+    } finally {
+      setStarring(false);
+    }
+  };
 
   useEffect(() => {
     let cancel = false;
@@ -424,6 +467,19 @@ export function SkinMarket({ skin, wear }: { skin: SkinHit; wear: string }) {
 
   return (
     <div className="space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-[13px] font-medium text-slate-500">{starred ? 'Te aviso si se mueve la más barata.' : 'Destácala y te aviso de su precio, no de un anuncio suelto.'}</p>
+        <button
+          type="button"
+          onClick={() => void toggleStar()}
+          disabled={starring}
+          aria-pressed={starred}
+          className={cn('flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold', starred ? 'bg-amber-400 text-slate-900' : 'bg-white text-slate-700 ring-1 ring-slate-200 dark:bg-white/10 dark:text-white dark:ring-white/10')}
+        >
+          <Star size={14} fill={starred ? 'currentColor' : 'none'} />
+          {starred ? 'Destacada' : 'Destacar'}
+        </button>
+      </div>
       {loading && <p className="text-sm font-medium text-slate-400">Buscando anuncios…</p>}
       {error && <p className="text-sm font-medium text-rose-600">{error}</p>}
       {listings && listings.length === 0 && !loading && <p className="text-sm font-medium text-slate-500">No hay anuncios en este desgaste.</p>}

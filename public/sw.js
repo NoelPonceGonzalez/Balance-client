@@ -3,7 +3,11 @@ self.addEventListener('install', (event) => {
 });
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil((async () => {
+    const keys = await caches.keys();
+    await Promise.all(keys.map((key) => caches.delete(key)));
+    await self.clients.claim();
+  })());
 });
 
 self.addEventListener('push', (event) => {
@@ -45,5 +49,6 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
   if (event.request.method !== 'GET' || url.origin !== self.location.origin) return;
   if (url.pathname.startsWith('/api') || url.pathname === '/health') return;
-  event.respondWith(fetch(event.request));
+  if (event.request.mode !== 'navigate') return;
+  event.respondWith(fetch(event.request, { cache: 'no-store' }).catch(() => fetch(event.request)));
 });

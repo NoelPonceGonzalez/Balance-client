@@ -13,6 +13,7 @@ import { api } from '@/lib/api';
 import { jelly, quickOut, softSpring } from '@/lib/motion';
 import { formatDay, formatEur, formatSignedEur } from '@/lib/format';
 import { planImageFileName, renderPlanPng } from '@/lib/plan-image';
+import { accountProducts } from '@/lib/products';
 import { cn, docId } from '@/lib/utils';
 import type { AccountRow, PlanForecast, PlanMonthLine, PlanMonthView, PlanRow, TripSplit } from '@/lib/types';
 import { TripFace, TripPlan } from '@/views/TripPlan';
@@ -167,6 +168,25 @@ function fromPlan(plan: PlanRow): Draft {
 
 function planPlaces(accounts: AccountRow[]): AccountRow[] {
   return accounts.filter((account) => !account.archived);
+}
+
+function pileName(group: string, cashTitle?: string): string {
+  if (group === 'cash') return cashTitle || 'Líquido';
+  if (group === 'crypto') return 'Cripto';
+  if (group === 'etf') return 'ETF';
+  if (group === 'stock') return 'Acciones';
+  return 'Otros';
+}
+
+function jointLine(forecast: PlanForecast | undefined, account?: AccountRow): string {
+  const pieces = (forecast?.site || []).filter((piece) => piece.eur > 0.004);
+  if (pieces.length < 2) return '';
+  const title = account ? accountProducts(account.platform || account.name).cash?.title : '';
+  const text = pieces.map((piece) => `${pileName(piece.group, title)} ${formatEur(piece.eur)}`).join(' · ');
+  const sum = pieces.reduce((total, piece) => total + piece.eur, 0);
+  const own = forecast?.anchor?.amount;
+  if (own != null && Math.abs(sum - own) > 0.5) return `En conjunto ${formatEur(sum)} · ${text}`;
+  return text;
 }
 
 function kindLabel(plan: { kind?: string; linkedAccountIds?: unknown[] }): string {
@@ -387,6 +407,7 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
   const [draft, setDraft] = useState<Draft | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [error, setError] = useState('');
+  const [shift, setShift] = useState('');
   const [editor, setEditor] = useState<EditorDraft | null>(null);
   const [drag, setDrag] = useState<{ line: PlanMonthLine; x: number; y: number; over: string | null } | null>(null);
   const dragRef = useRef<{ line: PlanMonthLine; x: number; y: number; moved: boolean } | null>(null);
@@ -641,6 +662,13 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
     const planId = docId(plan);
     const currentPaid = desiredMark.current.has(key) ? desiredMark.current.get(key)! : paid;
     const nextPaid = !currentPaid;
+    const line = (forecast?.months || []).flatMap((month) => month.lines).find((item) => item.markKey === key);
+    const place = linked[0];
+    if (plan.kind !== 'gastos' && place && line?.amount != null) {
+      const euros = formatEur(Math.abs(line.amount));
+      const leaving = nextPaid ? line.tone !== 'in' : line.tone === 'in';
+      setShift(leaving ? `Han salido ${euros} de ${place.name}` : `Han entrado ${euros} en ${place.name}`);
+    } else setShift('');
     desiredMark.current.set(key, nextPaid);
     setError('');
     setItems((rows) => rows.map((item) => {
@@ -670,6 +698,7 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
       }
     } catch (err) {
       desiredMark.current.delete(key);
+      setShift('');
       setError(err instanceof Error ? err.message : 'No se ha podido marcar el gasto.');
       await load();
     } finally {
@@ -811,6 +840,7 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
               <span className="text-xs font-medium text-slate-400">{formatEur(plan.targetAmount)}</span>
             </div>
             <p className="text-[2rem] font-semibold leading-none tabular-nums tracking-tight text-slate-900 dark:text-white"><SoftEur value={shownBalance} /></p>
+            {jointLine(forecast, linked[0]) && <p className="mt-2 text-[13px] font-medium leading-snug text-slate-400">{jointLine(forecast, linked[0])}</p>}
             <div className="mt-4 h-0.5 w-full overflow-hidden rounded-full bg-slate-900/10 dark:bg-white/15">
               <div className="h-full rounded-full bg-slate-900 transition-[width] duration-700 ease-out dark:bg-white" style={{ width: `${barWidth(shownBalance, plan.targetAmount)}%` }} />
             </div>
@@ -915,6 +945,7 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
                 </span>
                 <span className="mt-2 block text-[11px] font-semibold text-slate-400">{kindLabel(item.plan)}</span>
                 <span className="mt-3 block whitespace-nowrap text-[1.65rem] font-semibold leading-none tabular-nums tracking-tight"><SoftEur value={balance} /></span>
+                {jointLine(item.forecast, site) && <span className="mt-2 block text-[12px] font-medium leading-snug text-slate-400">{jointLine(item.forecast, site)}</span>}
                 <span className="mt-4 block h-0.5 overflow-hidden rounded-full bg-slate-200/80 dark:bg-white/10">
                   <span className={cn('block h-full rounded-full transition-[width] duration-700', done ? 'bg-[#16c784]' : 'bg-slate-900 dark:bg-white')} style={{ width: `${barWidth(balance, item.plan.targetAmount)}%` }} />
                 </span>
@@ -999,6 +1030,7 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
                 Apartas {formatEur(plan.monthlySavings)} el día {plan.savingsDay || Number(plan.startDate.slice(8, 10))}
                 {spends.length > 0 && <span> · {spends.join(' · ')}</span>}
               </p>
+              {shift && <p className="mt-2 text-[13px] font-medium text-slate-700 dark:text-slate-200">{shift}</p>}
           </div>
           <div className="mt-5 space-y-5">
             {shownMonths.map((month) => {

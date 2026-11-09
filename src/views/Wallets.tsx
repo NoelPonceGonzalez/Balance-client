@@ -1294,7 +1294,6 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
                 quiet
                 onValue={setLive}
                 onDay={onDay}
-                onMove={onMove}
                 hidden={hidden}
                 now={cashSide.total}
                 points={cashPath(current.cash, statement.map((row) => ({ day: row.day, amount: row.amount, absorbed: row.absorbed, open: row.open })), todayKey())}
