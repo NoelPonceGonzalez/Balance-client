@@ -643,21 +643,61 @@ function barVerbs(cash: boolean, group: string | null, auto: boolean, kind: stri
   };
 }
 
-function SiteBar({ slot, title, verbs, onPick }: { slot: HTMLElement | null; title: string; verbs: { id: VerbId; label: string }[]; onPick: (id: VerbId) => void }) {
+function SiteBar({ title, verbs, onPick }: { title: string; verbs: { id: VerbId; label: string }[]; onPick: (id: VerbId) => void }) {
   const [open, setOpen] = useState(false);
-  if (!slot) return null;
-  const paint = 'rounded-full bg-slate-950 px-4 py-2 text-[15px] font-semibold text-white dark:bg-white dark:text-slate-950';
+  const [leaving, setLeaving] = useState<VerbId | null>(null);
+  const still = stillMotion();
+  const choose = (id: VerbId) => {
+    if (leaving) return;
+    setLeaving(id);
+    window.setTimeout(() => {
+      setOpen(false);
+      setLeaving(null);
+      onPick(id);
+    }, still ? 0 : 320);
+  };
+  const paint = 'rounded-full bg-slate-950 px-4 py-2.5 text-[15px] font-semibold text-white shadow-[0_10px_28px_rgba(15,23,42,0.18)] dark:bg-white dark:text-slate-950';
   return createPortal(
-    open ? verbs.map((verb) => (
-      <button key={verb.id} type="button" onClick={() => { setOpen(false); onPick(verb.id); }} className={paint}>
-        {verb.label}
-      </button>
-    )) : (
-      <button type="button" onClick={() => setOpen(true)} className={paint}>
-        {title}
-      </button>
-    ),
-    slot,
+    <div className="pointer-events-none fixed z-50" style={{ right: '1.15rem', bottom: 'calc(env(safe-area-inset-bottom) + 6.25rem)' }}>
+      <div className="pointer-events-auto flex flex-col items-end gap-2">
+        <AnimatePresence mode="popLayout" initial={false}>
+          {open ? verbs.map((verb, index) => (
+            <motion.button
+              key={verb.id}
+              type="button"
+              layout
+              onClick={() => choose(verb.id)}
+              initial={still ? false : { opacity: 0, y: 16, scale: 0.84 }}
+              animate={{
+                opacity: leaving && leaving !== verb.id ? 0 : 1,
+                y: leaving && leaving !== verb.id ? 8 : 0,
+                scale: leaving === verb.id ? 1.08 : leaving ? 0.92 : 1,
+              }}
+              exit={still ? undefined : { opacity: 0, y: 12, scale: 0.9, transition: quickOut }}
+              transition={still ? { duration: 0 } : { ...jelly, delay: leaving ? 0 : index * 0.045 }}
+              className={paint}
+            >
+              {verb.label}
+            </motion.button>
+          )) : (
+            <motion.button
+              key="closed"
+              type="button"
+              layout
+              onClick={() => setOpen(true)}
+              initial={still ? false : { opacity: 0, y: 12, scale: 0.92 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={still ? undefined : { opacity: 0, y: -8, scale: 0.94, transition: quickOut }}
+              transition={still ? { duration: 0 } : jelly}
+              className={paint}
+            >
+              {title}
+            </motion.button>
+          )}
+        </AnimatePresence>
+      </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -823,7 +863,7 @@ function RangeTabs({ value, onChange }: { value: RangeId; onChange: (next: Range
 
 const card = 'rounded-[24px] border border-white/70 bg-white/80 p-4 dark:border-white/10 dark:bg-white/10';
 
-export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, actionSlot = null, onOpen, onAdd, onSections, onSaved, onKeep, onEditExtra, onFigure, onDay, onMove }: { accounts: CarteraAccount[]; hidden: boolean; beat?: number; openId: string | null; paneSlot?: HTMLElement | null; actionSlot?: HTMLElement | null; onOpen: (id: string | null) => void; onAdd?: (accountKey: string, section?: string) => void; onSections?: (accountKey: string, sections: string[]) => Promise<void>; onSaved?: () => Promise<void> | void; onKeep?: (name: string, amount: number) => void; onEditExtra?: (id: string) => void; onFigure?: (amount: number | null) => void; onDay?: (day: string | null) => void; onMove?: (move: { amount: number; pct: number | null } | null) => void }) {
+export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, onOpen, onAdd, onSections, onSaved, onKeep, onEditExtra, onFigure, onDay, onMove }: { accounts: CarteraAccount[]; hidden: boolean; beat?: number; openId: string | null; paneSlot?: HTMLElement | null; onOpen: (id: string | null) => void; onAdd?: (accountKey: string, section?: string) => void; onSections?: (accountKey: string, sections: string[]) => Promise<void>; onSaved?: () => Promise<void> | void; onKeep?: (name: string, amount: number) => void; onEditExtra?: (id: string) => void; onFigure?: (amount: number | null) => void; onDay?: (day: string | null) => void; onMove?: (move: { amount: number; pct: number | null } | null) => void }) {
   const [notes, setNotes] = useState<WalletRow[]>([]);
   const [error, setError] = useState('');
   const [entryDraft, setEntryDraft] = useState<EntryDraft | null>(null);
@@ -1646,7 +1686,6 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, a
       </AnimatePresence>
       {current && !current.extras && (showCash || showPortfolio) && !entryDraft && !detail && !fixedDraft && !sheet && (
         <SiteBar
-          slot={actionSlot}
           {...barVerbs(showCash, page?.group || null, Boolean(products?.auto), current.kind || 'bank', current.tracking || 'balance')}
           onPick={setSheet}
         />

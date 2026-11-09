@@ -944,7 +944,6 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
   const [liveDay, setLiveDay] = useState<string | null>(null);
   const [liveMove, setLiveMove] = useState<{ amount: number; pct: number | null } | null>(null);
   const [paneSlot, setPaneSlot] = useState<HTMLDivElement | null>(null);
-  const [actionSlot, setActionSlot] = useState<HTMLDivElement | null>(null);
   const [error, setError] = useState('');
   const [hidden, setHidden] = useState(() => localStorage.getItem(HIDE_KEY) === '1');
   const [chart, setChart] = useState<'line' | 'ring'>(() => (localStorage.getItem('pat_chart') === 'ring' ? 'ring' : 'line'));
@@ -1561,7 +1560,6 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
           <h2 className="min-w-0 truncate text-base font-semibold">{openAccount.name}</h2>
         </div>
       )}
-      {inAccount && <div ref={setActionSlot} className="order-3 flex flex-wrap gap-2" />}
     </div>
   );
 
@@ -1581,7 +1579,6 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
             beat={beat}
             openId={openWallet}
             paneSlot={paneSlot}
-            actionSlot={actionSlot}
             onOpen={setOpenWallet}
             onDay={setLiveDay}
             onMove={setLiveMove}
