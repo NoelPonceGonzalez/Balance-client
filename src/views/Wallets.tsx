@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/Input';
 import { api, ApiError } from '@/lib/api';
 import { OriginGlyph, OriginPicker } from '@/components/OriginMark';
 import { formatDay, formatEur, formatNumber, formatPct, formatSignedEur } from '@/lib/format';
+import type { VerbId } from '@/lib/verbs';
 import { glide, jelly, quickOut, softSpring } from '@/lib/motion';
 import { placeOnCurve, smoothPath } from '@/lib/curve';
 import { cn } from '@/lib/utils';
@@ -611,23 +612,59 @@ function GainTag({ value, cost, mode, hidden }: { value: number; cost?: number |
   );
 }
 
-function SiteBar({ onSearch, onWrite }: { onSearch: () => void; onWrite: () => void }) {
-  const still = stillMotion();
-  return (
-    <motion.div
-      className="sticky z-20 mt-4 flex gap-2"
-      style={{ bottom: 'calc(max(0.85rem, env(safe-area-inset-bottom)) + 4.6rem)' }}
-      initial={still ? false : { opacity: 0, y: 18 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={still ? { duration: 0 } : jelly}
-    >
-      <button type="button" onClick={onSearch} className="flex flex-1 items-center justify-between rounded-[28px] bg-white px-4 py-3.5 text-[15px] font-semibold text-slate-900 ring-1 ring-slate-200/70 dark:bg-slate-900 dark:text-white dark:ring-white/10">
-        Buscar <Search size={17} />
-      </button>
-      <button type="button" onClick={onWrite} className="flex flex-1 items-center justify-between rounded-[28px] bg-slate-950 px-4 py-3.5 text-[15px] font-semibold text-white dark:bg-white dark:text-slate-950">
-        Apuntar <ChevronRight size={17} />
-      </button>
-    </motion.div>
+function barVerbs(cash: boolean, group: string | null, auto: boolean, kind: string, tracking: string): { title: string; verbs: { id: VerbId; label: string }[] } {
+  const section = !cash && group && group !== 'all';
+  if (!section) {
+    const bank = tracking !== 'positions' && kind !== 'broker' && kind !== 'exchange';
+    return {
+      title: 'Transferencia',
+      verbs: bank
+        ? [{ id: 'in', label: 'Ingresar' }, { id: 'out', label: 'Quitar' }]
+        : [{ id: 'deposit', label: 'Ingresar' }, { id: 'withdraw', label: 'Quitar' }],
+    };
+  }
+  if (auto || group === 'personal_good') {
+    return {
+      title: 'Operar',
+      verbs: [
+        { id: 'buy', label: 'Comprar' },
+        { id: 'sell', label: 'Vender' },
+        { id: 'add', label: 'Añadir' },
+        { id: 'remove', label: 'Quitar' },
+      ],
+    };
+  }
+  return {
+    title: 'Operar',
+    verbs: [
+      { id: 'buy', label: 'Comprar' },
+      { id: 'sell', label: 'Vender' },
+    ],
+  };
+}
+
+function SiteBar({ title, verbs, onPick }: { title: string; verbs: { id: VerbId; label: string }[]; onPick: (id: VerbId) => void }) {
+  const [open, setOpen] = useState(false);
+  return createPortal(
+    <div className="pointer-events-none fixed inset-x-0 z-40 flex justify-center px-4" style={{ top: 'calc(env(safe-area-inset-top) + 8.75rem)' }}>
+      <div className="pointer-events-auto flex max-w-md flex-wrap justify-center gap-2">
+        {open ? verbs.map((verb) => (
+          <button
+            key={verb.id}
+            type="button"
+            onClick={() => { setOpen(false); onPick(verb.id); }}
+            className="rounded-full bg-slate-950 px-4 py-2.5 text-[15px] font-semibold text-white dark:bg-white dark:text-slate-950"
+          >
+            {verb.label}
+          </button>
+        )) : (
+          <button type="button" onClick={() => setOpen(true)} className="rounded-full bg-slate-950 px-5 py-2.5 text-[15px] font-semibold text-white dark:bg-white dark:text-slate-950">
+            {title}
+          </button>
+        )}
+      </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -797,7 +834,7 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
   const [notes, setNotes] = useState<WalletRow[]>([]);
   const [error, setError] = useState('');
   const [entryDraft, setEntryDraft] = useState<EntryDraft | null>(null);
-  const [sheet, setSheet] = useState(false);
+  const [sheet, setSheet] = useState<VerbId | null>(null);
   const [entryMore, setEntryMore] = useState(false);
   const [fixedDraft, setFixedDraft] = useState<FixedDraft | null>(null);
   const [ledger, setLedger] = useState<null | 'cash' | 'moves'>(null);
@@ -1338,10 +1375,7 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
               </button>
             </section>
           )}
-          {showCash && cashSide && !entryDraft && !detail && !fixedDraft && !sheet && (
-            <SiteBar onSearch={() => { setSearching(true); setLedger('cash'); }} onWrite={() => setSheet(true)} />
-          )}
-          {showCash && cashSide && <div aria-hidden className="h-24" />}
+          {showCash && cashSide && <div aria-hidden className="h-8" />}
           {showPortfolio && inventory && (
             <section className="px-1">
               {skinItems.length > 0 && (
@@ -1595,29 +1629,33 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
               </motion.div>
             </AnimatePresence>
           )}
-          {showPortfolio && !entryDraft && !detail && !fixedDraft && !sheet && (
-            <SiteBar onSearch={() => { setSearching(true); setLedger('moves'); }} onWrite={() => setSheet(true)} />
-          )}
-          {showPortfolio && <div aria-hidden className="h-24" />}
+          {showPortfolio && <div aria-hidden className="h-8" />}
             </motion.div>
           </AnimatePresence>
         </motion.div>
       )}
       </AnimatePresence>
+      {current && !current.extras && (showCash || showPortfolio) && !entryDraft && !detail && !fixedDraft && !sheet && (
+        <SiteBar
+          {...barVerbs(showCash, page?.group || null, Boolean(products?.auto), current.kind || 'bank', current.tracking || 'balance')}
+          onPick={setSheet}
+        />
+      )}
       {sheet && current && !current.extras && (
         <EntrySheet
           accounts={[{
             id: current.key,
             name: current.name,
-            kind: current.kind || (current.sides.some((side) => side.group !== 'cash') ? 'other' : 'bank'),
+            kind: current.kind || (current.sides.some((side) => side.group !== 'cash') ? 'broker' : 'bank'),
             tracking: current.tracking || (current.sides.some((side) => side.group !== 'cash') ? 'positions' : 'balance'),
             currency: current.currency || 'EUR',
             balance: current.balance ?? current.cash,
           }]}
-          pieces={current.sides.flatMap((side) => side.items.flatMap((item) => item.id ? [{ id: item.id, accountId: current.key, name: item.label }] : []))}
+          pieces={(page && !showCash ? page.items : current.sides.flatMap((side) => side.items)).flatMap((item) => item.id ? [{ id: item.id, accountId: current.key, name: item.label }] : [])}
           accountId={current.key}
-          verb="in"
-          onClose={() => setSheet(false)}
+          verb={sheet}
+          allowed={barVerbs(showCash, page?.group || null, Boolean(products?.auto), current.kind || 'bank', current.tracking || 'balance').verbs.map((item) => item.id)}
+          onClose={() => setSheet(null)}
           onSaved={async () => { await onSaved?.(); }}
         />
       )}

@@ -1,5 +1,4 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import { motion } from 'motion/react';
 import { LayoutDashboard, Target, Settings, ArrowLeftRight, LineChart, Camera } from 'lucide-react';
 import { FixedCheck } from '@/components/FixedCheck';
 import { OfferNotice } from '@/components/OfferNotice';
@@ -47,7 +46,6 @@ export function Shell({
   const [dueKey, setDueKey] = useState<string | null>(null);
   const [focusedOffer, setFocusedOffer] = useState<AppNotification | null>(null);
   const [bare, setBare] = useState(false);
-  const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const hideChrome = useCallback((hidden: boolean) => setBare(hidden), []);
   const scrollRef = useRef<HTMLElement>(null);
   const bandRef = useRef<HTMLDivElement>(null);
@@ -174,14 +172,7 @@ export function Shell({
                       : 'text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-200',
                   )}
                 >
-                  {active && (
-                    <motion.span
-                      layoutId="nav-pill"
-                      transition={still ? { duration: 0 } : { type: 'spring', stiffness: 190, damping: 18, mass: 1.05 }}
-                      className="pointer-events-none absolute inset-1 rounded-full bg-white dark:bg-white/14"
-                    />
-                  )}
-                  <Icon size={18} strokeWidth={1.75} className="relative" />
+                  <Icon size={18} strokeWidth={active ? 2.25 : 1.75} className="relative" />
                   <span className="relative truncate sm:hidden">{item.short}</span>
                   <span className="relative hidden sm:inline">{item.label}</span>
                 </button>

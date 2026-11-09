@@ -813,8 +813,15 @@ function StoryDialog({ item, onClose }: { item: { kind: string; key: string; nam
       .catch((err: Error) => { if (!cancelled) setFailed(err.message); });
     return () => { cancelled = true; };
   }, [item.kind, item.key, item.name, item.symbol, days, spans]);
-  const points: LinePoint[] = story && story.series.length >= 2 ? story.series.map((point) => ({ day: point.at, eur: point.eur })) : [];
-  const matched = points.length >= 2;
+  const fromStory: LinePoint[] = story && story.series.length >= 2 ? story.series.map((point) => ({ day: point.at, eur: point.eur })) : [];
+  const fromSpark: LinePoint[] = item.sparkline.length >= 2
+    ? item.sparkline.map((eur, index) => {
+        const day = new Date(Date.now() - (item.sparkline.length - 1 - index) * 86_400_000).toISOString().slice(0, 10);
+        return { day, eur };
+      })
+    : [];
+  const points: LinePoint[] = fromStory.length >= 2 ? fromStory : fromSpark;
+  const matched = fromStory.length >= 2;
   const change = matched ? story?.changePct : item.changePct;
   const label = matched ? story?.changeLabel : item.changeLabel;
   const up = (change ?? 0) > 0;
@@ -848,9 +855,9 @@ function StoryDialog({ item, onClose }: { item: { kind: string; key: string; nam
         </div>
       )}
       <div className="mt-4">
-        {waiting && points.length < 2 ? <QuietLoad kind="chart" /> : points.length < 2 ? <p className="text-sm font-medium text-slate-400">Todavía no hay suficientes precios para la gráfica.</p> : (
+        {waiting && points.length < 2 ? <QuietLoad kind="chart" /> : points.length >= 2 ? (
           <CashChart
-            key={`${item.key}:${loadedDays}`}
+            key={`${item.key}:${loadedDays}:${points.length}`}
             quiet
             tall
             points={points}
@@ -858,9 +865,10 @@ function StoryDialog({ item, onClose }: { item: { kind: string; key: string; nam
             hidden={false}
             onValue={setLive}
             onDay={setLiveDay}
-            emptyText="Todavía no hay suficientes precios para la gráfica."
+            emptyText=""
           />
-        )}
+        ) : null}
+        {story?.note && points.length < 2 && !waiting && <p className="text-sm font-medium text-slate-400">{story.note}</p>}
         {spans && days !== loadedDays && <p className="mt-1 text-[11px] font-bold text-slate-400">Cargando este tramo…</p>}
       </div>
       {story && story.floats.length > 0 && (
@@ -871,7 +879,7 @@ function StoryDialog({ item, onClose }: { item: { kind: string; key: string; nam
               <li key={band.label} className="flex items-center justify-between gap-3 py-2">
                 <span>
                   <span className="block text-sm font-bold">{band.label}{band.yours ? ' · el tuyo' : ''}</span>
-                  <span className="block text-[11px] font-medium text-slate-400">{band.range} · {band.sales} ventas</span>
+                  <span className="block text-[11px] font-medium text-slate-400">{band.sales > 0 ? `${band.range} · ${band.sales} ventas` : band.range}</span>
                 </span>
                 <span className="font-black tabular-nums">{formatPrice(band.priceEur)}</span>
               </li>
@@ -879,7 +887,7 @@ function StoryDialog({ item, onClose }: { item: { kind: string; key: string; nam
           </ul>
         </div>
       )}
-      <p className="mt-3 text-xs font-medium text-slate-400">{failed || (!item.key ? 'Este valor no está enlazado a un mercado, así que no hay histórico.' : story?.note) || 'El verde es subida y el rojo es bajada. El porcentaje es el de la gráfica, del primer punto al último.'}</p>
+      <p className="mt-3 text-xs font-medium text-slate-400">{(failed && failed !== '429' && !/^429\b/.test(failed) ? failed : '') || (!item.key ? 'Este valor no está enlazado a un mercado, así que no hay histórico.' : story?.note) || 'El verde es subida y el rojo es bajada. El porcentaje es el de la gráfica, del primer punto al último.'}</p>
     </Modal>
   );
 }
@@ -1082,7 +1090,7 @@ export function Market({ focusListing, focusTick = 0 }: { focusListing?: string 
             {market === 'all' ? (
               <motion.p key="kicker" initial={still ? false : { opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={still ? undefined : { opacity: 0, y: -6, transition: quickOut }} transition={softSpring} className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">Elige un mercado</motion.p>
             ) : (
-              <motion.button key="back" type="button" onClick={back} initial={still ? false : { opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} exit={still ? undefined : { opacity: 0, x: -8, transition: quickOut }} transition={softSpring} className="mb-1 inline-flex items-center gap-0.5 rounded-full bg-white py-2 pl-2 pr-3.5 text-sm font-black text-slate-800 shadow-sm ring-1 ring-slate-200 dark:bg-white/10 dark:text-white dark:ring-white/10">
+              <motion.button key="back" type="button" onClick={back} initial={still ? false : { opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} exit={still ? undefined : { opacity: 0, x: -8, transition: quickOut }} transition={softSpring} className="mb-1 inline-flex items-center gap-0.5 py-2 pr-3 text-sm font-semibold text-slate-800 dark:text-white">
                 <ChevronLeft size={18} />
                 {skinDesk ? 'CS2' : 'Mercados'}
               </motion.button>
@@ -1103,20 +1111,20 @@ export function Market({ focusListing, focusTick = 0 }: { focusListing?: string 
             {fresh ? `En vivo · ${formatAgo(data.updatedAt)}` : `Último intento ${formatAgo(data.updatedAt)}`}
           </p>
           <div className="flex gap-2">
-            <button type="button" aria-label="CSFloat" onClick={() => setDesk('csfloat')} className={cn('grid h-10 w-10 place-items-center rounded-full', desk === 'csfloat' ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900' : 'bg-white text-slate-700 dark:bg-white/10 dark:text-white')}>
+            <button type="button" aria-label="CSFloat" onClick={() => setDesk('csfloat')} className={cn('grid h-10 w-10 place-items-center rounded-full', desk === 'csfloat' ? 'text-slate-950 dark:text-white' : 'text-slate-500')}>
               <Star size={18} />
             </button>
-            <button type="button" aria-label="Me interesa" onClick={() => setDesk('saved')} className={cn('grid h-10 w-10 place-items-center rounded-full', desk === 'saved' ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900' : 'bg-white text-slate-700 dark:bg-white/10 dark:text-white')}>
+            <button type="button" aria-label="Me interesa" onClick={() => setDesk('saved')} className={cn('grid h-10 w-10 place-items-center rounded-full', desk === 'saved' ? 'text-slate-950 dark:text-white' : 'text-slate-500')}>
               <Heart size={18} />
             </button>
-            <button type="button" aria-label="Avisos" onClick={() => setDesk('alerts')} className={cn('grid h-10 w-10 place-items-center rounded-full', desk === 'alerts' ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900' : 'bg-white text-slate-700 dark:bg-white/10 dark:text-white')}>
+            <button type="button" aria-label="Avisos" onClick={() => setDesk('alerts')} className={cn('grid h-10 w-10 place-items-center rounded-full', desk === 'alerts' ? 'text-slate-950 dark:text-white' : 'text-slate-500')}>
               <Bell size={18} />
             </button>
           </div>
         </div>
       </div>
       {searchOn && (
-        <div className="sticky top-0 z-20 -mx-1 bg-[var(--app-bg)]/85 px-1 py-2 backdrop-blur-xl">
+        <div className="sticky top-0 z-20 -mx-1 px-1 py-2">
           <div className="relative">
             <Input
               icon={<Search size={16} />}
@@ -1139,7 +1147,7 @@ export function Market({ focusListing, focusTick = 0 }: { focusListing?: string 
           </div>
         </div>
       )}
-      {data.warning && !skinDesk && <p className="rounded-2xl bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">{data.warning}</p>}
+      {data.warning && data.warning !== '429' && !/^429\b/.test(data.warning) && !skinDesk && <p className="rounded-2xl bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">{data.warning}</p>}
       {desk === 'saved' && (
         <Modal title="Me interesa" onClose={() => setDesk(null)}>
           <SavedDesk needle={needle} />

@@ -22,7 +22,6 @@ import { CashChart, Wallets, type LinePoint } from '@/views/Wallets';
 import { SkinSearch, wearName, type SkinPhase } from '@/components/SkinSearch';
 import { OriginPicker } from '@/components/OriginMark';
 import { glide, jelly, quickOut, softSpring, SPRING_EASE } from '@/lib/motion';
-import { smoothPath } from '@/lib/curve';
 const HIDE_KEY = 'pat_hide_money';
 const SORT_KEY = 'pat_dash_sort';
 
@@ -308,38 +307,59 @@ function RisingAmount({ value, hidden, signed = false, card = false, delay = 0 }
 
 const rise = glide;
 
-function Donut({ slices }: { slices: { key: string; eur: number }[] }) {
+function Donut({ slices, hidden }: { slices: { key: string; name: string; eur: number }[]; hidden: boolean }) {
+  const [picked, setPicked] = useState<string | null>(null);
   const progress = useRise(1, true, 700, 40);
   const total = slices.reduce((sum, slice) => sum + slice.eur, 0);
   const radius = 68;
   const circumference = 2 * Math.PI * radius;
+  const selected = slices.find((slice) => slice.key === picked) || null;
+  const share = selected && total > 0 ? Math.round((selected.eur / total) * 1000) / 10 : null;
   let cursor = 0;
   return (
-    <svg viewBox="0 0 200 200" className="mx-auto h-40 w-40 text-slate-900 sm:h-52 sm:w-52 dark:text-white" role="img" aria-label="De dónde viene el patrimonio">
-      <circle cx="100" cy="100" r={radius} fill="none" stroke="currentColor" strokeWidth="24" className="text-slate-100 dark:text-slate-800" />
-      {total > 0 && slices.map((slice, index) => {
-        const length = (slice.eur / total) * circumference * progress;
-        const gap = slices.length > 1 ? 3 * progress : 0;
-        const drawn = Math.max(0, length - gap);
-        const node = (
-          <circle
-            key={slice.key}
-            cx="100"
-            cy="100"
-            r={radius}
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="24"
-            strokeOpacity={1 - (index / Math.max(slices.length - 1, 1)) * 0.62}
-            strokeDasharray={`${drawn} ${circumference - drawn}`}
-            strokeDashoffset={-cursor}
-            transform="rotate(-90 100 100)"
-          />
-        );
-        cursor += length;
-        return node;
-      })}
-    </svg>
+    <div className="relative mx-auto h-52 w-52 sm:h-60 sm:w-60">
+      <svg viewBox="0 0 200 200" className="h-full w-full text-slate-900 dark:text-white" role="img" aria-label="Parte de cada cartera">
+        <circle cx="100" cy="100" r={radius} fill="none" stroke="currentColor" strokeWidth="24" className="text-slate-100 dark:text-slate-800" />
+        {total > 0 && slices.map((slice, index) => {
+          const length = (slice.eur / total) * circumference * progress;
+          const gap = slices.length > 1 ? 3 * progress : 0;
+          const drawn = Math.max(0, length - gap);
+          const on = !selected || selected.key === slice.key;
+          const node = (
+            <circle
+              key={slice.key}
+              cx="100"
+              cy="100"
+              r={radius}
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="24"
+              strokeOpacity={on ? 1 - (index / Math.max(slices.length - 1, 1)) * 0.45 : 0.16}
+              strokeDasharray={`${drawn} ${circumference - drawn}`}
+              strokeDashoffset={-cursor}
+              transform="rotate(-90 100 100)"
+              className="cursor-pointer"
+              onClick={() => setPicked((current) => (current === slice.key ? null : slice.key))}
+            >
+              <title>{slice.name}</title>
+            </circle>
+          );
+          cursor += length;
+          return node;
+        })}
+      </svg>
+      <div className="pointer-events-none absolute inset-0 grid place-items-center px-10 text-center">
+        {selected && share != null ? (
+          <div>
+            <p className="truncate text-[13px] font-semibold text-slate-500">{selected.name}</p>
+            <p className="text-lg font-semibold tabular-nums text-slate-900 dark:text-white">{hidden ? '*****' : `${share} %`}</p>
+            <p className="text-[13px] font-semibold tabular-nums text-slate-500">{hidden ? '*****' : formatEur(selected.eur)}</p>
+          </div>
+        ) : (
+          <p className="text-[13px] font-medium text-slate-400">Toca una cartera</p>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -921,26 +941,6 @@ function pendingMonth(data: DashboardData | null): number {
   return data.accounts.reduce((sum, account) => sum + (account.flows || []).filter((flow) => flow.open).reduce((inner, flow) => inner + Math.abs(flow.amount), 0), 0);
 }
 
-function WorthLine({ values }: { values: number[] }) {
-  const clean = values.filter((value) => Number.isFinite(value));
-  if (clean.length < 2) return null;
-  const min = Math.min(...clean);
-  const max = Math.max(...clean);
-  const span = max - min || 1;
-  const width = 320;
-  const height = 128;
-  const xy: [number, number][] = clean.map((value, index) => {
-    const x = (index / (clean.length - 1)) * width;
-    const y = height - ((value - min) / span) * (height - 16) - 8;
-    return [x, y];
-  });
-  return (
-    <motion.svg viewBox={`0 0 ${width} ${height}`} className="h-32 w-full text-slate-900 dark:text-white" role="img" aria-label="Patrimonio en el tiempo" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={glide}>
-      <path d={smoothPath(xy)} fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinejoin="round" strokeLinecap="round" />
-    </motion.svg>
-  );
-}
-
 export function Dashboard({ heroMs, home, books }: { heroMs: number; home: number; books: number }) {
   const [data, setData] = useState<DashboardData | null>(null);
   const [view, setView] = useState<'general' | 'cartera'>('general');
@@ -951,6 +951,9 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
   const [error, setError] = useState('');
   const [hidden, setHidden] = useState(() => localStorage.getItem(HIDE_KEY) === '1');
   const [chart, setChart] = useState<'line' | 'ring'>(() => (localStorage.getItem('pat_chart') === 'ring' ? 'ring' : 'line'));
+  const [lineNow, setLineNow] = useState<number | null>(null);
+  const [lineDay, setLineDay] = useState<string | null>(null);
+  const [lineMove, setLineMove] = useState<{ amount: number; pct: number | null } | null>(null);
   const [dueLine, setDueLine] = useState<{ label: string; amount: number; direction: 'in' | 'out' } | null>(null);
   const [markLine, setMarkLine] = useState<{ planId: string; label: string; amount: number } | null>(null);
   const [offerLine, setOfferLine] = useState<AppNotification | null>(null);
@@ -1439,7 +1442,7 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
     }
     return () => hideChrome(false);
   }, [hideChrome, inAccount]);
-  const barValue = inAccount && openAccount ? openAccount.value : shownWorth;
+  const barValue = inAccount && openAccount ? openAccount.value : chart === 'line' && lineNow != null ? lineNow : shownWorth;
   const chooseView = (next: 'general' | 'cartera') => {
     setView(next);
     setOpenWallet(null);
@@ -1468,7 +1471,13 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
             >
               {hidden ? <EyeOff size={16} /> : <Eye size={16} />}
             </button>
-            {!inAccount && data?.variation.available && data.variation.amount != null && (
+            {!inAccount && chart === 'line' && lineMove && (
+              <p className={cn('text-[13px] font-semibold tabular-nums', hidden || lineMove.amount === 0 ? 'text-slate-400' : lineMove.amount > 0 ? 'text-[#16c784]' : 'text-[#ea3943]')}>
+                {hidden ? '*****' : formatSignedEur(lineMove.amount)}
+                {lineMove.pct != null && !hidden && <span className="ml-1.5">{formatPct(lineMove.pct)}</span>}
+              </p>
+            )}
+            {!inAccount && !(chart === 'line' && lineMove) && data?.variation.available && data.variation.amount != null && (
               <p className={cn('text-[13px] font-semibold tabular-nums', hidden ? 'text-slate-400' : totalClass)}>
                 <RisingAmount value={data.variation.amount} hidden={hidden} signed delay={120} />
                 {data.variation.percent != null && <span className="ml-1.5">{hidden ? '*****' : formatPct(data.variation.percent)}</span>}
@@ -1484,6 +1493,9 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
           {!inAccount && <div className="ml-auto"><ViewSwitch value={view} onChange={chooseView} /></div>}
           {inAccount && <div ref={setPaneSlot} className="ml-auto shrink-0" />}
         </div>
+        {!inAccount && chart === 'line' && lineDay && (
+          <p className="mt-1.5 text-[13px] font-semibold text-slate-400">{formatDay(lineDay)}</p>
+        )}
         {inAccount && liveDay && (
           <motion.p
             className="mt-1.5 text-[13px] font-semibold text-slate-400"
@@ -1719,19 +1731,24 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
         </div>
       </div>
       {chart === 'line' ? (
-        (data.series.length > 1 ? <WorthLine values={data.series.map((point) => point.eur)} /> : <p className="text-center text-[13px] font-medium text-slate-400">La línea aparece cuando haya más de un día.</p>)
+        data.series.length > 1 ? (
+          <CashChart
+            quiet
+            tall
+            tone="ink"
+            hidden={hidden}
+            points={data.series.map((point) => ({ day: point.day, eur: point.eur }))}
+            now={shownWorth ?? data.series[data.series.length - 1]?.eur ?? 0}
+            onValue={setLineNow}
+            onDay={setLineDay}
+            onMove={setLineMove}
+            emptyText=""
+          />
+        ) : (
+          <p className="text-center text-[13px] font-medium text-slate-400">La línea aparece cuando haya más de un día.</p>
+        )
       ) : slices.length > 0 ? (
-        <div className="grid gap-4 sm:grid-cols-[auto_1fr] sm:items-center">
-          <Donut slices={slices} />
-          <ul className="min-w-0">
-            {slices.map((slice) => (
-              <li key={slice.key} className="flex items-baseline justify-between gap-3 border-t border-slate-200/70 py-2 first:border-t-0 dark:border-white/10">
-                <span className="min-w-0 truncate text-[15px] font-semibold">{slice.name}</span>
-                <span className="shrink-0 text-[15px] font-semibold tabular-nums">{mask(formatEur(slice.eur))}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
+        <Donut slices={slices} hidden={hidden} />
       ) : (
         <p className="text-center text-[13px] font-medium text-slate-400">El reparto aparece cuando haya saldo en algún sitio.</p>
       )}

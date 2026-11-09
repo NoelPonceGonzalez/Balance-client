@@ -27,6 +27,7 @@ interface Props {
   pieces: SheetPiece[];
   accountId: string;
   verb: VerbId;
+  allowed?: VerbId[];
   editing?: string | null;
   initial?: {
     amount: string;
@@ -51,7 +52,7 @@ function emptyExtra() {
   return { description: '', category: '', fee: '', date: today(), counterAccountId: '', holdingId: '', otherHoldingId: '', quantity: '', otherQuantity: '' };
 }
 
-export function EntrySheet({ accounts, pieces, accountId, verb, editing, initial, onClose, onSaved, onDelete }: Props) {
+export function EntrySheet({ accounts, pieces, accountId, verb, allowed, editing, initial, onClose, onSaved, onDelete }: Props) {
   const [siteId, setSiteId] = useState(accountId);
   const [chosen, setChosen] = useState<VerbId>(verb);
   const [amount, setAmount] = useState(initial?.amount || '');
@@ -61,7 +62,9 @@ export function EntrySheet({ accounts, pieces, accountId, verb, editing, initial
   const [duplicate, setDuplicate] = useState(false);
   const [saving, setSaving] = useState(false);
   const site = accounts.find((item) => item.id === siteId) || accounts[0];
-  const verbs = site ? verbsFor(site.kind, site.tracking) : [];
+  const allVerbs = site ? verbsFor(site.kind, site.tracking) : [];
+  const narrowed = allowed?.length ? allVerbs.filter((item) => allowed.includes(item.id)) : allVerbs;
+  const verbs = narrowed.length ? narrowed : allVerbs;
   const active = verbs.some((item) => item.id === chosen) ? chosen : verbs[0]?.id || 'out';
   const mine = useMemo(() => pieces.filter((item) => item.accountId === site?.id), [pieces, site?.id]);
   const needsPiece = verbNeedsPiece(active);
