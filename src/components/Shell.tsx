@@ -128,7 +128,12 @@ export function Shell({
     <ChromeHidden.Provider value={hideChrome}>
     <OfferFocusContext.Provider value={setFocusedOffer}>
     <div className="relative flex h-dvh flex-col overflow-hidden bg-[var(--app-bg)] text-[var(--app-text)]">
-      <header aria-hidden={bare} className={cn('grid shrink-0 transition-[grid-template-rows,opacity] duration-300 ease-out', bare ? 'pointer-events-none grid-rows-[0fr] opacity-0' : 'grid-rows-[1fr] opacity-100')}>
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 -top-32 z-0 h-[78vh]"
+        style={{ background: 'radial-gradient(140% 90% at 50% 0%, var(--market-wash, transparent), transparent 70%)' }}
+      />
+      <header aria-hidden={bare} className={cn('relative z-10 grid shrink-0 transition-[grid-template-rows,opacity] duration-300 ease-out', bare ? 'pointer-events-none grid-rows-[0fr] opacity-0' : 'grid-rows-[1fr] opacity-100')}>
         <div className="min-h-0 overflow-hidden">
           <div className="flex items-center justify-end gap-0.5 px-3 pb-1 pt-[max(0.35rem,env(safe-area-inset-top))] md:px-8">
             <InstallApp compact />
@@ -148,7 +153,7 @@ export function Shell({
       </header>
       <FixedCheck nonce={dueNonce} focusKey={dueKey} onSettled={onSettled} />
       <OfferNotice focused={focusedOffer} onFocusedClose={() => setFocusedOffer(null)} />
-      <main ref={scrollRef} className={cn('app-scroll min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-4 py-2 md:px-8', bare && 'pt-[max(0.75rem,env(safe-area-inset-top))]')}>
+      <main ref={scrollRef} className={cn('app-scroll relative z-10 min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-4 py-2 md:px-8', bare && 'pt-[max(0.75rem,env(safe-area-inset-top))]')}>
         <div ref={bandRef} className="min-w-0 origin-center will-change-transform">
           {children}
         </div>

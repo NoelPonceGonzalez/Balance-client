@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { ChevronLeft, Heart, Search, Star, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { CsfloatFinder, SkinMarket, SkinSuggest, type SkinHit } from '@/components/CsfloatFinder';
@@ -148,16 +149,16 @@ const TAPE_FILTERS = [
 type TapeFilter = (typeof TAPE_FILTERS)[number]['id'];
 
 const MARKET_TONE: Record<string, { accent: string; search: string; wash: string }> = {
-  crypto: { accent: '#f7931a', search: 'Bitcoin, ether, solana…', wash: 'rgba(247,147,26,0.22)' },
-  stock: { accent: '#0a84ff', search: 'Apple, NVIDIA, ASML…', wash: 'rgba(10,132,255,0.16)' },
-  etf: { accent: '#30d158', search: 'VWCE, S&P 500, Nasdaq…', wash: 'rgba(48,209,88,0.16)' },
-  index: { accent: '#5e5ce6', search: 'IBEX, DAX, Nasdaq…', wash: 'rgba(94,92,230,0.16)' },
-  gold: { accent: '#c6a15b', search: 'Oro', wash: 'rgba(198,161,91,0.28)' },
-  silver: { accent: '#8e8e93', search: 'Plata', wash: 'rgba(174,174,178,0.22)' },
-  oil: { accent: '#8d6e63', search: 'Petróleo', wash: 'rgba(141,110,99,0.22)' },
-  copper: { accent: '#b87333', search: 'Cobre', wash: 'rgba(184,115,51,0.24)' },
-  cs2: { accent: '#de9b35', search: 'Pandora, guantes, AK…', wash: 'rgba(222,155,53,0.18)' },
-  tf2: { accent: '#c17f3e', search: 'Llave, gorra, australium…', wash: 'rgba(193,127,62,0.2)' },
+  crypto: { accent: '#f7931a', search: 'Bitcoin, ether, solana…', wash: 'rgba(247,147,26,0.38)' },
+  stock: { accent: '#0a84ff', search: 'Apple, NVIDIA, ASML…', wash: 'rgba(10,132,255,0.28)' },
+  etf: { accent: '#30d158', search: 'VWCE, S&P 500, Nasdaq…', wash: 'rgba(48,209,88,0.28)' },
+  index: { accent: '#5e5ce6', search: 'IBEX, DAX, Nasdaq…', wash: 'rgba(94,92,230,0.28)' },
+  gold: { accent: '#c6a15b', search: 'Oro', wash: 'rgba(198,161,91,0.42)' },
+  silver: { accent: '#8e8e93', search: 'Plata', wash: 'rgba(174,174,178,0.34)' },
+  oil: { accent: '#8d6e63', search: 'Petróleo', wash: 'rgba(141,110,99,0.34)' },
+  copper: { accent: '#b87333', search: 'Cobre', wash: 'rgba(184,115,51,0.36)' },
+  cs2: { accent: '#de9b35', search: 'Pandora, guantes, AK…', wash: 'rgba(222,155,53,0.36)' },
+  tf2: { accent: '#c17f3e', search: 'Llave, gorra, australium…', wash: 'rgba(193,127,62,0.36)' },
 };
 
 const HERO_MARKETS = new Set(['gold', 'silver', 'oil', 'copper']);
@@ -233,15 +234,15 @@ function CryptoBoard({ items, filtered, quiet, onOpen }: { items: MarketTapeItem
             animate={{ opacity: 1, y: 0, scale: 1 }}
             whileTap={still ? undefined : { scale: 0.985 }}
             transition={still ? { duration: 0 } : { ...softSpring, delay: Math.min(index, 10) * 0.035 }}
-            className="overflow-hidden rounded-[28px] bg-[#12151c] p-4 text-left text-white shadow-sm"
+            className="overflow-hidden rounded-[28px] bg-white p-4 text-left text-slate-900 shadow-sm ring-1 ring-slate-200/70 dark:bg-slate-900 dark:text-white dark:ring-white/10"
           >
             <span className="flex items-center gap-3">
               <Mark image={item.image} symbol={item.symbol} />
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-base font-semibold">{item.name}</span>
-                <span className="block truncate font-mono text-[11px] font-bold uppercase text-white/40">{item.symbol}</span>
+                <span className="block truncate font-mono text-[11px] font-bold uppercase text-slate-400">{item.symbol}</span>
               </span>
-              <Pct value={item.changePct} className={cn('rounded-full px-2.5 py-1 text-xs', (item.changePct ?? 0) === 0 || item.changePct == null ? 'bg-white/10' : (item.changePct ?? 0) > 0 ? 'bg-[#16c784]/15' : 'bg-[#ea3943]/15')} />
+              <Pct value={item.changePct} className={cn('rounded-full px-2.5 py-1 text-xs', (item.changePct ?? 0) === 0 || item.changePct == null ? 'bg-slate-100 text-slate-500 dark:bg-white/10' : (item.changePct ?? 0) > 0 ? 'bg-[#16c784]/15' : 'bg-[#ea3943]/15')} />
             </span>
             <span className="mt-5 flex items-end justify-between gap-3">
               <span className="text-[1.7rem] font-black tabular-nums tracking-tight">{quoteAmount(item.kind, item.priceEur)}</span>
@@ -381,10 +382,9 @@ function GameBoard({ items, filtered, quiet, warm, onOpen }: { items: MarketTape
           animate={{ opacity: 1, y: 0, scale: 1 }}
           whileTap={still ? undefined : { scale: 0.98 }}
           transition={still ? { duration: 0 } : { ...softSpring, delay: Math.min(index, 8) * 0.04 }}
-          className="overflow-hidden rounded-[28px] text-left text-white"
-          style={{ background: warm ? '#1c120c' : '#12151c' }}
+          className="overflow-hidden rounded-[28px] bg-white text-left text-slate-900 ring-1 ring-slate-200/70 dark:bg-slate-900 dark:text-white dark:ring-white/10"
         >
-          <span className="grid aspect-[5/4] place-items-center" style={{ background: warm ? 'radial-gradient(circle at 50% 42%, #6b4423, #1c120c)' : 'radial-gradient(circle at 50% 42%, #3d4a5c, #12151c)' }}>
+          <span className="grid aspect-[5/4] place-items-center bg-slate-50 dark:bg-white/5" style={{ background: warm ? 'radial-gradient(circle at 50% 42%, rgba(222,155,53,0.35), transparent 70%)' : 'radial-gradient(circle at 50% 42%, rgba(148,163,184,0.35), transparent 70%)' }}>
             {item.image ? <img src={item.image} alt="" referrerPolicy="no-referrer" className="h-[72%] w-[72%] object-contain drop-shadow-[0_10px_16px_rgba(0,0,0,0.45)]" /> : <Mark image={null} symbol={item.symbol} />}
           </span>
           <span className="block px-3 py-2.5">
@@ -984,6 +984,12 @@ export function Market({ focusListing, focusTick = 0 }: { focusListing?: string 
     setListingFocus(focusListing);
     setDesk('csfloat');
   }, [focusListing, focusTick]);
+  useEffect(() => {
+    const root = document.documentElement;
+    const wash = market === 'all' ? 'rgba(142, 142, 147, 0.28)' : MARKET_TONE[market]?.wash;
+    if (wash) root.style.setProperty('--market-wash', wash);
+    return () => root.style.removeProperty('--market-wash');
+  }, [market]);
   const [, setTick] = useState(0);
 
   const load = () => {
@@ -1081,9 +1087,7 @@ export function Market({ focusListing, focusTick = 0 }: { focusListing?: string 
 
   return (
     <div className="relative mx-auto min-w-0 max-w-5xl space-y-5">
-      {tone && market !== 'all' && (
-        <div aria-hidden className="pointer-events-none absolute inset-x-0 -top-4 -z-10 h-56" style={{ background: `radial-gradient(560px 190px at 8% 0%, ${tone.wash}, transparent 72%)` }} />
-      )}
+      <div className="sticky top-0 z-30 -mx-4 bg-[linear-gradient(to_bottom,color-mix(in_srgb,var(--market-wash,transparent)_55%,transparent),transparent)] px-4 pb-3 pt-1 md:-mx-8 md:px-8">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="min-w-0">
           <AnimatePresence mode="wait" initial={false}>
@@ -1120,6 +1124,7 @@ export function Market({ focusListing, focusTick = 0 }: { focusListing?: string 
           </div>
         </div>
       </div>
+      </div>
       {searchOn && (
         <div className="sticky top-0 z-30 -mx-1 px-1 py-2">
           <div className="relative">
@@ -1155,8 +1160,19 @@ export function Market({ focusListing, focusTick = 0 }: { focusListing?: string 
           <CsfloatFinder key={focusTick} focusId={listingFocus} />
         </Modal>
       )}
+      {!desk && !open && createPortal(
+        <button
+          type="button"
+          onClick={() => setDesk('alerts')}
+          className="fixed z-50 rounded-full bg-slate-950 px-4 py-2.5 text-[15px] font-semibold text-white shadow-[0_10px_28px_rgba(15,23,42,0.18)] dark:bg-white dark:text-slate-950"
+          style={{ right: '1.15rem', bottom: 'calc(env(safe-area-inset-bottom) + 6.25rem)' }}
+        >
+          Aviso
+        </button>,
+        document.body,
+      )}
       {desk === 'alerts' && (
-        <Modal title="Avisos" onClose={() => setDesk(null)}>
+        <Modal title="Aviso" onClose={() => setDesk(null)}>
           <Followed onOpenListing={(id) => { setListingFocus(id); setDesk('csfloat'); }} />
           <AlertDesk items={data.signals || []} catalog={sections.flatMap((section) => section.items)} onChanged={load} />
         </Modal>
@@ -1174,9 +1190,9 @@ export function Market({ focusListing, focusTick = 0 }: { focusListing?: string 
         >
           {skinDesk ? (
             <DragRow className="-mx-4 flex max-w-full flex-nowrap gap-1.5 px-4">
-              <button type="button" onClick={() => setWearPick('all')} className={cn('shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-black uppercase tracking-wide', wearPick === 'all' ? 'bg-[#de9b35] text-[#1a1208]' : 'bg-[#1a1d24] text-white/80')}>General</button>
+              <button type="button" onClick={() => setWearPick('all')} className={cn('shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-black uppercase tracking-wide', wearPick === 'all' ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950' : 'bg-white text-slate-600 ring-1 ring-slate-200 dark:bg-slate-900 dark:text-slate-200 dark:ring-white/10')}>General</button>
               {skinDesk.wears.map((option) => (
-                <button key={option.wear} type="button" onClick={() => setWearPick(option.wear)} className={cn('shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-black uppercase tracking-wide', wearPick === option.wear ? 'bg-[#de9b35] text-[#1a1208]' : 'bg-[#1a1d24] text-white/80')}>
+                <button key={option.wear} type="button" onClick={() => setWearPick(option.wear)} className={cn('shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-black uppercase tracking-wide', wearPick === option.wear ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950' : 'bg-white text-slate-600 ring-1 ring-slate-200 dark:bg-slate-900 dark:text-slate-200 dark:ring-white/10')}>
                   {WEAR_CHIP[option.wear] || option.wear}
                 </button>
               ))}

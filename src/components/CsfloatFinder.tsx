@@ -266,8 +266,8 @@ function suggestRows(hits: SkinHit[]): Array<{ type: 'group'; label: string; cou
 
 function SkinThumb({ image }: { image: string | null }) {
   return (
-    <span className="grid h-12 w-16 shrink-0 place-items-center rounded-lg bg-[#12151c]">
-      {image ? <img src={image} alt="" referrerPolicy="no-referrer" className="h-10 w-14 object-contain" /> : <span className="text-[10px] font-black text-white/30">CS</span>}
+    <span className="grid h-12 w-16 shrink-0 place-items-center rounded-lg bg-slate-100 dark:bg-white/10">
+      {image ? <img src={image} alt="" referrerPolicy="no-referrer" className="h-10 w-14 object-contain" /> : <span className="text-[10px] font-black text-slate-400">CS</span>}
     </span>
   );
 }
@@ -370,7 +370,7 @@ export function SkinSuggest({ query, onPick, onMatch }: { query: string; onPick:
     };
   }, [query]);
 
-  if (hits.length === 0) return note ? <p className="absolute left-0 right-0 top-full z-40 mt-2 rounded-2xl bg-[#1a1d24] px-3 py-3 text-sm font-medium text-white/70 shadow-2xl">{note}</p> : null;
+  if (hits.length === 0) return note ? <p className="absolute left-0 right-0 top-full z-40 mt-2 rounded-2xl bg-white px-3 py-3 text-sm font-medium text-slate-500 shadow-2xl ring-1 ring-slate-200 dark:bg-slate-900 dark:text-slate-300 dark:ring-white/10">{note}</p> : null;
   const rows = suggestRows(hits);
 
   return (
@@ -379,20 +379,20 @@ export function SkinSuggest({ query, onPick, onMatch }: { query: string; onPick:
       animate={{ opacity: 1, y: 0 }}
       exit={still ? undefined : { opacity: 0, y: 6, transition: quickOut }}
       transition={softSpring}
-      className="absolute left-0 right-0 top-full z-40 mt-2 overflow-hidden rounded-2xl bg-[#1a1d24] text-white shadow-2xl ring-1 ring-white/10"
+      className="absolute left-0 right-0 top-full z-40 mt-2 overflow-hidden rounded-2xl bg-white text-slate-900 shadow-2xl ring-1 ring-slate-200 dark:bg-slate-900 dark:text-white dark:ring-white/10"
     >
       <div className="max-h-80 overflow-y-auto py-1">
         {rows.map((row) => row.type === 'group' ? (
           <div key={`group:${row.label}`} className="px-3 pb-1 pt-3">
             <p className="text-sm font-black">{row.label}</p>
-            <p className="text-[11px] font-medium text-white/45">Grupo de {row.count} skins</p>
+            <p className="text-[11px] font-medium text-slate-400">Grupo de {row.count} skins</p>
           </div>
         ) : (
-          <button key={row.hit.label} type="button" onClick={() => onPick(row.hit, null)} className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-white/10">
+          <button key={row.hit.label} type="button" onClick={() => onPick(row.hit, null)} className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-slate-50 dark:hover:bg-white/10">
             <SkinThumb image={row.hit.image} />
             <span className="min-w-0">
               <span className="block truncate text-sm font-black">{row.hit.label}</span>
-              <span className="block text-[11px] font-medium text-white/45">{KIND_LABEL[row.hit.kind] || row.hit.kind}</span>
+              <span className="block text-[11px] font-medium text-slate-400">{KIND_LABEL[row.hit.kind] || row.hit.kind}</span>
             </span>
           </button>
         ))}
