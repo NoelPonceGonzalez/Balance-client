@@ -184,7 +184,7 @@ export function Settings({
   return (
     <div className="mx-auto max-w-lg space-y-8 pb-28">
       <div>
-        <h1 className="text-2xl font-black tracking-tight">Ajustes</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Ajustes</h1>
         <p className="mt-1 text-sm font-medium text-slate-400">{user.email}</p>
       </div>
 
@@ -237,9 +237,8 @@ export function Settings({
               <p className="text-[15px] font-semibold">Avisos</p>
               <p className="text-[13px] font-semibold text-slate-400">{pushGate === 'ready' ? 'Activos' : pushGate === 'blocked' ? 'Bloqueados' : pushGate === 'unsupported' ? 'No disponibles' : 'Apagados'}</p>
             </div>
-            <p className="mt-1 text-xs font-medium text-slate-400">El guante y el precio llegan a este teléfono. En el iPhone hace falta tener Balance instalada.</p>
-            {pushGate !== 'ready' && pushGate !== 'unsupported' && (
-              <button type="button" onClick={() => void turnOn('push')} className="mt-3 text-sm font-semibold text-slate-800 dark:text-slate-100">Activar</button>
+            {pushGate !== 'unsupported' && (
+              <button type="button" onClick={() => void turnOn('push')} className="mt-3 text-sm font-semibold text-slate-800 dark:text-slate-100">{pushGate === 'ready' ? 'Probar aviso' : 'Activar'}</button>
             )}
           </div>
           <div className="px-4 py-4">
@@ -247,7 +246,6 @@ export function Settings({
               <p className="text-[15px] font-semibold">Cámara</p>
               <p className="text-[13px] font-semibold text-slate-400">{cameraGate === 'ready' ? 'Activa' : cameraGate === 'blocked' ? 'Bloqueada' : cameraGate === 'unsupported' ? 'No disponible' : 'Apagada'}</p>
             </div>
-            <p className="mt-1 text-xs font-medium text-slate-400">Sirve para fotografiar un tique. Si el teléfono la bloqueó, permítela en sus ajustes.</p>
             {cameraGate !== 'ready' && cameraGate !== 'unsupported' && (
               <button type="button" onClick={() => void turnOn('camera')} className="mt-3 text-sm font-semibold text-slate-800 dark:text-slate-100">Activar</button>
             )}
@@ -279,7 +277,6 @@ export function Settings({
       <Group title="CSFloat">
         <div className="px-4 py-4">
           <p className="text-[15px] font-semibold">{csfloat ? 'Clave guardada' : 'Sin clave'}</p>
-          <p className="mt-1 text-xs font-medium text-slate-400">Solo se usa para leer anuncios nuevos. Se guarda cifrada y no vuelve a salir. La copia de los datos no la incluye. Al borrar la cuenta, se borra.</p>
           <div className="mt-3">
             <Input
               label={csfloat ? 'Cambiar clave' : 'Clave de Developer'}
@@ -331,8 +328,8 @@ export function Settings({
             Borrar la cuenta
           </button>
         ) : (
-          <div className="rounded-[28px] border border-rose-100 bg-rose-50/70 px-4 py-4 dark:border-rose-500/20 dark:bg-rose-950/30">
-            <p className="text-sm font-medium text-rose-700 dark:text-rose-300">Se elimina todo y no se puede deshacer. Escribe borrar para confirmar.</p>
+          <div className="rounded-[28px] bg-white px-4 py-4 ring-1 ring-slate-200/70 dark:bg-slate-900 dark:ring-white/10">
+            <p className="text-sm font-medium text-slate-600 dark:text-slate-300">Se elimina todo y no se puede deshacer. Escribe borrar para confirmar.</p>
             <div className="mt-3">
               <Input label="Escribe borrar" value={eraseText} onChange={(event) => setEraseText(event.target.value)} placeholder="borrar" />
             </div>

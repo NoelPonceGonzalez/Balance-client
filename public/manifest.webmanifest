@@ -2,6 +2,7 @@
   "name": "Balance",
   "short_name": "Balance",
   "description": "Tu dinero, junto en un solo sitio.",
+  "id": "/",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

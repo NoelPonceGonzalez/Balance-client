@@ -1,10 +1,11 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { createPortal } from 'react-dom';
-import { Check, ChevronDown, ChevronLeft, ChevronRight, Minus, Plus, Search, Trash2, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronLeft, ChevronRight, Plus, Search, Trash2, X } from 'lucide-react';
 import { PlatformLogo } from '@/components/PlatformLogo';
 import { SpendIcon } from '@/components/SpendIcon';
 import { Modal } from '@/components/Modal';
+import { EntrySheet } from '@/components/EntrySheet';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { api, ApiError } from '@/lib/api';
@@ -79,6 +80,10 @@ export interface CarteraAccount {
   sections?: string[];
   extras?: boolean;
   image?: string | null;
+  kind?: string;
+  tracking?: string;
+  currency?: string;
+  balance?: number;
 }
 
 interface WalletEntry {
@@ -272,7 +277,7 @@ function accentFor(label: string): string {
   return ACCENT_PALETTE[hash % ACCENT_PALETTE.length];
 }
 
-export function CashChart({ points, now, hidden, base = null, label, showPct = false, beside = false, tall = false, plain = false, quiet = false, tone, beforePlot, onValue, onDay, emptyText = 'La gráfica aparece con el primer movimiento.' }: { points: LinePoint[]; now: number; hidden: boolean; base?: number | null; label?: string; showPct?: boolean; beside?: boolean; tall?: boolean; plain?: boolean; quiet?: boolean; tone?: 'ink' | string; beforePlot?: ReactNode; onValue?: (eur: number) => void; onDay?: (day: string | null) => void; emptyText?: string }) {
+export function CashChart({ points, now, hidden, base = null, label, showPct = false, beside = false, tall = false, plain = false, quiet = false, tone, beforePlot, onValue, onDay, onMove, emptyText = 'La gráfica aparece con el primer movimiento.' }: { points: LinePoint[]; now: number; hidden: boolean; base?: number | null; label?: string; showPct?: boolean; beside?: boolean; tall?: boolean; plain?: boolean; quiet?: boolean; tone?: 'ink' | string; beforePlot?: ReactNode; onValue?: (eur: number) => void; onDay?: (day: string | null) => void; onMove?: (move: { amount: number; pct: number | null } | null) => void; emptyText?: string }) {
   const fillId = `fill-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
   const pastId = `${fillId}-past`;
   const futureId = `${fillId}-future`;
@@ -321,13 +326,12 @@ export function CashChart({ points, now, hidden, base = null, label, showPct = f
   const value = focus ? focus.eur : now;
   const change = value - first;
   const pct = first > 0 ? (change / first) * 100 : null;
-  const up = (line[line.length - 1]?.eur ?? now) >= first;
   const baseY = enough ? height - ((first - bottom) / (top - bottom)) * height : 0;
   const ticks = enough ? monthTicks(t0, t0 + tSpan) : [];
   const lined = Boolean(tone);
   const accent = tone && tone !== 'ink' ? tone : null;
-  const color = accent || (up ? '#16c784' : '#ea3943');
-  const stroke = lined && !accent ? 'currentColor' : color;
+  const color = accent || 'var(--app-text)';
+  const stroke = color;
   const mark = focus ? [focus.x, focus.y] as [number, number] : xy[xy.length - 1];
   const cut = focus ? focus.x : null;
   sampleRef.current = (x: number) => {
@@ -419,37 +423,48 @@ export function CashChart({ points, now, hidden, base = null, label, showPct = f
   const shownDay = focus?.day || line[line.length - 1]?.day || null;
   useEffect(() => { onValue?.(value); }, [onValue, value]);
   useEffect(() => { if (shownDay) onDay?.(shownDay); }, [onDay, shownDay]);
+  useEffect(() => {
+    if (!onMove) return;
+    const moved = line.length >= 2 || reference != null;
+    onMove(moved ? { amount: change, pct } : null);
+  }, [onMove, change, pct, line.length, reference]);
+  useEffect(() => {
+    if (!onMove) return;
+    return () => onMove(null);
+  }, [onMove]);
   return (
     <div>
-      {quiet ? (
-        label ? <p className="text-sm font-medium text-slate-400">{label}</p> : null
-      ) : beside ? (
-        <div>
-          {(label || focus) && <p className="mb-1 text-sm font-medium text-slate-400">{focus ? formatDay(focus.day) : label}</p>}
-          <p className="flex items-baseline gap-2">
-            <span className="text-[34px] font-black leading-none tracking-tight tabular-nums">{money(value, hidden)}</span>
-            {pct != null && (line.length >= 2 || reference != null) && (
-              <span className={cn('text-base font-black tabular-nums', toneClass(change))}>
-                {up ? '▲' : '▼'} {hidden ? '*****' : formatPct(Math.abs(pct)).replace(/^[+-]/, '')}
-              </span>
-            )}
+      {(() => {
+        const moved = line.length >= 2 || reference != null;
+        const delta = moved ? (
+          <p className={cn('text-[13px] font-semibold tabular-nums', hidden ? 'text-slate-400' : toneClass(change))}>
+            {hidden ? '*****' : formatSignedEur(change)}
+            {pct != null && !hidden && <span className="ml-1.5">{formatPct(pct)}</span>}
           </p>
-        </div>
-      ) : (
-        <div className="flex items-end justify-between gap-3">
+        ) : null;
+        const since = moved ? (focus ? formatDay(focus.day) : reference != null ? 'Desde la compra' : `Desde ${formatDay(line[0].day)}`) : '';
+        if (quiet) {
+          const here = onMove ? null : delta;
+          if (!label && !here) return null;
+          return (
+            <div>
+              {label ? <p className="text-sm font-medium text-slate-400">{label}</p> : null}
+              {here ? <div className={label ? 'mt-1' : undefined}>{here}</div> : null}
+            </div>
+          );
+        }
+        return (
           <div>
-            {label && <p className="mb-1.5 text-sm font-semibold text-slate-400">{focus ? formatDay(focus.day) : label}</p>}
-            <p className={cn('font-black leading-none tabular-nums', label ? 'text-[34px] tracking-tight' : 'text-[28px]')}>{money(value, hidden)}</p>
-          </div>
-          {(line.length >= 2 || reference != null) && (
-            <p className={cn('text-right text-xs font-black tabular-nums', toneClass(change))}>
-              {hidden ? '*****' : formatSignedEur(change)}
-              {pct != null && (reference != null || showPct) && <span className="ml-1">{hidden ? '' : formatPct(pct)}</span>}
-              <span className="block font-semibold text-slate-400">{focus ? formatDay(focus.day) : reference != null ? 'desde la compra' : `desde ${formatDay(line[0].day)}`}</span>
+            {(label || focus) && <p className="mb-1.5 text-sm font-medium text-slate-400">{focus ? formatDay(focus.day) : label}</p>}
+            <p className="flex items-baseline gap-2">
+              <span className="text-[2rem] font-semibold leading-none tracking-tight tabular-nums text-slate-900 dark:text-white">{money(value, hidden)}</span>
+              {beside ? delta : null}
             </p>
-          )}
-        </div>
-      )}
+            {!beside && delta}
+            {!beside && since && <p className="mt-1 text-[13px] font-medium text-slate-400">{since}</p>}
+          </div>
+        );
+      })()}
       {beforePlot}
       <div
         ref={setBox}
@@ -470,7 +485,7 @@ export function CashChart({ points, now, hidden, base = null, label, showPct = f
             <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className={cn('absolute inset-0 overflow-visible', lined && !accent && 'text-slate-950 dark:text-white')} aria-label="Cómo ha ido el valor">
               <defs>
                 <linearGradient id={fillId} x1="0" x2="0" y1="0" y2="1">
-                  <stop offset="0%" stopColor={color} stopOpacity="0.28" />
+                  <stop offset="0%" stopColor={color} stopOpacity={accent ? 0.28 : 0.12} />
                   <stop offset="100%" stopColor={color} stopOpacity="0" />
                 </linearGradient>
                 <clipPath id={pastId}>
@@ -587,108 +602,32 @@ function useSeries(accountKey: string | null, group: string, holdingId: string |
 }
 
 function GainTag({ value, cost, mode, hidden }: { value: number; cost?: number | null; mode: 'eur' | 'pct'; hidden: boolean }) {
-  if (cost == null || !(cost > 0)) return <span className="shrink-0 text-sm font-black text-slate-300">—</span>;
+  if (cost == null || !(cost > 0)) return <span className="shrink-0 text-[13px] font-semibold text-slate-300">—</span>;
   const gain = value - cost;
-  const up = gain >= 0;
   return (
-    <span className={cn('inline-flex shrink-0 items-center gap-1.5 text-[15px] font-black tabular-nums', toneClass(gain))}>
-      <span className="text-[11px]">{up ? '▲' : '▼'}</span>
-      {hidden ? '*****' : mode === 'eur' ? formatEur(Math.abs(gain)) : formatPct(Math.abs((gain / cost) * 100)).replace(/^[+-]/, '')}
+    <span className={cn('shrink-0 text-[13px] font-semibold tabular-nums', toneClass(gain))}>
+      {hidden ? '*****' : mode === 'eur' ? formatSignedEur(gain) : formatPct((gain / cost) * 100)}
     </span>
   );
 }
 
-function CashDock({ onSearch, onIn, onOut }: { onSearch: () => void; onIn: () => void; onOut: () => void }) {
-  const [open, setOpen] = useState(false);
+function SiteBar({ onSearch, onWrite }: { onSearch: () => void; onWrite: () => void }) {
   const still = stillMotion();
-  const pill = 'flex items-center justify-between gap-2 rounded-2xl px-4 py-3.5 text-[15px] font-bold shadow-[0_10px_30px_rgba(15,23,42,0.14)]';
-  const actions = [
-    { label: 'Ingresar', Icon: Plus, run: onIn },
-    { label: 'Enviar', Icon: Minus, run: onOut },
-  ];
-  return createPortal(
-    <div className="pointer-events-none fixed inset-x-0 z-40 flex justify-center px-4" style={{ bottom: 'calc(max(1rem, env(safe-area-inset-bottom)) + 4.4rem)' }}>
-      <AnimatePresence>
-        {open && (
-          <motion.div
-            key="veil"
-            className="pointer-events-auto fixed inset-0 bg-white/50 backdrop-blur-[3px] dark:bg-black/50"
-            onClick={() => setOpen(false)}
-            initial={still ? false : { opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0, transition: quickOut }}
-          />
-        )}
-      </AnimatePresence>
-      <motion.div
-        className="pointer-events-auto relative grid w-full max-w-md grid-cols-2 gap-3"
-        initial={still ? false : { opacity: 0, y: 28, scale: 0.9 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        transition={still ? { duration: 0 } : jelly}
-      >
-        <button type="button" onClick={onSearch} className={cn(pill, 'border border-slate-200/80 bg-white/95 text-slate-900 backdrop-blur dark:border-white/10 dark:bg-slate-900/95 dark:text-white')}>
-          Buscar <Search size={17} />
-        </button>
-        <div className="relative flex justify-end">
-          <AnimatePresence>
-            {open && (
-              <div className="absolute bottom-full right-0 mb-3 w-full space-y-2.5">
-                {actions.map(({ label, Icon, run }, index) => (
-                  <motion.button
-                    key={label}
-                    type="button"
-                    onClick={() => { setOpen(false); run(); }}
-                    initial={still ? false : { opacity: 0, y: 18, scale: 0.86 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={still ? undefined : { opacity: 0, y: 12, scale: 0.92, transition: quickOut }}
-                    transition={{ ...jelly, delay: still ? 0 : (actions.length - 1 - index) * 0.05 }}
-                    style={{ transformOrigin: 'bottom right' }}
-                    className={cn(pill, 'w-full border border-slate-200/80 bg-white text-slate-900 dark:border-white/10 dark:bg-slate-900 dark:text-white')}
-                  >
-                    {label} <Icon size={17} />
-                  </motion.button>
-                ))}
-              </div>
-            )}
-          </AnimatePresence>
-          <motion.button
-            type="button"
-            layout
-            aria-expanded={open}
-            aria-label={open ? 'Cerrar' : 'Transferir'}
-            onClick={() => setOpen(!open)}
-            transition={still ? { duration: 0 } : jelly}
-            className={cn(pill, 'bg-slate-950 text-white dark:bg-white dark:text-slate-950', open ? 'w-[3.25rem] justify-center px-0' : 'w-full')}
-          >
-            {open ? <X size={18} /> : <>Transferir <ChevronRight size={17} /></>}
-          </motion.button>
-        </div>
-      </motion.div>
-    </div>,
-    document.body,
-  );
-}
-
-function PairDock({ onSearch, onMoves }: { onSearch: () => void; onMoves: () => void }) {
-  const still = stillMotion();
-  const pill = 'flex items-center justify-between gap-2 rounded-2xl px-4 py-3.5 text-[15px] font-bold shadow-[0_10px_30px_rgba(15,23,42,0.14)]';
-  return createPortal(
-    <div className="pointer-events-none fixed inset-x-0 z-40 flex justify-center px-4" style={{ bottom: 'calc(max(1rem, env(safe-area-inset-bottom)) + 4.4rem)' }}>
-      <motion.div
-        className="pointer-events-auto grid w-full max-w-md grid-cols-2 gap-3"
-        initial={still ? false : { opacity: 0, y: 28, scale: 0.9 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        transition={still ? { duration: 0 } : jelly}
-      >
-        <button type="button" onClick={onSearch} className={cn(pill, 'border border-slate-200/80 bg-white/95 text-slate-900 backdrop-blur dark:border-white/10 dark:bg-slate-900/95 dark:text-white')}>
-          Buscar <Search size={17} />
-        </button>
-        <button type="button" onClick={onMoves} className={cn(pill, 'bg-slate-950 text-white dark:bg-white dark:text-slate-950')}>
-          Transacciones <ChevronRight size={17} />
-        </button>
-      </motion.div>
-    </div>,
-    document.body,
+  return (
+    <motion.div
+      className="sticky z-20 mt-4 flex gap-2"
+      style={{ bottom: 'calc(max(0.85rem, env(safe-area-inset-bottom)) + 4.6rem)' }}
+      initial={still ? false : { opacity: 0, y: 18 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={still ? { duration: 0 } : jelly}
+    >
+      <button type="button" onClick={onSearch} className="flex flex-1 items-center justify-between rounded-[28px] bg-white px-4 py-3.5 text-[15px] font-semibold text-slate-900 ring-1 ring-slate-200/70 dark:bg-slate-900 dark:text-white dark:ring-white/10">
+        Buscar <Search size={17} />
+      </button>
+      <button type="button" onClick={onWrite} className="flex flex-1 items-center justify-between rounded-[28px] bg-slate-950 px-4 py-3.5 text-[15px] font-semibold text-white dark:bg-white dark:text-slate-950">
+        Apuntar <ChevronRight size={17} />
+      </button>
+    </motion.div>
   );
 }
 
@@ -735,7 +674,7 @@ function ActivityList({ rows, hidden, mode, autoFocus = false }: { rows: Activit
                   <span className="block truncate text-sm font-semibold">{row.label}</span>
                   <span className="block truncate text-[11px] font-medium text-slate-400">{row.note}</span>
                 </span>
-                <span className={cn('shrink-0 text-sm font-black tabular-nums', row.amount > 0 ? 'text-[#16c784]' : row.amount < 0 ? 'text-[#ea3943]' : 'text-slate-400')}>
+                <span className={cn('shrink-0 text-sm font-semibold tabular-nums', row.amount > 0 ? 'text-[#16c784]' : row.amount < 0 ? 'text-[#ea3943]' : 'text-slate-400')}>
                   {hidden ? '*****' : formatSignedEur(row.amount)}
                 </span>
               </>
@@ -843,7 +782,7 @@ function RangeTabs({ value, onChange }: { value: RangeId; onChange: (next: Range
       {RANGES.map((item) => {
         const on = item.id === value;
         return (
-          <button key={item.id} type="button" aria-pressed={on} onClick={() => onChange(item.id)} className={cn('px-1 py-1 text-[15px] transition-colors', on ? 'font-black text-slate-950 dark:text-white' : 'font-semibold text-slate-300 dark:text-slate-600')}>
+          <button key={item.id} type="button" aria-pressed={on} onClick={() => onChange(item.id)} className={cn('px-1 py-1 text-[15px] transition-colors', on ? 'font-semibold text-slate-950 dark:text-white' : 'font-medium text-slate-300 dark:text-slate-600')}>
             {item.label}
           </button>
         );
@@ -854,10 +793,11 @@ function RangeTabs({ value, onChange }: { value: RangeId; onChange: (next: Range
 
 const card = 'rounded-[24px] border border-white/70 bg-white/80 p-4 dark:border-white/10 dark:bg-white/10';
 
-export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, onOpen, onAdd, onSections, onSaved, onKeep, onEditExtra, onFigure, onDay }: { accounts: CarteraAccount[]; hidden: boolean; beat?: number; openId: string | null; paneSlot?: HTMLElement | null; onOpen: (id: string | null) => void; onAdd?: (accountKey: string, section?: string) => void; onSections?: (accountKey: string, sections: string[]) => Promise<void>; onSaved?: () => Promise<void> | void; onKeep?: (name: string, amount: number) => void; onEditExtra?: (id: string) => void; onFigure?: (amount: number | null) => void; onDay?: (day: string | null) => void }) {
+export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, onOpen, onAdd, onSections, onSaved, onKeep, onEditExtra, onFigure, onDay, onMove }: { accounts: CarteraAccount[]; hidden: boolean; beat?: number; openId: string | null; paneSlot?: HTMLElement | null; onOpen: (id: string | null) => void; onAdd?: (accountKey: string, section?: string) => void; onSections?: (accountKey: string, sections: string[]) => Promise<void>; onSaved?: () => Promise<void> | void; onKeep?: (name: string, amount: number) => void; onEditExtra?: (id: string) => void; onFigure?: (amount: number | null) => void; onDay?: (day: string | null) => void; onMove?: (move: { amount: number; pct: number | null } | null) => void }) {
   const [notes, setNotes] = useState<WalletRow[]>([]);
   const [error, setError] = useState('');
   const [entryDraft, setEntryDraft] = useState<EntryDraft | null>(null);
+  const [sheet, setSheet] = useState(false);
   const [entryMore, setEntryMore] = useState(false);
   const [fixedDraft, setFixedDraft] = useState<FixedDraft | null>(null);
   const [ledger, setLedger] = useState<null | 'cash' | 'moves'>(null);
@@ -1266,12 +1206,12 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
               initial={window.matchMedia('(prefers-reduced-motion: reduce)').matches ? false : { opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ ...glide, delay: Math.min(index, 5) * 0.04 }}
-              className="rounded-[24px] border border-white/70 bg-white/70 p-3 text-left shadow-lg shadow-slate-900/5 backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/60"
+              className="rounded-[28px] bg-white p-4 text-left ring-1 ring-slate-200/70 dark:bg-slate-900 dark:ring-white/10"
             >
               <span className="flex items-start justify-between gap-2">
                 <span className="flex min-w-0 items-center gap-2">
                   {account.image ? <img src={account.image} alt="" className="h-[22px] w-[22px] rounded-lg object-cover" /> : <PlatformLogo name={account.logoName} size={22} />}
-                  <span className="min-w-0 truncate text-sm font-black">{account.name}</span>
+                  <span className="min-w-0 truncate text-sm font-semibold">{account.name}</span>
                 </span>
                 {(() => {
                   const frames = [
@@ -1280,7 +1220,7 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
                   ];
                   const frame = frames.length ? frames[beat % frames.length] : { text: '—', tone: 'text-slate-300' };
                   const text = hidden && frames.length ? '*****' : frame.text;
-                  if (stillMotion()) return <span className={cn('shrink-0 text-sm font-black tabular-nums', frame.tone)}>{text}</span>;
+                  if (stillMotion()) return <span className={cn('shrink-0 text-[13px] font-semibold tabular-nums', frame.tone)}>{text}</span>;
                   return (
                     <AnimatePresence mode="wait" initial={false}>
                       <motion.span
@@ -1289,7 +1229,7 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
                         animate={{ opacity: 1, y: 0, scale: 1 }}
                         exit={{ opacity: 0, y: -6, scale: 0.9, transition: quickOut }}
                         transition={jelly}
-                        className={cn('inline-block shrink-0 text-sm font-black tabular-nums', frame.tone)}
+                        className={cn('inline-block shrink-0 text-[13px] font-semibold tabular-nums', frame.tone)}
                       >
                         {text}
                       </motion.span>
@@ -1297,7 +1237,7 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
                   );
                 })()}
               </span>
-              <span className="mt-2 block whitespace-nowrap text-[clamp(1.35rem,6.2vw,1.85rem)] font-black leading-none tabular-nums sm:text-[26px]">{account.value == null ? '—' : money(account.value, hidden)}</span>
+              <span className="mt-3 block whitespace-nowrap text-[1.65rem] font-semibold leading-none tabular-nums tracking-tight">{account.value == null ? '—' : money(account.value, hidden)}</span>
               <span className="mt-2 block text-[11px] font-semibold text-slate-400">
                 {(account.sides || []).map((side) => side.title).join(' · ') || 'Sin desglose'}
               </span>
@@ -1318,7 +1258,7 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
           <button type="button" onClick={() => setLedger(null)} className="inline-flex items-center gap-1 text-sm font-bold text-slate-500">
             <ChevronLeft size={16} /> Volver
           </button>
-          <h2 className="mt-3 text-xl font-black">Transacciones</h2>
+          <h2 className="mt-3 text-xl font-semibold tracking-tight">Transacciones</h2>
           <div className="mt-3">
             <ActivityList mode="all" hidden={hidden} rows={ledgerRows} autoFocus={searching} />
           </div>
@@ -1354,6 +1294,7 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
                 quiet
                 onValue={setLive}
                 onDay={onDay}
+                onMove={onMove}
                 hidden={hidden}
                 now={cashSide.total}
                 points={cashPath(current.cash, statement.map((row) => ({ day: row.day, amount: row.amount, absorbed: row.absorbed, open: row.open })), todayKey())}
@@ -1363,7 +1304,7 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
           {showCash && cashSide && (
             <section className="px-1 pt-4">
               <button type="button" onClick={() => setLedger('cash')} className="inline-flex items-center gap-1 text-left">
-                <h3 className="text-xl font-black">Transacciones</h3>
+                <h3 className="text-xl font-semibold tracking-tight">Transacciones</h3>
                 <ChevronRight size={18} className="shrink-0 text-slate-400" />
               </button>
               <div className="mt-2">
@@ -1373,8 +1314,7 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
           )}
           {showCash && cashSide && current.planId && (
             <section className="px-1 pt-4">
-              <h3 className="text-xl font-black">Fijos</h3>
-              <p className="mt-1 text-[13px] font-medium text-slate-400">Cuando toca, te llega un aviso al móvil y se pregunta hasta que lo confirmes.</p>
+              <h3 className="text-xl font-semibold tracking-tight">Fijos</h3>
               <ul className="mt-2">
                 {current.fixed.map((rule) => (
                   <li key={rule.key || `${rule.label}:${rule.rhythm}`} className="flex items-center gap-3 border-t border-slate-200/70 py-2.5 first:border-t-0 dark:border-white/10">
@@ -1383,7 +1323,7 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
                       <span className="block truncate text-[15px] font-bold">{rule.label}</span>
                       <span className="block text-xs font-semibold text-slate-400">{rule.rhythm}</span>
                     </span>
-                    <span className={cn('shrink-0 text-[15px] font-black tabular-nums', rule.amount >= 0 ? 'text-[#16c784]' : 'text-[#ea3943]')}>{hidden ? '*****' : formatSignedEur(rule.amount)}</span>
+                    <span className={cn('shrink-0 text-[15px] font-semibold tabular-nums', rule.amount >= 0 ? 'text-[#16c784]' : 'text-[#ea3943]')}>{hidden ? '*****' : formatSignedEur(rule.amount)}</span>
                     {rule.key && (
                       <button type="button" onClick={() => void removeFixed(rule.key || '')} className="shrink-0 text-[12px] font-semibold text-rose-600">Quitar</button>
                     )}
@@ -1399,10 +1339,10 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
               </button>
             </section>
           )}
-          {showCash && cashSide && <div aria-hidden className="h-16" />}
-          {showCash && cashSide && !entryDraft && !detail && !fixedDraft && (
-            <CashDock onSearch={() => { setSearching(true); setLedger('cash'); }} onIn={() => openEntry('in')} onOut={() => openEntry('out')} />
+          {showCash && cashSide && !entryDraft && !detail && !fixedDraft && !sheet && (
+            <SiteBar onSearch={() => { setSearching(true); setLedger('cash'); }} onWrite={() => setSheet(true)} />
           )}
+          {showCash && cashSide && <div aria-hidden className="h-24" />}
           {showPortfolio && inventory && (
             <section className="px-1">
               {skinItems.length > 0 && (
@@ -1508,6 +1448,7 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
                             tone={accentFor(asset.label)}
                             onValue={setLive}
                             onDay={onDay}
+                            onMove={onMove}
                             hidden={hidden}
                             now={asset.eur}
                             base={range === 'MAX' ? (asset.costEur ?? null) : null}
@@ -1523,6 +1464,7 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
                             tone="ink"
                             onValue={setLive}
                             onDay={onDay}
+                            onMove={onMove}
                             hidden={hidden}
                             now={page.total}
                             base={range === 'MAX' ? page.invested : null}
@@ -1535,7 +1477,7 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
                     </section>
                     {!asset && <section className="px-1 pt-4">
                       <div className="flex items-center justify-between gap-3">
-                        <h3 className="text-xl font-black">{current.extras ? 'Tus cosas' : 'Inversiones'}</h3>
+                        <h3 className="text-xl font-semibold tracking-tight">{current.extras ? 'Tus cosas' : 'Inversiones'}</h3>
                         {!page.empty && (
                           <button type="button" onClick={() => setGainMode(gainMode === 'eur' ? 'pct' : 'eur')} className="inline-flex items-center gap-1 text-[15px] font-semibold text-slate-400">
                             {gainMode === 'eur' ? 'Desde la compra' : 'En porcentaje'}
@@ -1607,6 +1549,7 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
                       tone="ink"
                       onValue={setLive}
                       onDay={onDay}
+                      onMove={onMove}
                       hidden={hidden}
                       now={portfolioTotal}
                       base={range === 'MAX' && portfolioInvested > 0 ? portfolioInvested : null}
@@ -1617,7 +1560,7 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
                     {listed.length > 0 && (
                       <div className="pt-6">
                         <div className="flex items-center justify-between gap-3">
-                          <h3 className="text-xl font-black">{products?.auto ? 'Inventario' : 'Inversiones'}</h3>
+                          <h3 className="text-xl font-semibold tracking-tight">{products?.auto ? 'Inventario' : 'Inversiones'}</h3>
                           <button type="button" onClick={() => setGainMode(gainMode === 'eur' ? 'pct' : 'eur')} className="inline-flex items-center gap-1 text-[15px] font-semibold text-slate-400">
                             {gainMode === 'eur' ? 'Desde la compra' : 'En porcentaje'}
                             <ChevronDown size={16} />
@@ -1653,15 +1596,32 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
               </motion.div>
             </AnimatePresence>
           )}
-          {showPortfolio && <div aria-hidden className="h-16" />}
-          {showPortfolio && !entryDraft && !detail && !fixedDraft && (
-            <PairDock onSearch={() => { setSearching(true); setLedger('moves'); }} onMoves={() => { setSearching(false); setLedger('moves'); }} />
+          {showPortfolio && !entryDraft && !detail && !fixedDraft && !sheet && (
+            <SiteBar onSearch={() => { setSearching(true); setLedger('moves'); }} onWrite={() => setSheet(true)} />
           )}
+          {showPortfolio && <div aria-hidden className="h-24" />}
             </motion.div>
           </AnimatePresence>
         </motion.div>
       )}
       </AnimatePresence>
+      {sheet && current && !current.extras && (
+        <EntrySheet
+          accounts={[{
+            id: current.key,
+            name: current.name,
+            kind: current.kind || (current.sides.some((side) => side.group !== 'cash') ? 'other' : 'bank'),
+            tracking: current.tracking || (current.sides.some((side) => side.group !== 'cash') ? 'positions' : 'balance'),
+            currency: current.currency || 'EUR',
+            balance: current.balance ?? current.cash,
+          }]}
+          pieces={current.sides.flatMap((side) => side.items.flatMap((item) => item.id ? [{ id: item.id, accountId: current.key, name: item.label }] : []))}
+          accountId={current.key}
+          verb="in"
+          onClose={() => setSheet(false)}
+          onSaved={async () => { await onSaved?.(); }}
+        />
+      )}
       {fixedDraft && current && (
         <Modal title="Fijo" onClose={() => setFixedDraft(null)}>
           <div className="grid gap-3">
@@ -1695,7 +1655,7 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
             <SpentMark label={detail.label} image={detail.image} />
             <div className="min-w-0">
               <p className="text-sm font-medium text-slate-500">{detail.note}</p>
-              <p className={cn('mt-1 text-2xl font-black tabular-nums', detail.amount > 0 ? 'text-[#16c784]' : detail.amount < 0 ? 'text-[#ea3943]' : 'text-slate-400')}>
+              <p className={cn('mt-1 text-2xl font-semibold tabular-nums tracking-tight', detail.amount > 0 ? 'text-[#16c784]' : detail.amount < 0 ? 'text-[#ea3943]' : 'text-slate-400')}>
                 {hidden ? '*****' : formatSignedEur(detail.amount)}
               </p>
             </div>

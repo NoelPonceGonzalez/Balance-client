@@ -15,8 +15,83 @@
     <meta name="theme-color" content="#f2f2f7" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)" />
     <meta name="color-scheme" content="light dark" />
+    <style>
+      html, body { margin: 0; background: #f2f2f7; }
+      #boot {
+        position: fixed;
+        inset: 0;
+        z-index: 100;
+        display: grid;
+        place-items: center;
+        background: #f2f2f7;
+        color: #1c1c1e;
+        font-family: ui-sans-serif, system-ui, sans-serif;
+      }
+      #boot.is-done { opacity: 0; transition: opacity 420ms ease; pointer-events: none; }
+      .boot-card { text-align: center; animation: boot-in 720ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+      .boot-mark {
+        display: grid;
+        place-items: center;
+        width: 44px;
+        height: 44px;
+        margin: 0 auto;
+        border-radius: 14px;
+        background: #111;
+        color: #fff;
+      }
+      .boot-name {
+        margin: 14px 0 0;
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+      }
+      .boot-line {
+        display: block;
+        width: 28px;
+        height: 1px;
+        margin: 16px auto 0;
+        background: currentColor;
+        opacity: 0.28;
+        transform-origin: center;
+        animation: boot-line 1.15s ease-in-out infinite;
+      }
+      @keyframes boot-in {
+        from { opacity: 0; transform: translateY(8px); }
+        to { opacity: 1; transform: none; }
+      }
+      @keyframes boot-line {
+        0%, 100% { transform: scaleX(0.35); opacity: 0.16; }
+        50% { transform: scaleX(1); opacity: 0.4; }
+      }
+      @media (prefers-color-scheme: dark) {
+        html, body, #boot { background: #000; color: #f5f5f7; }
+        .boot-mark { background: #f5f5f7; color: #111; }
+      }
+      html.dark, html.dark body, html.dark #boot { background: #000; color: #f5f5f7; }
+      html.dark .boot-mark { background: #f5f5f7; color: #111; }
+      @media (prefers-reduced-motion: reduce) {
+        .boot-card, .boot-line { animation: none; }
+      }
+    </style>
   </head>
   <body>
+    <div id="boot" role="status" aria-live="polite">
+      <div class="boot-card">
+        <span class="sr-only" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">Cargando</span>
+        <div class="boot-mark">
+          <svg width="22" height="22" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+            <g stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M16 6.5v18.5M12 25h8M5.5 9.5h21"/>
+              <path d="M8 9.5 5.4 16c.75.75 1.8 1.15 2.6 1.15S10 16.75 10.6 16L8 9.5z"/>
+              <path d="M24 9.5 21.4 16c.75.75 1.8 1.15 2.6 1.15s1.85-.4 2.6-1.15L24 9.5z"/>
+            </g>
+          </svg>
+        </div>
+        <p class="boot-name">Balance</p>
+        <span class="boot-line"></span>
+      </div>
+    </div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

@@ -30,6 +30,7 @@ interface ExpenseDraft {
   paidBy: string;
   all: boolean;
   among: string[];
+  counts: boolean;
 }
 
 function phaseOf(plan: PlanRow): 'active' | 'settling' | 'done' {
@@ -59,13 +60,13 @@ function statusClass(status: PayStatus): string {
   return 'text-slate-400';
 }
 
-const cardClass = 'rounded-2xl border border-white/70 bg-white/80 p-4 shadow-lg shadow-slate-900/5 dark:border-white/10 dark:bg-slate-900/60';
+const cardClass = 'rounded-[28px] bg-white p-4 ring-1 ring-slate-200/70 dark:bg-slate-900 dark:ring-white/10';
 const quiet = 'border border-slate-200/90 bg-white text-slate-800 shadow-[0_8px_24px_rgba(15,23,42,0.06)] dark:border-white/10 dark:bg-slate-900 dark:text-white';
 const chipOn = 'border-slate-200 bg-slate-100 text-slate-800 dark:border-white/15 dark:bg-white/10 dark:text-white';
 
 function Mark({ name, color, light = false }: { name: string; color: string; light?: boolean }) {
   return (
-    <span className={cn('grid shrink-0 place-items-center rounded-full font-black text-white', light ? 'h-7 w-7 text-[11px]' : 'h-10 w-10 text-sm')} style={{ background: color }}>
+    <span className={cn('grid shrink-0 place-items-center rounded-full font-semibold text-white', light ? 'h-7 w-7 text-[11px]' : 'h-10 w-10 text-sm')} style={{ background: color }}>
       {(name.trim().slice(0, 1) || '?').toUpperCase()}
     </span>
   );
@@ -89,7 +90,7 @@ function StandLine({ people, open, onToggle }: { people: TripSplit['people']; op
       {spots.map(({ person, x }) => (
         <span
           key={person.id}
-          className="absolute top-1/2 grid h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full text-[8px] font-black text-white ring-2 ring-[var(--app-bg)]"
+          className="absolute top-1/2 grid h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full text-[8px] font-semibold text-white ring-2 ring-[var(--app-bg)]"
           style={{ left: `${x}%`, background: person.color }}
         >
           {(person.name.trim().slice(0, 1) || '?').toUpperCase()}
@@ -115,7 +116,7 @@ export function TripFace({ plan, split, onMenu, userId = '' }: { plan: PlanRow; 
   return (
     <>
       <span className="flex items-start justify-between gap-2">
-        <span className="min-w-0 truncate text-sm font-black">{plan.name}</span>
+        <span className="min-w-0 truncate text-sm font-semibold">{plan.name}</span>
         <button
           type="button"
           data-menu
@@ -131,7 +132,10 @@ export function TripFace({ plan, split, onMenu, userId = '' }: { plan: PlanRow; 
         </button>
       </span>
       <span className="mt-2 block text-[11px] font-semibold text-slate-400">Reparto</span>
-      <span className="mt-1 block whitespace-nowrap text-[clamp(1.35rem,6.2vw,1.85rem)] font-black leading-none tabular-nums sm:text-[28px]">{formatEur(split?.totalSpent || 0)}</span>
+      <span className="mt-1 block whitespace-nowrap text-[clamp(1.35rem,6.2vw,1.85rem)] font-semibold leading-none tabular-nums sm:text-[28px]">{formatEur(split?.totalSpent || 0)}</span>
+      {split?.budget && split.budget.budget > 0 && (
+        <span className={cn('mt-1 block text-[11px] font-semibold', split.budget.left < -0.004 ? 'text-[#ea3943]' : 'text-slate-500')}>Quedan {formatEur(split.budget.left)}</span>
+      )}
       <span className="relative mt-3 block h-1.5">
         <span className="block h-1.5 rounded-full bg-slate-200/80 dark:bg-white/10" />
         {spotsOf(people).map(({ person, x }) => (
@@ -173,6 +177,8 @@ export function TripPlan({
   const [draft, setDraft] = useState<ExpenseDraft | null>(null);
   const [pot, setPot] = useState('');
   const [potOn, setPotOn] = useState(false);
+  const [carry, setCarry] = useState('');
+  const [carryOn, setCarryOn] = useState(false);
   const [peopleOpen, setPeopleOpen] = useState(false);
   const [banks, setBanks] = useState<{ id: string; name: string }[]>([]);
   const [ticketBank, setTicketBank] = useState<Record<string, string>>({});
@@ -292,6 +298,7 @@ export function TripPlan({
       amount: value,
       paidBy: draft.paidBy,
       category: '',
+      counts: draft.counts,
       splitAmong: draft.all ? [] : draft.among,
     });
     if (draft.id) await api(`/api/plans/${docId(plan)}/gasto/${draft.id}`, { method: 'PATCH', body });
@@ -314,6 +321,14 @@ export function TripPlan({
     await onChanged();
   });
 
+  const saveCarry = (id: string) => run(async () => {
+    const value = Number(carry || 0);
+    if (!Number.isFinite(value) || value < 0) throw new Error('Lo que llevas no puede ser negativo.');
+    await api(`/api/plans/${docId(plan)}/pot`, { method: 'PATCH', body: JSON.stringify({ userId: id, pocket: value }) });
+    setCarryOn(false);
+    await onChanged();
+  });
+
   const actPay = (path: 'pagado' | 'recibido' | 'no-recibido') => run(async () => {
     if (!selectedPay) return;
     await api(`/api/plans/${docId(plan)}/liquidacion/${selectedPay.id}/${path}`, { method: 'POST', body: '{}' });
@@ -330,7 +345,27 @@ export function TripPlan({
       paidBy: expense ? String(expense.paidBy) : userId,
       all: among.length === 0,
       among: among.length > 0 ? among : people.map((person) => person.id),
+      counts: expense ? expense.counts !== false : true,
     });
+  };
+
+  const budget = split?.budget;
+  const budgetRows = people.map((person) => {
+    const row = budget?.people.find((item) => item.id === person.id);
+    const pocket = row?.pocket ?? (plan.members || []).find((member) => String(member.userId) === person.id)?.pocket ?? 0;
+    return { person, pocket, left: row?.left ?? pocket };
+  });
+  const budgetTotal = budget?.budget ?? budgetRows.reduce((sum, row) => sum + row.pocket, 0);
+  const budgetLeft = budget?.left ?? budgetTotal;
+
+  const openPerson = (id: string, field: 'pot' | 'carry') => {
+    const person = people.find((item) => item.id === id);
+    const row = budgetRows.find((item) => item.person.id === id);
+    setPersonId(id);
+    setPot(String(person?.contributed || ''));
+    setCarry(row && row.pocket ? String(row.pocket) : '');
+    setPotOn(field === 'pot');
+    setCarryOn(field === 'carry');
   };
 
   const amongText = (expense: TripExpense) => {
@@ -351,7 +386,7 @@ export function TripPlan({
               <ChevronLeft size={16} />
             </button>
             <span className="truncate">{plan.name}</span>
-            <span className="shrink-0 text-base font-black text-slate-900 dark:text-white">{formatEur(split?.totalSpent || 0)}</span>
+            <span className="shrink-0 text-base font-semibold text-slate-900 dark:text-white">{formatEur(split?.totalSpent || 0)}</span>
           </span>
           <span className="flex shrink-0 items-center gap-3">
             {phase === 'active' && (
@@ -380,6 +415,38 @@ export function TripPlan({
           <span>Recibe</span>
         </p>
       </div>
+
+      <section>
+        <div className="mb-2 flex items-baseline justify-between px-1">
+          <h3 className="text-sm font-semibold">Presupuesto</h3>
+          <span className={cn('text-sm font-semibold tabular-nums', budgetTotal > 0 && budgetLeft < -0.004 ? 'text-[#ea3943]' : 'text-slate-900 dark:text-white')}>
+            {budgetTotal > 0 ? `Quedan ${formatEur(budgetLeft)}` : 'Sin poner'}
+          </span>
+        </div>
+        <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white/70 dark:border-white/10 dark:bg-black/20">
+          {budgetTotal > 0 && (
+            <div className="px-3 pt-3">
+              <div className="h-1.5 overflow-hidden rounded-full bg-slate-200/80 dark:bg-white/10">
+                <div className="h-full rounded-full bg-slate-950 transition-[width] duration-700 ease-out dark:bg-white" style={{ width: `${Math.max(0, Math.min(1, budgetLeft / budgetTotal)) * 100}%` }} />
+              </div>
+              <p className="mt-1 text-[11px] font-medium text-slate-400">{formatEur(budgetLeft)} de {formatEur(budgetTotal)}</p>
+            </div>
+          )}
+          {budgetTotal === 0 && <p className="px-3 pt-3 text-[12px] font-medium text-slate-400">Cuando estéis allí, cada uno dice con cuánto está.</p>}
+          {budgetRows.map((row) => (
+            <button key={row.person.id} type="button" onClick={() => openPerson(row.person.id, 'carry')} className="flex w-full items-center gap-3 border-t border-slate-200/70 px-3 py-2.5 text-left dark:border-white/10">
+              <Mark name={row.person.name} color={row.person.color} light />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-semibold">{row.person.id === userId ? `${row.person.name} · tú` : row.person.name}</span>
+                <span className="mt-0.5 block text-[11px] font-medium text-slate-400">{row.pocket > 0 ? `Está con ${formatEur(row.pocket)}` : 'Todavía sin decirlo'}</span>
+              </span>
+              <span className={cn('shrink-0 text-[13px] font-semibold tabular-nums', row.pocket > 0 && row.left < -0.004 ? 'text-[#ea3943]' : 'text-slate-700 dark:text-slate-200')}>
+                {row.pocket > 0 ? formatEur(row.left) : 'Poner'}
+              </span>
+            </button>
+          ))}
+        </div>
+      </section>
       {notice && <p className="text-xs font-semibold text-slate-500">{notice}</p>}
       {error && <p className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">{error}</p>}
 
@@ -388,8 +455,8 @@ export function TripPlan({
         return (
           <section key={id} className={cardClass}>
             {expense.receipt && <img src={expense.receipt} alt="Tique" className="mb-3 h-28 w-full rounded-2xl object-cover" />}
-            <p className="text-sm font-black">{expense.name}</p>
-            <p className="mt-1 text-2xl font-black tabular-nums">{formatEur(expense.amount)}</p>
+            <p className="text-sm font-semibold">{expense.name}</p>
+            <p className="mt-1 text-2xl font-semibold tabular-nums">{formatEur(expense.amount)}</p>
             <p className="mt-1 text-[13px] font-medium text-slate-500">Confirma que es tuyo. Se resta el 100% del banco que elijas.</p>
             <div className="mt-3 flex flex-wrap gap-2">
               {banks.map((bank) => (
@@ -420,13 +487,16 @@ export function TripPlan({
             const positive = person.net > 0.004;
             const negative = person.net < -0.004;
             return (
-              <button key={person.id} type="button" onClick={() => { setPersonId(person.id); setPotOn(false); setPot(String(person.contributed || '')); }} className={cn('flex w-full items-center gap-3 px-3 py-2.5 text-left', index > 0 && 'border-t border-slate-200/70 dark:border-white/10')}>
+              <button key={person.id} type="button" onClick={() => openPerson(person.id, 'pot')} className={cn('flex w-full items-center gap-3 px-3 py-2.5 text-left', index > 0 && 'border-t border-slate-200/70 dark:border-white/10')}>
                 <Mark name={person.name} color={person.color} light />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-semibold">{person.id === userId ? `${person.name} · tú` : person.name}</span>
-                  <span className="mt-0.5 block text-[11px] font-medium text-slate-400">Ha aportado {formatEur(person.contributed)}</span>
+                  <span className="mt-0.5 block text-[11px] font-medium text-slate-400">
+                    Ha aportado {formatEur(person.contributed)}
+                    {(budgetRows.find((row) => row.person.id === person.id)?.pocket || 0) > 0 ? ` · Quedan ${formatEur(budgetRows.find((row) => row.person.id === person.id)?.left || 0)}` : ''}
+                  </span>
                 </span>
-                <span className={cn('shrink-0 text-right text-[13px] font-black', positive ? 'text-[#16c784]' : negative ? 'text-[#ea3943]' : 'text-slate-400')}>
+                <span className={cn('shrink-0 text-right text-[13px] font-semibold', positive ? 'text-[#16c784]' : negative ? 'text-[#ea3943]' : 'text-slate-400')}>
                   {positive ? `Recibe ${formatEur(person.net)}` : negative ? `Paga ${formatEur(-person.net)}` : 'En paz'}
                 </span>
               </button>
@@ -436,7 +506,7 @@ export function TripPlan({
       )}
 
       <section>
-        <h3 className="mb-2 px-1 text-sm font-black">Gastos</h3>
+        <h3 className="mb-2 px-1 text-sm font-semibold">Gastos</h3>
         <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white/70 dark:border-white/10 dark:bg-black/20">
           {expenses.length === 0 && <p className="px-3 py-3 text-xs font-medium text-slate-400">Todavía no hay gastos.</p>}
           {expenses.map((expense, index) => {
@@ -450,10 +520,10 @@ export function TripPlan({
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-semibold">{expense.name}</span>
                   <span className="mt-0.5 block truncate text-[11px] font-medium text-slate-400">
-                    {payerName ? (gone ? `${payerName} · se ha salido` : payerName) : 'Sin quien lo pague'} · {amongText(expense)}{expense.charge === 'pending' ? ' · Por aceptar' : ''}
+                    {payerName ? (gone ? `${payerName} · se ha salido` : payerName) : 'Sin quien lo pague'} · {amongText(expense)}{expense.counts === false ? ' · Fuera' : ''}{expense.charge === 'pending' ? ' · Por aceptar' : ''}
                   </span>
                 </span>
-                <span className="shrink-0 text-sm font-black tabular-nums">{formatEur(expense.amount)}</span>
+                <span className="shrink-0 text-sm font-semibold tabular-nums">{formatEur(expense.amount)}</span>
               </button>
             );
           })}
@@ -474,6 +544,14 @@ export function TripPlan({
           <form className="grid gap-4" onSubmit={(event) => { event.preventDefault(); void saveExpense(); }}>
             <Input label="Concepto" value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="Cena, tren, hotel…" />
             <Input label="Importe" type="number" min="0" step="any" value={draft.amount} onChange={(event) => setDraft({ ...draft, amount: event.target.value })} />
+            <div>
+              <p className="text-[13px] font-medium text-slate-600 dark:text-slate-300">Presupuesto</p>
+              <div className="mt-2 flex gap-2">
+                <button type="button" onClick={() => setDraft({ ...draft, counts: true })} className={cn('rounded-full border px-3 py-2 text-[13px] font-bold', draft.counts ? chipOn : 'border-slate-200 text-slate-600')}>Cuenta</button>
+                <button type="button" onClick={() => setDraft({ ...draft, counts: false })} className={cn('rounded-full border px-3 py-2 text-[13px] font-bold', !draft.counts ? chipOn : 'border-slate-200 text-slate-600')}>Fuera</button>
+              </div>
+              <p className="mt-2 text-[12px] font-medium text-slate-500">{draft.counts ? 'Baja lo que lleváis allí.' : 'El hotel o el avión. No baja lo que lleváis.'}</p>
+            </div>
             <div>
               <p className="text-[13px] font-medium text-slate-600 dark:text-slate-300">Quién lo ha pagado</p>
               <div className="mt-2 flex flex-wrap gap-2">
@@ -519,26 +597,36 @@ export function TripPlan({
             <Mark name={selectedPerson.name} color={selectedPerson.color} />
             <div>
               <p className="text-sm font-medium text-slate-500">Ha aportado {formatEur(selectedPerson.contributed)}</p>
-              <p className={cn('text-lg font-black', selectedPerson.net > 0.004 ? 'text-[#16c784]' : selectedPerson.net < -0.004 ? 'text-[#ea3943]' : 'text-slate-500')}>
+              <p className={cn('text-lg font-semibold', selectedPerson.net > 0.004 ? 'text-[#16c784]' : selectedPerson.net < -0.004 ? 'text-[#ea3943]' : 'text-slate-500')}>
                 {selectedPerson.net > 0.004 ? `Debe recibir ${formatEur(selectedPerson.net)}` : selectedPerson.net < -0.004 ? `Debe pagar ${formatEur(-selectedPerson.net)}` : 'En paz'}
               </p>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-2 text-sm">
-            <p className="rounded-2xl bg-slate-50 px-3 py-2 dark:bg-white/5"><span className="block text-[11px] font-semibold text-slate-400">Ha pagado</span><span className="font-black">{formatEur(selectedPerson.spent)}</span></p>
-            <p className="rounded-2xl bg-slate-50 px-3 py-2 dark:bg-white/5"><span className="block text-[11px] font-semibold text-slate-400">Le toca</span><span className="font-black">{formatEur(selectedPerson.share)}</span></p>
+            <p className="rounded-2xl bg-slate-50 px-3 py-2 dark:bg-white/5"><span className="block text-[11px] font-semibold text-slate-400">Ha pagado</span><span className="font-semibold">{formatEur(selectedPerson.spent)}</span></p>
+            <p className="rounded-2xl bg-slate-50 px-3 py-2 dark:bg-white/5"><span className="block text-[11px] font-semibold text-slate-400">Le toca</span><span className="font-semibold">{formatEur(selectedPerson.share)}</span></p>
           </div>
           {phase === 'active' && (selectedPerson.id === userId || owner) && (
-            potOn ? (
-              <form className="mt-3 flex gap-2" onSubmit={(event) => { event.preventDefault(); void savePot(selectedPerson.id); }}>
-                <input value={pot} onChange={(event) => setPot(event.target.value)} inputMode="decimal" aria-label="Lo aportado" className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold dark:border-white/10 dark:bg-slate-900" />
-                <button type="submit" className={cn(quiet, 'rounded-xl px-3 text-sm font-bold')}>Ok</button>
-              </form>
-            ) : (
-              <button type="button" onClick={() => setPotOn(true)} className="mt-3 text-[13px] font-bold text-slate-500">Cambiar lo aportado</button>
-            )
+            <div className="mt-3 grid gap-2">
+              {carryOn ? (
+                <form className="flex gap-2" onSubmit={(event) => { event.preventDefault(); void saveCarry(selectedPerson.id); }}>
+                  <input value={carry} onChange={(event) => setCarry(event.target.value)} inputMode="decimal" aria-label="Estoy con" placeholder="Estoy con" className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold dark:border-white/10 dark:bg-slate-900" />
+                  <button type="submit" className={cn(quiet, 'rounded-xl px-3 text-sm font-bold')}>Ok</button>
+                </form>
+              ) : (
+                <button type="button" onClick={() => { setCarryOn(true); setPotOn(false); }} className="text-left text-[13px] font-bold text-slate-500">Estoy con {formatEur(budgetRows.find((row) => row.person.id === selectedPerson.id)?.pocket || 0)}</button>
+              )}
+              {potOn ? (
+                <form className="flex gap-2" onSubmit={(event) => { event.preventDefault(); void savePot(selectedPerson.id); }}>
+                  <input value={pot} onChange={(event) => setPot(event.target.value)} inputMode="decimal" aria-label="Lo aportado" className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold dark:border-white/10 dark:bg-slate-900" />
+                  <button type="submit" className={cn(quiet, 'rounded-xl px-3 text-sm font-bold')}>Ok</button>
+                </form>
+              ) : (
+                <button type="button" onClick={() => { setPotOn(true); setCarryOn(false); }} className="text-left text-[13px] font-bold text-slate-500">Cambiar lo aportado</button>
+              )}
+            </div>
           )}
-          <h3 className="mb-2 mt-5 text-sm font-black">Gastos que ha pagado</h3>
+          <h3 className="mb-2 mt-5 text-sm font-semibold">Gastos que ha pagado</h3>
           {expenses.filter((expense) => String(expense.paidBy) === selectedPerson.id).length === 0 && <p className="text-xs font-medium text-slate-400">No ha pagado ninguno.</p>}
           {expenses.filter((expense) => String(expense.paidBy) === selectedPerson.id).map((expense) => (
             <p key={String(expense._id)} className="flex items-center justify-between gap-3 py-1.5 text-sm font-semibold">
@@ -546,7 +634,7 @@ export function TripPlan({
               <span className="shrink-0 tabular-nums">{formatEur(expense.amount)}</span>
             </p>
           ))}
-          <h3 className="mb-2 mt-5 text-sm font-black">A quién</h3>
+          <h3 className="mb-2 mt-5 text-sm font-semibold">A quién</h3>
           {pays.filter((row) => row.fromId === selectedPerson.id || row.toId === selectedPerson.id).length === 0 && <p className="text-xs font-medium text-slate-400">No tiene pagos con el resto.</p>}
           {pays.filter((row) => row.fromId === selectedPerson.id || row.toId === selectedPerson.id).map((row) => {
             const done = row.status === 'confirmed';
@@ -567,15 +655,15 @@ export function TripPlan({
         <Modal title="Liquidación" onClose={() => { setPayId(null); setAsk(null); }}>
           {ask === 'pay' ? (
             <div className="grid gap-3">
-              <p className="text-lg font-black">¿Has realizado este pago?</p>
-              <p className="text-3xl font-black tabular-nums">{formatEur(selectedPay.amount)}</p>
+              <p className="text-lg font-semibold">¿Has realizado este pago?</p>
+              <p className="text-3xl font-semibold tabular-nums">{formatEur(selectedPay.amount)}</p>
               <p className="text-sm font-medium text-slate-500">Debes pagar a {selectedPay.to}.</p>
               <button type="button" disabled={busy} onClick={() => void actPay('pagado')} className="rounded-2xl border border-slate-200/90 bg-white py-3.5 text-[15px] font-bold text-slate-800 shadow-[0_8px_24px_rgba(15,23,42,0.06)] dark:border-white/10 dark:bg-slate-900 dark:text-white">He realizado el pago</button>
               <button type="button" onClick={() => setAsk(null)} className="rounded-2xl border border-slate-200 py-3.5 text-[15px] font-bold text-slate-600">Todavía no he pagado</button>
             </div>
           ) : ask === 'got' || ask === 'miss' ? (
             <div className="grid gap-3">
-              <p className="text-lg font-black">{selectedPay.from} indica que te ha pagado {formatEur(selectedPay.amount)}.</p>
+              <p className="text-lg font-semibold">{selectedPay.from} indica que te ha pagado {formatEur(selectedPay.amount)}.</p>
               <p className="text-sm font-medium text-slate-500">¿Has recibido el dinero?</p>
               <button type="button" disabled={busy} onClick={() => void actPay('recibido')} className="rounded-2xl border border-slate-200/90 bg-white py-3.5 text-[15px] font-bold text-slate-800 shadow-[0_8px_24px_rgba(15,23,42,0.06)] dark:border-white/10 dark:bg-slate-900 dark:text-white">Sí, he recibido el dinero</button>
               <button type="button" disabled={busy} onClick={() => void actPay('no-recibido')} className="rounded-2xl border border-slate-200 py-3.5 text-[15px] font-bold text-[#ea3943]">No he recibido el dinero</button>
@@ -589,13 +677,13 @@ export function TripPlan({
                 <Mark name={selectedPay.to} color={colorOf(selectedPay.toId)} light />
                 <span>{selectedPay.to}</span>
               </div>
-              <p className="text-3xl font-black tabular-nums">{formatEur(selectedPay.amount)}</p>
+              <p className="text-3xl font-semibold tabular-nums">{formatEur(selectedPay.amount)}</p>
               <p className="text-sm font-medium text-slate-500">{selectedPay.from} es quien paga. {selectedPay.to} es quien recibe.</p>
-              <p className={cn('text-sm font-black', statusClass(selectedPay.status))}>{statusLabel(selectedPay.status)}</p>
+              <p className={cn('text-sm font-semibold', statusClass(selectedPay.status))}>{statusLabel(selectedPay.status)}</p>
               {selectedPay.openedAt && <p className="text-[12px] font-medium text-slate-400">Creada {when(selectedPay.openedAt)}</p>}
               {(selectedPay.events || []).length > 0 && (
                 <div className="space-y-2 border-t border-slate-100 pt-3 dark:border-white/10">
-                  <p className="text-[11px] font-black uppercase tracking-wide text-slate-400">Historial</p>
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Historial</p>
                   {(selectedPay.events || []).map((event, index) => (
                     <p key={`${event.at}-${index}`} className="text-[13px] font-medium text-slate-600 dark:text-slate-300">
                       <span className="font-bold">{event.userId ? nameOf(String(event.userId)) : 'Alguien'}</span>

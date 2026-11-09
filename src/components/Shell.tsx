@@ -154,9 +154,10 @@ export function Shell({
         </div>
       </main>
       <div className="pointer-events-none absolute inset-x-0 bottom-0 z-40">
-        <div data-dock className="pointer-events-auto flex justify-center px-3 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3">
+        <div aria-hidden className="absolute inset-x-0 bottom-0 h-36 bg-gradient-to-t from-[var(--app-bg)]/50 via-[var(--app-bg)]/15 to-transparent" />
+        <div data-dock className="pointer-events-auto relative flex justify-center px-4 pb-[max(0.85rem,env(safe-area-inset-bottom))] pt-2">
         <div className="relative w-full max-w-md sm:w-auto">
-          <div aria-hidden className="pointer-events-none absolute inset-0 rounded-full border border-white/80 bg-white/45 shadow-[0_16px_40px_rgba(15,23,42,0.08)] ring-1 ring-inset ring-white/70 backdrop-blur-2xl dark:border-white/10 dark:bg-slate-950/45 dark:ring-white/10" />
+          <div aria-hidden className="dock-glass pointer-events-none absolute inset-0 rounded-full border border-white/35 shadow-[0_10px_36px_rgba(15,23,42,0.06)] dark:border-white/10" />
           <nav className="relative flex h-14 items-center px-1">
             {ITEMS.map((item) => {
               const Icon = item.icon;
@@ -169,7 +170,7 @@ export function Shell({
                   className={cn(
                     'relative flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-full px-1 py-1 text-[10px] font-semibold leading-none sm:flex-none sm:flex-row sm:gap-2 sm:px-3.5 sm:py-2 sm:text-[13px]',
                     active
-                      ? 'text-indigo-600 dark:text-indigo-300'
+                      ? 'text-slate-950 dark:text-white'
                       : 'text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-200',
                   )}
                 >
@@ -177,7 +178,7 @@ export function Shell({
                     <motion.span
                       layoutId="nav-pill"
                       transition={still ? { duration: 0 } : { type: 'spring', stiffness: 190, damping: 18, mass: 1.05 }}
-                      className="pointer-events-none absolute inset-0 rounded-full border border-white/90 bg-white/85 shadow-[0_2px_12px_rgba(15,23,42,0.05)] dark:border-white/15 dark:bg-white/10"
+                      className="pointer-events-none absolute inset-1 rounded-full bg-white dark:bg-white/14"
                     />
                   )}
                   <Icon size={18} strokeWidth={1.75} className="relative" />
@@ -198,7 +199,7 @@ export function Shell({
             type="button"
             onClick={onTicket}
             aria-label="Fotografiar un tique"
-            className="absolute left-1/2 top-1/2 z-10 grid h-10 w-10 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-[#1d4ed8] text-white shadow-[0_8px_16px_rgba(29,78,216,0.22)]"
+            className="absolute left-1/2 top-1/2 z-10 grid h-10 w-10 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-slate-950 text-white dark:bg-white dark:text-slate-950"
           >
             <Camera size={18} strokeWidth={1.75} />
           </button>

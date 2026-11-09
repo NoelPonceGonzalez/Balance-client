@@ -15,7 +15,7 @@
     --app-text: #1c1c1e;
     --app-muted: #6e6e73;
     --app-line: rgba(60, 60, 67, 0.12);
-    --app-accent: #4f46e5;
+    --app-accent: #1c1c1e;
   }
 
   html.dark {
@@ -24,7 +24,7 @@
     --app-text: #f5f5f7;
     --app-muted: #98989d;
     --app-line: rgba(84, 84, 88, 0.55);
-    --app-accent: #818cf8;
+    --app-accent: #f5f5f7;
     color-scheme: dark;
   }
 
@@ -61,11 +61,21 @@
   -ms-overflow-style: none;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-x: contain;
-  touch-action: pan-x;
+  touch-action: pan-y;
 }
 
 .market-pills button {
-  touch-action: pan-x;
+  touch-action: pan-y;
+}
+
+.dock-glass {
+  background: color-mix(in srgb, white 18%, transparent);
+  -webkit-backdrop-filter: blur(28px) saturate(1.7);
+  backdrop-filter: blur(28px) saturate(1.7);
+}
+
+html.dark .dock-glass {
+  background: color-mix(in srgb, #05070c 22%, transparent);
 }
 
 .app-scroll {

@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { motion } from 'motion/react';
 import { modalPanelClass } from '@/components/Modal';
 import { activateCamera, activatePush, phoneStatus, type Gate } from '@/lib/device';
+import { syncPhonePush, warmPushKey } from '@/lib/push';
 import { softSpring } from '@/lib/motion';
 import { cn } from '@/lib/utils';
 
@@ -28,7 +29,8 @@ export function DeviceAccess() {
   };
 
   useEffect(() => {
-    refresh();
+    warmPushKey();
+    void syncPhonePush().finally(refresh);
   }, []);
 
   const later = () => {
@@ -74,7 +76,7 @@ export function DeviceAccess() {
         </p>
         <div className="mt-4 grid gap-2">
           {needPush && (
-            <button type="button" disabled={busy !== ''} onClick={() => void turnOn('push')} className="w-full rounded-full bg-indigo-600 py-3 text-[15px] font-semibold text-white disabled:opacity-50">
+            <button type="button" disabled={busy !== ''} onClick={() => void turnOn('push')} className="w-full rounded-full bg-slate-950 py-3 text-[15px] font-semibold text-white disabled:opacity-50 dark:bg-white dark:text-slate-950">
               {busy === 'push' ? 'Activando…' : 'Activar avisos'}
             </button>
           )}

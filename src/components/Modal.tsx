@@ -5,10 +5,10 @@ import { softSpring } from '@/lib/motion';
 import { cn } from '@/lib/utils';
 
 export const modalOverlayClass =
-  'fixed inset-0 z-50 flex items-center justify-center bg-white/25 p-4 backdrop-blur-2xl dark:bg-slate-950/40';
+  'fixed inset-0 z-50 flex items-end justify-center bg-black/25 p-3 sm:items-center dark:bg-black/50';
 
 export const modalPanelClass =
-  'max-h-[92dvh] w-full overflow-y-auto rounded-[22px] border border-white/80 bg-white/70 p-5 text-slate-900 shadow-[0_24px_80px_rgba(15,23,42,0.12)] backdrop-blur-2xl dark:border-white/10 dark:bg-slate-950/55 dark:text-white';
+  'max-h-[92dvh] w-full overflow-y-auto rounded-[28px] bg-white p-5 text-slate-900 ring-1 ring-slate-200/70 dark:bg-slate-900 dark:text-white dark:ring-white/10';
 
 export function ModalClose({ onClose }: { onClose: () => void }) {
   return (

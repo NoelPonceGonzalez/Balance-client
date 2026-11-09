@@ -1,9 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ExternalLink, Search, Star } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
+import { DragRow } from '@/components/DragRow';
 import { Modal } from '@/components/Modal';
 import { Input } from '@/components/ui/Input';
 import { api } from '@/lib/api';
 import { formatAgo, formatDay, formatEur } from '@/lib/format';
+import { quickOut, softSpring } from '@/lib/motion';
 import { cn } from '@/lib/utils';
 
 type Listing = {
@@ -56,18 +59,24 @@ type Tracked = {
   url: string;
 };
 
-type SkinHit = { name: string; label: string; kind: string; paintIndex: number | null; wears: { wear: string; refEur: number | null }[] };
+export type SkinHit = { name: string; label: string; kind: string; paintIndex: number | null; image: string | null; wears: { wear: string; refEur: number | null }[] };
 
 const WEAR_SHORT: Record<string, string> = { 'Factory New': 'FN', 'Minimal Wear': 'MW', 'Field-Tested': 'FT', 'Well-Worn': 'WW', 'Battle-Scarred': 'BS' };
 const KIND_LABEL: Record<string, string> = { Gloves: 'Guantes', Knives: 'Cuchillo', Weapons: 'Arma' };
 
 const SORTS = [
+  { id: 'best_deal', label: 'Mejor precio' },
   { id: 'lowest_price', label: 'Más barato' },
   { id: 'lowest_float', label: 'Menos float' },
   { id: 'highest_float', label: 'Más float' },
   { id: 'most_recent', label: 'Lo último' },
-  { id: 'best_deal', label: 'Mejor oferta' },
 ] as const;
+
+type Catalog = { results: SkinHit[]; wear: string | null };
+
+function stillMotion(): boolean {
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
 
 const STATE_LABEL: Record<Tracked['state'], string> = { listed: 'A la venta', sold: 'Vendido', gone: 'Quitado' };
 
@@ -232,15 +241,54 @@ function ListingSheet({ id, onBack, onChanged }: { id: string; onBack: () => voi
   );
 }
 
-function ListingCard({ listing, onOpen }: { listing: Listing; onOpen: () => void }) {
-  const photo = listing.photos[0] || listing.image;
+function paintOf(label: string): string {
+  const raw = label.split(' | ').slice(1).join(' | ') || label;
+  return raw.replace(/\s+\([^)]+\)$/, '');
+}
+
+function suggestRows(hits: SkinHit[]): Array<{ type: 'group'; label: string; count: number } | { type: 'hit'; hit: SkinHit }> {
+  const order: string[] = [];
+  const buckets = new Map<string, SkinHit[]>();
+  for (const hit of hits) {
+    const key = paintOf(hit.label);
+    if (!buckets.has(key)) order.push(key);
+    buckets.set(key, [...(buckets.get(key) || []), hit]);
+  }
+  const rows: Array<{ type: 'group'; label: string; count: number } | { type: 'hit'; hit: SkinHit }> = [];
+  for (const key of order) {
+    const group = buckets.get(key) || [];
+    if (group.length > 1) rows.push({ type: 'group', label: key, count: group.length });
+    for (const hit of group) rows.push({ type: 'hit', hit });
+  }
+  return rows;
+}
+
+function SkinThumb({ image }: { image: string | null }) {
+  return (
+    <span className="grid h-12 w-16 shrink-0 place-items-center rounded-lg bg-[#12151c]">
+      {image ? <img src={image} alt="" referrerPolicy="no-referrer" className="h-10 w-14 object-contain" /> : <span className="text-[10px] font-black text-white/30">CS</span>}
+    </span>
+  );
+}
+
+function ListingCard({ listing, onOpen, index, showWear }: { listing: Listing; onOpen: () => void; index: number; showWear?: boolean }) {
+  const still = stillMotion();
+  const art = listing.image || listing.photos[0] || null;
   const gap = deal(listing);
   return (
-    <button type="button" onClick={onOpen} className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white text-left shadow-sm dark:border-white/10 dark:bg-slate-900">
-      <span className="relative block bg-[#1a1d24]">
-        {photo ? <img src={photo} alt="" referrerPolicy="no-referrer" className="aspect-[4/3] w-full object-contain" /> : <span className="block aspect-[4/3]" />}
+    <motion.button
+      type="button"
+      onClick={onOpen}
+      initial={still ? false : { opacity: 0, y: 14, scale: 0.96 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={still ? { duration: 0 } : { ...softSpring, delay: Math.min(index, 8) * 0.04 }}
+      className="overflow-hidden rounded-3xl bg-white text-left shadow-sm ring-1 ring-slate-200/80 dark:bg-slate-900 dark:ring-white/10"
+    >
+      <span className="relative grid aspect-[5/4] place-items-center bg-[radial-gradient(circle_at_50%_42%,#3d4a5c,#12151c)]">
+        {art ? <img src={art} alt="" referrerPolicy="no-referrer" className="h-[74%] w-[74%] object-contain drop-shadow-[0_10px_16px_rgba(0,0,0,0.45)]" /> : <span className="block aspect-[5/4]" />}
         {listing.stickers.length > 0 && <span className="absolute bottom-2 right-2 grid h-5 min-w-5 place-items-center rounded-md bg-black/70 px-1 text-[10px] font-black text-white">{listing.stickers.length}</span>}
         {listing.tracked && <Star size={14} className="absolute left-2 top-2 text-amber-300" fill="currentColor" />}
+        {showWear && listing.wear && <span className="absolute bottom-2 left-2 rounded-md bg-black/70 px-1.5 py-0.5 text-[10px] font-black uppercase text-white">{WEAR_SHORT[listing.wear] || listing.wear}</span>}
       </span>
       <span className="block px-2.5 pb-2.5 pt-2">
         <span className="flex items-baseline justify-between gap-1">
@@ -250,129 +298,147 @@ function ListingCard({ listing, onOpen }: { listing: Listing; onOpen: () => void
         <FloatBar value={listing.floatValue} />
         <span className="mt-1.5 block truncate text-[10px] font-semibold text-slate-500">{floatFull(listing.floatValue)}{listing.paintSeed == null ? '' : ` (${listing.paintSeed})`}</span>
       </span>
-    </button>
+    </motion.button>
   );
 }
 
-function ListingGrid({ listings, onOpen }: { listings: Listing[]; onOpen: (id: string) => void }) {
+function ListingGrid({ listings, onOpen, showWear }: { listings: Listing[]; onOpen: (id: string) => void; showWear?: boolean }) {
   return (
-    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-      {listings.map((listing) => <ListingCard key={listing.id} listing={listing} onOpen={() => onOpen(listing.id)} />)}
+    <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+      {listings.map((listing, index) => <ListingCard key={listing.id} listing={listing} index={index} showWear={showWear} onOpen={() => onOpen(listing.id)} />)}
     </div>
   );
 }
 
-export function CsfloatQuery({ query, onMatch }: { query: string; onMatch?: (found: boolean) => void }) {
+function PriceNote({ sort }: { sort: (typeof SORTS)[number]['id'] }) {
+  if (sort !== 'best_deal') return null;
+  return <p className="text-xs font-medium text-slate-500">El mejor precio es el que queda más por debajo del valor que CSFloat calcula para ese float.</p>;
+}
+
+function bestGap(listing: Listing): number {
+  const gap = deal(listing);
+  return gap == null ? Number.POSITIVE_INFINITY : gap;
+}
+
+export function SkinSuggest({ query, onPick, onMatch }: { query: string; onPick: (hit: SkinHit, wear: string | null) => void; onMatch?: (found: boolean) => void }) {
   const [hits, setHits] = useState<SkinHit[]>([]);
-  const [skin, setSkin] = useState<SkinHit | null>(null);
-  const [wear, setWear] = useState('');
-  const [listings, setListings] = useState<Listing[] | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [searching, setSearching] = useState(false);
-  const [error, setError] = useState('');
-  const [openId, setOpenId] = useState<string | null>(null);
+  const still = stillMotion();
+  const pick = useRef(onPick);
+  const match = useRef(onMatch);
+  pick.current = onPick;
+  match.current = onMatch;
 
   useEffect(() => {
     const text = query.trim();
-    setSkin(null);
-    setWear('');
-    setListings(null);
-    setError('');
     if (text.length < 2) {
       setHits([]);
-      onMatch?.(false);
+      match.current?.(false);
       return;
     }
     let cancel = false;
     const timer = window.setTimeout(() => {
-      setSearching(true);
-      api<{ results: SkinHit[] }>(`/api/market/csfloat/catalog?q=${encodeURIComponent(text)}`)
+      api<Catalog>(`/api/market/csfloat/catalog?q=${encodeURIComponent(text)}`)
         .then((data) => {
           if (cancel) return;
           const results = data.results || [];
+          const exact = data.wear ? results.filter((hit) => hit.wears.some((row) => row.wear === data.wear)) : [];
+          match.current?.(results.length > 0);
+          if (data.wear && exact.length === 1) {
+            setHits([]);
+            pick.current(exact[0], data.wear);
+            return;
+          }
           setHits(results);
-          onMatch?.(results.length > 0);
         })
         .catch(() => {
           if (!cancel) {
             setHits([]);
-            onMatch?.(false);
+            match.current?.(false);
           }
-        })
-        .finally(() => { if (!cancel) setSearching(false); });
+        });
     }, 250);
     return () => {
       cancel = true;
       window.clearTimeout(timer);
     };
-  }, [query, onMatch]);
+  }, [query]);
 
-  const openSkin = (hit: SkinHit, nextWear: string) => {
-    setSkin(hit);
-    setWear(nextWear);
-  };
+  if (hits.length === 0) return null;
+  const rows = suggestRows(hits);
+
+  return (
+    <motion.div
+      initial={still ? false : { opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={still ? undefined : { opacity: 0, y: 6, transition: quickOut }}
+      transition={softSpring}
+      className="absolute left-0 right-0 top-full z-30 mt-2 overflow-hidden rounded-2xl bg-[#1a1d24] text-white shadow-2xl ring-1 ring-white/10"
+    >
+      <div className="max-h-80 overflow-y-auto py-1">
+        {rows.map((row) => row.type === 'group' ? (
+          <div key={`group:${row.label}`} className="px-3 pb-1 pt-3">
+            <p className="text-sm font-black">{row.label}</p>
+            <p className="text-[11px] font-medium text-white/45">Grupo de {row.count} skins</p>
+          </div>
+        ) : (
+          <button key={row.hit.label} type="button" onClick={() => onPick(row.hit, null)} className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-white/10">
+            <SkinThumb image={row.hit.image} />
+            <span className="min-w-0">
+              <span className="block truncate text-sm font-black">{row.hit.label}</span>
+              <span className="block text-[11px] font-medium text-white/45">{KIND_LABEL[row.hit.kind] || row.hit.kind}</span>
+            </span>
+          </button>
+        ))}
+      </div>
+    </motion.div>
+  );
+}
+
+export function SkinMarket({ skin, wear }: { skin: SkinHit; wear: string }) {
+  const [listings, setListings] = useState<Listing[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [openId, setOpenId] = useState<string | null>(null);
+  const wears = wear === 'all' ? skin.wears.map((row) => row.wear) : [wear];
 
   useEffect(() => {
-    if (!skin || !wear) return;
     let cancel = false;
-    const params = new URLSearchParams({ name: `${skin.name} (${wear})`, sort: 'lowest_price' });
-    if (skin.paintIndex != null) params.set('paint', String(skin.paintIndex));
     setLoading(true);
     setError('');
     setListings(null);
-    api<{ listings: Listing[] }>(`/api/market/csfloat/listings?${params}`)
-      .then((data) => { if (!cancel) setListings(data.listings || []); })
+    Promise.all(wears.map((next) => {
+      const params = new URLSearchParams({ name: `${skin.name} (${next})`, sort: 'best_deal' });
+      if (skin.paintIndex != null) params.set('paint', String(skin.paintIndex));
+      return api<{ listings: Listing[] }>(`/api/market/csfloat/listings?${params}`).then((data) => data.listings || []);
+    }))
+      .then((packs) => {
+        if (cancel) return;
+        const merged = packs.flat();
+        merged.sort((a, b) => bestGap(a) - bestGap(b) || a.priceEur - b.priceEur);
+        setListings(merged.slice(0, 40));
+      })
       .catch((err: Error) => { if (!cancel) setError(err.message); })
       .finally(() => { if (!cancel) setLoading(false); });
     return () => { cancel = true; };
   }, [skin, wear]);
 
-  if (!skin && hits.length === 0 && !searching) return null;
-
   return (
-    <section className="space-y-3">
-      <h2 className="text-lg font-black">CSFloat</h2>
-      {searching && !skin && hits.length === 0 && <p className="text-sm font-medium text-slate-400">Buscando en CSFloat…</p>}
-      {!skin && hits.map((hit) => (
-        <article key={hit.label} className="rounded-2xl border border-slate-200/80 bg-white px-3 py-3 dark:border-white/10 dark:bg-slate-900">
-          <button type="button" onClick={() => openSkin(hit, hit.wears.some((row) => row.wear === 'Field-Tested') ? 'Field-Tested' : hit.wears[0]?.wear || '')} className="block w-full text-left">
-            <span className="block font-black">{hit.label}</span>
-            <span className="text-[11px] font-bold uppercase text-slate-400">{KIND_LABEL[hit.kind] || hit.kind}</span>
-          </button>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {hit.wears.map((option) => (
-              <button key={option.wear} type="button" onClick={() => openSkin(hit, option.wear)} className="rounded-full border border-slate-200 px-3 py-1 text-xs font-black text-slate-600 dark:border-white/10 dark:text-slate-200">
-                {WEAR_SHORT[option.wear] || option.wear}{option.refEur != null ? ` · ${formatEur(option.refEur)}` : ''}
-              </button>
-            ))}
-          </div>
-        </article>
-      ))}
-      {skin && (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between gap-3">
-            <p className="min-w-0 truncate font-black">{skin.label}</p>
-            <button type="button" onClick={() => { setSkin(null); setListings(null); }} className="shrink-0 text-xs font-bold text-slate-400">Volver</button>
-          </div>
-          <div className="market-pills flex flex-nowrap gap-2 overflow-x-auto">
-            {skin.wears.map((option) => (
-              <button key={option.wear} type="button" onClick={() => setWear(option.wear)} className={cn('shrink-0 rounded-full px-3 py-1.5 text-xs font-black', wear === option.wear ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900' : 'bg-white text-slate-500 dark:bg-white/10')}>
-                {WEAR_SHORT[option.wear] || option.wear}{option.refEur != null ? ` · ${formatEur(option.refEur)}` : ''}
-              </button>
-            ))}
-          </div>
-          {loading && <p className="text-sm font-medium text-slate-400">Buscando anuncios…</p>}
-          {error && <p className="text-sm font-medium text-rose-600">{error}</p>}
-          {listings && listings.length === 0 && !loading && <p className="text-sm font-medium text-slate-500">No hay anuncios de este desgaste.</p>}
-          {listings && listings.length > 0 && <ListingGrid listings={listings} onOpen={setOpenId} />}
-        </div>
+    <div className="space-y-3">
+      {loading && <p className="text-sm font-medium text-slate-400">Buscando anuncios…</p>}
+      {error && <p className="text-sm font-medium text-rose-600">{error}</p>}
+      {listings && listings.length === 0 && !loading && <p className="text-sm font-medium text-slate-500">No hay anuncios en este desgaste.</p>}
+      {listings && listings.length > 0 && (
+        <>
+          <PriceNote sort="best_deal" />
+          <ListingGrid listings={listings} showWear={wear === 'all'} onOpen={setOpenId} />
+        </>
       )}
       {openId && (
         <Modal title="Anuncio" onClose={() => setOpenId(null)}>
           <ListingSheet id={openId} onBack={() => setOpenId(null)} onChanged={() => undefined} />
         </Modal>
       )}
-    </section>
+    </div>
   );
 }
 
@@ -399,7 +465,7 @@ export function CsfloatFinder({ focusId }: { focusId?: string | null }) {
   const [hits, setHits] = useState<SkinHit[]>([]);
   const [skin, setSkin] = useState<SkinHit | null>(null);
   const [wear, setWear] = useState('');
-  const [sort, setSort] = useState<(typeof SORTS)[number]['id']>('lowest_price');
+  const [sort, setSort] = useState<(typeof SORTS)[number]['id']>('best_deal');
   const [minFloat, setMinFloat] = useState('');
   const [maxFloat, setMaxFloat] = useState('');
   const [maxEur, setMaxEur] = useState('');
@@ -431,13 +497,20 @@ export function CsfloatFinder({ focusId }: { focusId?: string | null }) {
       setHits([]);
       return;
     }
-    const found = await api<{ results: SkinHit[] }>(`/api/market/csfloat/catalog?q=${encodeURIComponent(text)}`).catch(() => ({ results: [] }));
-    setHits(found.results || []);
+    const found = await api<Catalog>(`/api/market/csfloat/catalog?q=${encodeURIComponent(text)}`).catch(() => ({ results: [], wear: null }));
+    const results = found.results || [];
+    const exact = found.wear ? results.filter((hit) => hit.wears.some((row) => row.wear === found.wear)) : [];
+    setHits(results);
+    if (found.wear && exact.length === 1) {
+      setSkin(exact[0]);
+      setWear(found.wear);
+      setSort('best_deal');
+    }
   };
 
   const browse = async () => {
-    if (!skin) return;
-    const name = wear ? `${skin.name} (${wear})` : skin.name;
+    if (!skin || !wear) return;
+    const name = `${skin.name} (${wear})`;
     const params = new URLSearchParams({ name, sort });
     if (skin.paintIndex != null) params.set('paint', String(skin.paintIndex));
     const low = shown(minFloat);
@@ -462,7 +535,7 @@ export function CsfloatFinder({ focusId }: { focusId?: string | null }) {
   };
 
   useEffect(() => {
-    if (skin) void browse();
+    if (skin && wear) void browse();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [skin, wear, sort]);
 
@@ -505,52 +578,57 @@ export function CsfloatFinder({ focusId }: { focusId?: string | null }) {
         <Input icon={<Search size={16} />} value={query} onChange={(event) => void search(event.target.value)} placeholder="Busca en CSFloat: Pandora, Vice, Crimson Kimono…" aria-label="Buscar en CSFloat" />
         {!skin && hits.length > 0 && (
           <div className="grid gap-1">
-            {hits.map((hit) => {
-              const cheapest = hit.wears.reduce<number | null>((low, row) => (row.refEur != null && (low == null || row.refEur < low) ? row.refEur : low), null);
-              return (
-                <button key={hit.label} type="button" onClick={() => { setSkin(hit); setWear(hit.wears.some((row) => row.wear === 'Field-Tested') ? 'Field-Tested' : hit.wears[0]?.wear || ''); }} className="flex items-center justify-between gap-3 rounded-2xl px-2 py-2 text-left text-sm font-bold hover:bg-slate-50 dark:hover:bg-white/5">
-                  <span className="min-w-0">
-                    <span className="block truncate">{hit.label}</span>
-                    <span className="block text-[11px] font-bold uppercase text-slate-400">{KIND_LABEL[hit.kind] || hit.kind}</span>
-                  </span>
-                  {cheapest != null && <span className="shrink-0 text-xs font-bold text-slate-400">desde {formatEur(cheapest)}</span>}
-                </button>
-              );
-            })}
+            {suggestRows(hits).map((row) => row.type === 'group' ? (
+              <p key={`group:${row.label}`} className="px-2 pt-2 text-[11px] font-bold uppercase text-slate-400">{row.label} · {row.count}</p>
+            ) : (
+              <button key={row.hit.label} type="button" onClick={() => { setSkin(row.hit); setWear(''); setListings(null); setSort('best_deal'); }} className="flex w-full items-center gap-3 rounded-2xl px-2 py-2 text-left text-sm font-bold hover:bg-slate-50 dark:hover:bg-white/5">
+                <SkinThumb image={row.hit.image} />
+                <span className="min-w-0">
+                  <span className="block truncate">{row.hit.label}</span>
+                  <span className="block text-[11px] font-bold uppercase text-slate-400">{KIND_LABEL[row.hit.kind] || row.hit.kind}</span>
+                </span>
+              </button>
+            ))}
           </div>
         )}
         {skin && (
           <div className="space-y-2">
             <p className="flex items-center justify-between gap-3 text-sm font-black">
               <span className="truncate">{skin.label}</span>
-              <button type="button" onClick={() => { setSkin(null); setListings(null); }} className="shrink-0 text-xs font-bold text-slate-400">Cambiar</button>
+              <button type="button" onClick={() => { setSkin(null); setWear(''); setListings(null); }} className="shrink-0 text-xs font-bold text-slate-400">Cambiar</button>
             </p>
             {skin.wears.length > 0 && (
               <div className="flex flex-wrap gap-2">
                 {skin.wears.map((option) => (
-                  <button key={option.wear} type="button" onClick={() => setWear(option.wear)} className={cn('rounded-full border px-3 py-1 text-xs font-bold', wear === option.wear ? 'border-slate-900 text-slate-900 dark:border-white dark:text-white' : 'border-slate-200 text-slate-400 dark:border-white/10')}>
+                  <button key={option.wear} type="button" onClick={() => { setWear(option.wear); setSort('best_deal'); }} className={cn('rounded-full border px-3 py-1 text-xs font-bold', wear === option.wear ? 'border-slate-900 text-slate-900 dark:border-white dark:text-white' : 'border-slate-200 text-slate-400 dark:border-white/10')}>
                     {WEAR_SHORT[option.wear] || option.wear}{option.refEur != null ? ` · ${formatEur(option.refEur)}` : ''}
                   </button>
                 ))}
               </div>
             )}
-            <div className="market-pills -mx-1 flex flex-nowrap gap-2 overflow-x-auto px-1">
+            {!wear && <p className="text-sm font-medium text-slate-500">Elige el desgaste. A partir de ahí salen por mejor precio.</p>}
+            {wear && <DragRow className="-mx-1 flex flex-nowrap gap-2 px-1">
               {SORTS.map((option) => (
                 <button key={option.id} type="button" onClick={() => setSort(option.id)} className={cn('shrink-0 rounded-full px-3 py-1.5 text-xs font-bold', sort === option.id ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900' : 'bg-slate-100 text-slate-500 dark:bg-white/10')}>{option.label}</button>
               ))}
-            </div>
-            <div className="grid grid-cols-2 gap-2">
+            </DragRow>}
+            {wear && <div className="grid grid-cols-2 gap-2">
               <Input label="Float desde" inputMode="decimal" value={minFloat} onChange={(event) => setMinFloat(event.target.value)} placeholder="0,15" />
               <Input label="Float hasta" inputMode="decimal" value={maxFloat} onChange={(event) => setMaxFloat(event.target.value)} placeholder="0,25" />
               <Input label="Hasta (€)" inputMode="decimal" value={maxEur} onChange={(event) => setMaxEur(event.target.value)} placeholder="Opcional" />
               <Input label="Patrón" inputMode="numeric" value={seed} onChange={(event) => setSeed(event.target.value)} placeholder="Opcional" />
-            </div>
-            <button type="button" onClick={() => void browse()} className="w-full rounded-2xl bg-slate-900 px-4 py-2.5 text-sm font-black text-white dark:bg-white dark:text-slate-900">{loading ? 'Buscando…' : 'Buscar anuncios'}</button>
+            </div>}
+            {wear && <button type="button" onClick={() => void browse()} className="w-full rounded-2xl bg-slate-900 px-4 py-2.5 text-sm font-black text-white dark:bg-white dark:text-slate-900">{loading ? 'Buscando…' : 'Buscar anuncios'}</button>}
           </div>
         )}
         {error && <p className="text-sm font-medium text-rose-600">{error}</p>}
         {listings && listings.length === 0 && !loading && <p className="text-sm font-medium text-slate-500">No hay anuncios con esos filtros.</p>}
-        {listings && listings.length > 0 && <ListingGrid listings={listings} onOpen={setOpenId} />}
+        {listings && listings.length > 0 && (
+          <>
+            <PriceNote sort={sort} />
+            <ListingGrid listings={listings} onOpen={setOpenId} />
+          </>
+        )}
         {!skin && tracked.length === 0 && hits.length === 0 && (
           <p className="text-sm font-medium text-slate-500">Busca unos guantes, entra en el anuncio que te guste y dale a la estrella. Desde ese momento te aviso si baja, sube, se vende o lo quitan.</p>
         )}

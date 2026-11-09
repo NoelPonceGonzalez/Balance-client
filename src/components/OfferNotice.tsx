@@ -63,6 +63,17 @@ function dismissed(item: AppNotification, skip: Set<string>, passed: PassedOffer
   return passed.some((row) => row.listing === listing && Math.abs(row.price - price) < 1);
 }
 
+export function nextOffer(items: AppNotification[]): AppNotification | null {
+  const skip = skippedIds();
+  const passed = readPassed();
+  for (const item of items) {
+    if (!item.quoteKey?.startsWith('listing:')) continue;
+    if (dismissed(item, skip, passed)) continue;
+    return item;
+  }
+  return null;
+}
+
 function saleMoment(item: AppNotification): string {
   const match = item.quoteKey?.match(/(\d{4}-\d{2}-\d{2}T[\d:.]+Z)$/);
   return match?.[1] || item.createdAt;
@@ -134,9 +145,8 @@ export function OfferNotice({ focused = null, onFocusedClose }: { focused?: AppN
   const focusId = picked?.id || '';
   const place = unique.length === 0 ? 0 : Math.min(index, unique.length - 1);
   const shown = unique[place] || null;
-  const fresh = unique.some((item) => !dismissed(item, skip, passed));
   const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const open = Boolean(shown) && (Boolean(picked) || (!aside && fresh));
+  const open = Boolean(shown) && Boolean(picked);
 
   useEffect(() => {
     if (focusId) {

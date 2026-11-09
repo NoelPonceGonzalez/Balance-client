@@ -9,6 +9,22 @@ export class ApiError extends Error {
 }
 
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
+  let last: unknown;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    try {
+      return await apiOnce<T>(path, options);
+    } catch (error) {
+      last = error;
+      const status = error instanceof ApiError ? error.status : 0;
+      if (status !== 0 && status !== 500) throw error;
+      if (attempt === 3) break;
+      await new Promise((resolve) => setTimeout(resolve, 350));
+    }
+  }
+  throw last;
+}
+
+async function apiOnce<T>(path: string, options: RequestInit): Promise<T> {
   const token = localStorage.getItem('pat_token');
   const headers = new Headers(options.headers);
   if (!headers.has('Content-Type') && options.body) headers.set('Content-Type', 'application/json');

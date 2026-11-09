@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
-import { QuietLoad } from '@/components/QuietLoad';
 import { Shell, type Section } from '@/components/Shell';
 import { api, ApiError } from '@/lib/api';
 import { glide } from '@/lib/motion';
@@ -34,6 +33,18 @@ export default function App() {
   const [focusPlan, setFocusPlan] = useState<string | null>(null);
   const [focusTick, setFocusTick] = useState(0);
   const [focusListing, setFocusListing] = useState<string | null>(null);
+
+  useEffect(() => {
+    const openPlan = (event: Event) => {
+      const id = (event as CustomEvent<string>).detail;
+      if (!id) return;
+      setFocusPlan(id);
+      setFocusTick((value) => value + 1);
+      setSection('plans');
+    };
+    window.addEventListener('pat-plan', openPlan);
+    return () => window.removeEventListener('pat-plan', openPlan);
+  }, []);
 
   const restoreSession = () => {
     const token = localStorage.getItem('pat_token');
@@ -110,7 +121,16 @@ export default function App() {
     setUser(null);
   };
 
-  if (!ready) return <QuietLoad kind="screen" />;
+  useEffect(() => {
+    if (!ready) return;
+    const boot = document.getElementById('boot');
+    if (!boot) return;
+    boot.classList.add('is-done');
+    const timer = window.setTimeout(() => boot.remove(), 460);
+    return () => window.clearTimeout(timer);
+  }, [ready]);
+
+  if (!ready) return null;
   if (offline && !user) {
     return (
       <div className="grid h-dvh place-items-center bg-white px-6">

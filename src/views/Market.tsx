@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react';
-import { Bell, Heart, Search, Star, X } from 'lucide-react';
-import { CsfloatFinder, CsfloatQuery } from '@/components/CsfloatFinder';
+import { useEffect, useRef, useState } from 'react';
+import { Bell, ChevronLeft, Heart, Search, Star, X } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
+import { CsfloatFinder, SkinMarket, SkinSuggest, type SkinHit } from '@/components/CsfloatFinder';
+import { DragRow } from '@/components/DragRow';
 import { Modal } from '@/components/Modal';
 import { QuietLoad } from '@/components/QuietLoad';
 import { Sparkline } from '@/components/Sparkline';
@@ -9,8 +11,9 @@ import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { api } from '@/lib/api';
-import { enablePhonePush } from '@/lib/push';
+import { activatePush } from '@/lib/device';
 import { formatAgo, formatDay, formatEur, formatNumber, formatPct, formatPrice } from '@/lib/format';
+import { quickOut, softSpring } from '@/lib/motion';
 import { cn } from '@/lib/utils';
 import { CashChart, type LinePoint } from '@/views/Wallets';
 import type { AppNotification, MarketBoard, MarketItem, MarketPending, MarketSignal, MarketStory, MarketTapeItem, QuoteCandidate } from '@/lib/types';
@@ -104,7 +107,7 @@ function QuoteSearch({ assetClass, onPick }: { assetClass: string; onPick: (item
           <button key={`${item.source}:${item.externalId}`} type="button" onClick={() => onPick(item)} className="flex w-full items-center gap-3 rounded-2xl px-2 py-2 text-left hover:bg-slate-50 dark:hover:bg-slate-800">
             <Mark image={item.image} symbol={item.symbol} />
             <span className="min-w-0">
-              <span className="block truncate text-sm font-black">{item.name}</span>
+              <span className="block truncate text-sm font-semibold">{item.name}</span>
               <span className="block text-xs font-bold text-slate-500">{item.symbol} · {item.source === 'coingecko' ? 'CoinGecko' : 'Yahoo Finance'}</span>
             </span>
           </button>
@@ -131,6 +134,272 @@ function canSpan(kind: string) {
   return kind === 'crypto' || kind === 'etf' || kind === 'stock' || kind === 'gold' || kind === 'silver' || kind === 'oil' || kind === 'copper' || kind === 'index';
 }
 
+function stillMotion(): boolean {
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+const WEAR_CHIP: Record<string, string> = { 'Factory New': 'FN', 'Minimal Wear': 'MW', 'Field-Tested': 'FT', 'Well-Worn': 'WW', 'Battle-Scarred': 'BS' };
+const TAPE_FILTERS = [
+  { id: 'all', label: 'Todas' },
+  { id: 'up', label: 'Suben' },
+  { id: 'down', label: 'Bajan' },
+] as const;
+
+type TapeFilter = (typeof TAPE_FILTERS)[number]['id'];
+
+const MARKET_TONE: Record<string, { accent: string; search: string; wash: string }> = {
+  crypto: { accent: '#f7931a', search: 'Bitcoin, ether, solana…', wash: 'rgba(247,147,26,0.22)' },
+  stock: { accent: '#0a84ff', search: 'Apple, NVIDIA, ASML…', wash: 'rgba(10,132,255,0.16)' },
+  etf: { accent: '#30d158', search: 'VWCE, S&P 500, Nasdaq…', wash: 'rgba(48,209,88,0.16)' },
+  index: { accent: '#5e5ce6', search: 'IBEX, DAX, Nasdaq…', wash: 'rgba(94,92,230,0.16)' },
+  gold: { accent: '#c6a15b', search: 'Oro', wash: 'rgba(198,161,91,0.28)' },
+  silver: { accent: '#8e8e93', search: 'Plata', wash: 'rgba(174,174,178,0.22)' },
+  oil: { accent: '#8d6e63', search: 'Petróleo', wash: 'rgba(141,110,99,0.22)' },
+  copper: { accent: '#b87333', search: 'Cobre', wash: 'rgba(184,115,51,0.24)' },
+  cs2: { accent: '#de9b35', search: 'Pandora, guantes, AK…', wash: 'rgba(222,155,53,0.18)' },
+  tf2: { accent: '#c17f3e', search: 'Llave, gorra, australium…', wash: 'rgba(193,127,62,0.2)' },
+};
+
+const HERO_MARKETS = new Set(['gold', 'silver', 'oil', 'copper']);
+
+const shift = {
+  enter: (d: number) => ({ opacity: 0, x: 32 * d, scale: 0.985 }),
+  center: { opacity: 1, x: 0, scale: 1 },
+  exit: (d: number) => ({ opacity: 0, x: -24 * d, scale: 0.985, transition: quickOut }),
+};
+
+function byMove(items: MarketTapeItem[], filter: TapeFilter): MarketTapeItem[] {
+  if (filter === 'all') return items;
+  return items.filter((item) => item.changePct != null && (filter === 'up' ? item.changePct > 0 : item.changePct < 0));
+}
+
+function Pct({ value, className }: { value: number | null; className?: string }) {
+  const up = (value ?? 0) > 0;
+  const down = (value ?? 0) < 0;
+  return <span className={cn('font-black tabular-nums', !up && !down ? 'text-slate-400' : up ? 'text-[#16c784]' : 'text-[#ea3943]', className)}>{value == null ? '—' : formatPct(value)}</span>;
+}
+
+function EmptyNote({ children }: { children: string }) {
+  return <p className="rounded-3xl bg-white px-4 py-10 text-center text-sm font-medium text-slate-500 dark:bg-slate-900">{children}</p>;
+}
+
+function MoveFilter({ tone, value, onChange }: { tone: 'pills' | 'segment'; value: TapeFilter; onChange: (id: TapeFilter) => void }) {
+  if (tone === 'pills') {
+    return (
+      <div className="grid grid-cols-3 gap-2">
+        {TAPE_FILTERS.map((filter) => {
+          const on = value === filter.id;
+          const face = filter.id === 'up'
+            ? (on ? 'bg-[#16c784] text-white' : 'bg-white text-[#16c784] dark:bg-white/10')
+            : filter.id === 'down'
+              ? (on ? 'bg-[#ea3943] text-white' : 'bg-white text-[#ea3943] dark:bg-white/10')
+              : (on ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900' : 'bg-white text-slate-700 dark:bg-white/10 dark:text-white');
+          return (
+            <button key={filter.id} type="button" onClick={() => onChange(filter.id)} className={cn('rounded-2xl py-2.5 text-sm font-black transition-transform active:scale-[0.98]', face)}>
+              {filter.label}
+            </button>
+          );
+        })}
+      </div>
+    );
+  }
+  return (
+    <div className="grid grid-cols-3 rounded-full bg-white p-1 ring-1 ring-slate-200/80 dark:bg-white/10 dark:ring-white/10">
+      {TAPE_FILTERS.map((filter) => (
+        <button key={filter.id} type="button" onClick={() => onChange(filter.id)} className={cn('rounded-full py-1.5 text-sm font-bold', value === filter.id ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900' : 'text-slate-500')}>
+          {filter.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function CryptoBoard({ items, filtered, quiet, onOpen }: { items: MarketTapeItem[]; filtered: boolean; quiet: boolean; onOpen: (item: MarketTapeItem) => void }) {
+  const still = stillMotion();
+  if (!items.length) {
+    if (quiet) return null;
+    return <EmptyNote>{filtered ? 'Ninguna cripto coincide.' : 'Todavía no hay criptos con precio.'}</EmptyNote>;
+  }
+  return (
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      {items.map((item, index) => {
+        const up = (item.changePct ?? 0) > 0;
+        return (
+          <motion.button
+            key={item.key}
+            type="button"
+            onClick={() => onOpen(item)}
+            initial={still ? false : { opacity: 0, y: 18, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            whileTap={still ? undefined : { scale: 0.985 }}
+            transition={still ? { duration: 0 } : { ...softSpring, delay: Math.min(index, 10) * 0.035 }}
+            className="overflow-hidden rounded-[28px] bg-[#12151c] p-4 text-left text-white shadow-sm"
+          >
+            <span className="flex items-center gap-3">
+              <Mark image={item.image} symbol={item.symbol} />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-base font-semibold">{item.name}</span>
+                <span className="block truncate font-mono text-[11px] font-bold uppercase text-white/40">{item.symbol}</span>
+              </span>
+              <Pct value={item.changePct} className={cn('rounded-full px-2.5 py-1 text-xs', (item.changePct ?? 0) === 0 || item.changePct == null ? 'bg-white/10' : (item.changePct ?? 0) > 0 ? 'bg-[#16c784]/15' : 'bg-[#ea3943]/15')} />
+            </span>
+            <span className="mt-5 flex items-end justify-between gap-3">
+              <span className="text-[1.7rem] font-black tabular-nums tracking-tight">{quoteAmount(item.kind, item.priceEur)}</span>
+              <Sparkline values={item.sparkline} up={up} />
+            </span>
+          </motion.button>
+        );
+      })}
+    </div>
+  );
+}
+
+function StockBoard({ items, filtered, onOpen }: { items: MarketTapeItem[]; filtered: boolean; onOpen: (item: MarketTapeItem) => void }) {
+  const still = stillMotion();
+  if (!items.length) return <EmptyNote>{filtered ? 'Ninguna acción coincide.' : 'Todavía no hay acciones.'}</EmptyNote>;
+  return (
+    <div className="overflow-hidden rounded-[28px] bg-white ring-1 ring-slate-200/80 dark:bg-slate-900 dark:ring-white/10">
+      {items.map((item, index) => (
+        <motion.button
+          key={item.key}
+          type="button"
+          onClick={() => onOpen(item)}
+          initial={still ? false : { opacity: 0, x: 10 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={still ? { duration: 0 } : { ...softSpring, delay: Math.min(index, 12) * 0.02 }}
+          className="flex w-full items-center gap-3 border-b border-slate-100 px-3.5 py-3 text-left last:border-0 dark:border-white/10"
+        >
+          <Mark image={item.image} symbol={item.symbol} />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm font-semibold">{item.name}</span>
+            <span className="block truncate text-[11px] font-bold uppercase text-slate-400">{item.symbol}</span>
+          </span>
+          <span className="text-right">
+            <span className="block text-sm font-black tabular-nums">{quoteAmount(item.kind, item.priceEur)}</span>
+            <Pct value={item.changePct} className="text-[11px]" />
+          </span>
+        </motion.button>
+      ))}
+    </div>
+  );
+}
+
+function EtfBoard({ items, filtered, onOpen }: { items: MarketTapeItem[]; filtered: boolean; onOpen: (item: MarketTapeItem) => void }) {
+  const still = stillMotion();
+  if (!items.length) return <EmptyNote>{filtered ? 'Ningún ETF coincide.' : 'Todavía no hay ETF.'}</EmptyNote>;
+  return (
+    <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+      {items.map((item, index) => (
+        <motion.button
+          key={item.key}
+          type="button"
+          onClick={() => onOpen(item)}
+          initial={still ? false : { opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          whileTap={still ? undefined : { scale: 0.985 }}
+          transition={still ? { duration: 0 } : { ...softSpring, delay: Math.min(index, 8) * 0.03 }}
+          className="flex flex-col rounded-[28px] bg-white p-3.5 text-left ring-1 ring-slate-200/70 dark:bg-slate-900 dark:ring-white/10"
+          style={{ boxShadow: 'inset 0 2px 0 #30d158' }}
+        >
+          <Mark image={item.image} symbol={item.symbol} />
+          <span className="mt-3 line-clamp-2 text-sm font-semibold leading-tight">{item.name}</span>
+          <span className="mt-auto pt-3 text-lg font-black tabular-nums">{quoteAmount(item.kind, item.priceEur)}</span>
+          <Pct value={item.changePct} className="text-xs" />
+        </motion.button>
+      ))}
+    </div>
+  );
+}
+
+function IndexBoard({ items, filtered, onOpen }: { items: MarketTapeItem[]; filtered: boolean; onOpen: (item: MarketTapeItem) => void }) {
+  const still = stillMotion();
+  if (!items.length) return <EmptyNote>{filtered ? 'Ningún índice coincide.' : 'Todavía no hay índices.'}</EmptyNote>;
+  return (
+    <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+      {items.map((item, index) => (
+        <motion.button
+          key={item.key}
+          type="button"
+          onClick={() => onOpen(item)}
+          initial={still ? false : { opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          whileTap={still ? undefined : { scale: 0.985 }}
+          transition={still ? { duration: 0 } : { ...softSpring, delay: Math.min(index, 8) * 0.03 }}
+          className="rounded-[28px] bg-white px-4 py-4 text-left ring-1 ring-slate-200/70 dark:bg-slate-900 dark:ring-white/10"
+        >
+          <span className="block truncate text-[11px] font-bold uppercase tracking-[0.16em] text-slate-400">{item.name}</span>
+          <span className="mt-1 block text-3xl font-black tabular-nums tracking-tight">{quoteAmount(item.kind, item.priceEur)}</span>
+          <Pct value={item.changePct} className="mt-1 block text-sm" />
+        </motion.button>
+      ))}
+    </div>
+  );
+}
+
+function HeroBoard({ item, accent, onOpen }: { item: MarketTapeItem | undefined; accent: string; onOpen: (item: MarketTapeItem) => void }) {
+  const still = stillMotion();
+  if (!item) return <EmptyNote>Todavía no hay cotización.</EmptyNote>;
+  const up = (item.changePct ?? 0) > 0;
+  return (
+    <motion.button
+      type="button"
+      onClick={() => onOpen(item)}
+      initial={still ? false : { opacity: 0, y: 16, scale: 0.98 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      whileTap={still ? undefined : { scale: 0.99 }}
+      transition={softSpring}
+      className="w-full rounded-[32px] bg-white p-6 text-left ring-1 ring-slate-200/70 dark:bg-slate-900 dark:ring-white/10"
+    >
+      <span className="flex items-center gap-3">
+        <Mark image={item.image} symbol={item.symbol} />
+        <span className="min-w-0">
+          <span className="block truncate text-lg font-semibold">{item.name}</span>
+          <span className="block text-[11px] font-bold uppercase tracking-[0.16em]" style={{ color: accent }}>{item.symbol}</span>
+        </span>
+      </span>
+      <span className="mt-8 block text-5xl font-black tabular-nums tracking-tight" style={{ color: accent }}>{quoteAmount(item.kind, item.priceEur)}</span>
+      <span className="mt-2 block"><Pct value={item.changePct} className="text-base" /></span>
+      <span className="mt-6 block"><Sparkline values={item.sparkline} up={up} /></span>
+    </motion.button>
+  );
+}
+
+function GameBoard({ items, filtered, quiet, warm, onOpen }: { items: MarketTapeItem[]; filtered: boolean; quiet: boolean; warm?: boolean; onOpen: (item: MarketTapeItem) => void }) {
+  const still = stillMotion();
+  if (!items.length) {
+    if (quiet) return null;
+    return <EmptyNote>{filtered ? 'Nada coincide con esa búsqueda.' : 'Escribe el nombre para entrar.'}</EmptyNote>;
+  }
+  return (
+    <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+      {items.map((item, index) => (
+        <motion.button
+          key={item.key}
+          type="button"
+          onClick={() => onOpen(item)}
+          initial={still ? false : { opacity: 0, y: 14, scale: 0.96 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          whileTap={still ? undefined : { scale: 0.98 }}
+          transition={still ? { duration: 0 } : { ...softSpring, delay: Math.min(index, 8) * 0.04 }}
+          className="overflow-hidden rounded-[28px] text-left text-white"
+          style={{ background: warm ? '#1c120c' : '#12151c' }}
+        >
+          <span className="grid aspect-[5/4] place-items-center" style={{ background: warm ? 'radial-gradient(circle at 50% 42%, #6b4423, #1c120c)' : 'radial-gradient(circle at 50% 42%, #3d4a5c, #12151c)' }}>
+            {item.image ? <img src={item.image} alt="" referrerPolicy="no-referrer" className="h-[72%] w-[72%] object-contain drop-shadow-[0_10px_16px_rgba(0,0,0,0.45)]" /> : <Mark image={null} symbol={item.symbol} />}
+          </span>
+          <span className="block px-3 py-2.5">
+            <span className="block truncate text-sm font-semibold">{item.name}</span>
+            <span className="mt-1 flex items-center justify-between gap-2">
+              <span className="text-sm font-black tabular-nums">{quoteAmount(item.kind, item.priceEur)}</span>
+              <Pct value={item.changePct} className="text-[11px]" />
+            </span>
+          </span>
+        </motion.button>
+      ))}
+    </div>
+  );
+}
+
 function quoteAmount(kind: string, value: number | null | undefined): string {
   if (kind === 'index') return formatNumber(value, 2);
   return formatPrice(value);
@@ -143,7 +412,7 @@ function QuoteRow({ item, onOpen, onChanged }: { item: MarketItem; onOpen: () =>
       <button type="button" onClick={onOpen} className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 text-left sm:grid-cols-[auto_minmax(0,1fr)_5.5rem_auto]">
         <Mark image={item.image} symbol={item.symbol} />
         <div className="min-w-0">
-          <p className="truncate font-black">{item.name}</p>
+          <p className="truncate font-semibold">{item.name}</p>
           <p className="truncate text-[11px] font-bold uppercase text-slate-400">{item.symbol} · {item.accountName}</p>
         </div>
         <span className="hidden sm:block"><Sparkline values={item.sparkline} up={up && item.changePct !== 0} /></span>
@@ -182,7 +451,7 @@ function TapeRow({ item, fallback, onOpen }: { item: MarketTapeItem; fallback?: 
     <button type="button" onClick={onOpen} className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-3 border-b border-slate-100 py-3 text-left last:border-0 dark:border-slate-800 sm:items-center sm:grid-cols-[auto_minmax(0,1fr)_5.5rem_auto]">
       <Mark image={item.image} symbol={item.symbol} fallback={fallback} contain={game} />
       <div className="min-w-0">
-        <p className={cn('font-black leading-snug', game ? 'break-words' : 'truncate')}>{item.name}</p>
+        <p className={cn('font-semibold leading-snug', game ? 'break-words' : 'truncate')}>{item.name}</p>
         <p className="truncate text-[11px] font-bold uppercase text-slate-400">{item.symbol} · {item.sourceLabel}</p>
       </div>
       <span className="hidden sm:block"><Sparkline values={item.sparkline} up={up} /></span>
@@ -237,7 +506,7 @@ function SavedDesk({ needle }: { needle: string }) {
               <article key={offer.id} className="flex items-center gap-3 py-3">
                 {offer.image && <img src={offer.image} alt="" referrerPolicy="no-referrer" className="h-14 w-20 shrink-0 object-contain" />}
                 <div className="min-w-0 flex-1">
-                  <p className="truncate font-black">{offer.label}</p>
+                  <p className="truncate font-semibold">{offer.label}</p>
                   <p className="text-sm font-bold tabular-nums text-slate-500">{offer.priceEur == null ? '—' : formatEur(offer.priceEur)}{offer.floatValue == null ? '' : ` · float ${offer.floatValue.toFixed(4)}`}</p>
                 </div>
                 <a href={offer.url} target="_blank" rel="noopener noreferrer" className="shrink-0 rounded-full bg-slate-900 px-3 py-2 text-xs font-black text-white dark:bg-white dark:text-slate-900">Abrir</a>
@@ -365,7 +634,7 @@ function AlertDesk({ items, catalog, onChanged }: { items: MarketSignal[]; catal
             <div className="mt-3 flex items-center gap-3">
               <Mark image={history.image || null} symbol={history.name} contain={history.kind === 'compra'} fallback={history.kind === 'compra' ? '/platforms/cs2.svg' : null} />
               <div className="min-w-0">
-                <p className="font-black">{history.name}</p>
+                <p className="font-semibold">{history.name}</p>
                 <p className="text-[11px] font-bold uppercase text-slate-400">Escuchando{history.priceEur == null ? '' : ` · ahora ${formatEur(history.priceEur)}`}</p>
               </div>
             </div>
@@ -398,7 +667,7 @@ function AlertDesk({ items, catalog, onChanged }: { items: MarketSignal[]; catal
                 <button type="button" onClick={() => setHistory(item)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
                   <Mark image={item.image || null} symbol={item.name} contain={item.kind === 'compra'} fallback={item.kind === 'compra' ? '/platforms/cs2.svg' : null} />
                   <span className="min-w-0 flex-1">
-                    <span className="block font-black">{item.name}</span>
+                    <span className="block font-semibold">{item.name}</span>
                     <span className="block text-[11px] font-bold uppercase text-slate-400">Escuchando{item.priceEur == null ? '' : ` · ahora ${formatEur(item.priceEur)}`}</span>
                     <span className="mt-1 block text-xs font-medium text-slate-500">{item.note}</span>
                   </span>
@@ -449,7 +718,7 @@ function AlertDesk({ items, catalog, onChanged }: { items: MarketSignal[]; catal
           )}
           {picked && (
             <div className="grid gap-2">
-              <p className="flex items-center gap-3 text-sm font-black">
+              <p className="flex items-center gap-3 text-sm font-semibold">
                 <Mark image={picked.image} symbol={picked.name} contain={picked.kind === 'skin'} fallback={picked.kind === 'skin' ? '/platforms/cs2.svg' : null} />
                 <span>{picked.name}{picked.kind === 'quote' && picked.priceEur != null ? ` · ${formatEur(picked.priceEur)}` : ''}</span>
               </p>
@@ -468,7 +737,7 @@ function AlertDesk({ items, catalog, onChanged }: { items: MarketSignal[]; catal
           {note && <p className="text-xs font-medium text-rose-600">{note}</p>}
         </div>
         )}
-        {!history && !adding && <button type="button" onClick={() => void enablePhonePush().then(setPhone).catch((err: Error) => setPhone(err.message))} className="mt-4 text-xs font-bold text-slate-500">Avisos en el móvil</button>}
+        {!history && !adding && <button type="button" onClick={() => void activatePush().then(setPhone).catch((err: Error) => setPhone(err.message))} className="mt-4 text-xs font-bold text-slate-500">Avisos en el móvil</button>}
         {phone && <p className="mt-1 text-xs font-medium text-slate-500">{phone}</p>}
       </Card>
   );
@@ -485,13 +754,29 @@ function TapeSection({ title, icon, items, onOpen, onPick }: { title: string; ic
   return (
     <section className="space-y-2">
       {onPick ? (
-        <button type="button" onClick={onPick} className="flex items-center gap-2 text-lg font-black">{heading}</button>
+        <button type="button" onClick={onPick} className="flex items-center gap-2 text-lg font-semibold">{heading}</button>
       ) : (
-        <h2 className="flex items-center gap-2 text-lg font-black">{heading}</h2>
+        <h2 className="flex items-center gap-2 text-lg font-semibold">{heading}</h2>
       )}
-      <Card className="px-4 py-1">
-        {items.map((item) => <TapeRow key={item.key} item={item} fallback={item.image ? null : icon} onOpen={() => onOpen(item)} />)}
-      </Card>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+        {items.map((item) => {
+          const up = (item.changePct ?? 0) > 0;
+          const down = (item.changePct ?? 0) < 0;
+          const game = item.kind === 'cs2' || item.kind === 'tf2';
+          return (
+            <button key={item.key} type="button" onClick={() => onOpen(item)} className="flex flex-col rounded-3xl bg-white p-3 text-left ring-1 ring-slate-200/70 dark:bg-slate-900 dark:ring-white/10">
+              <span className="flex items-center justify-between gap-2">
+                <Mark image={item.image} symbol={item.symbol} fallback={item.image ? null : icon} contain={game} />
+                <span className={cn('rounded-full px-2 py-1 text-[11px] font-black tabular-nums', !up && !down ? 'bg-slate-100 text-slate-500 dark:bg-white/10' : up ? 'bg-[#16c784]/15 text-[#16c784]' : 'bg-[#ea3943]/15 text-[#ea3943]')}>
+                  {item.changePct == null ? '—' : formatPct(item.changePct)}
+                </span>
+              </span>
+              <span className="mt-3 line-clamp-2 text-sm font-semibold leading-tight">{item.name}</span>
+              <span className="mt-1 text-lg font-black tabular-nums">{quoteAmount(item.kind, item.priceEur)}</span>
+            </button>
+          );
+        })}
+      </div>
     </section>
   );
 }
@@ -503,7 +788,7 @@ function PendingRow({ item, onChanged }: { item: MarketPending; onChanged: () =>
   };
   return (
     <div className="rounded-2xl border border-dashed border-slate-200 p-3 dark:border-slate-700">
-      <p className="font-black">{item.name} <span className="text-slate-400">{item.symbol}</span></p>
+      <p className="font-semibold">{item.name} <span className="text-slate-400">{item.symbol}</span></p>
       <p className="text-xs font-medium text-slate-500">{item.accountName}. Elige la cotización exacta para empezar a seguirla.</p>
       <QuoteSearch assetClass={item.assetClass} onPick={(candidate) => void link(candidate)} />
     </div>
@@ -541,6 +826,7 @@ function StoryDialog({ item, onClose }: { item: { kind: string; key: string; nam
         <div>
           <p className="text-2xl font-black tabular-nums sm:text-3xl">{quoteAmount(item.kind, live ?? item.priceEur)}</p>
           {liveDay && <p className="mt-1 text-[13px] font-semibold text-slate-400">{formatDay(liveDay)}</p>}
+          {story && story.series.length > 0 && <p className="mt-1 text-[13px] font-medium text-slate-400">Precio de {formatAgo(story.series[story.series.length - 1].at)}</p>}
         </div>
         <span className={cn('rounded-xl px-3 py-1.5 text-sm font-black', !up && !down ? 'bg-slate-100 text-slate-500' : up ? 'bg-[#16c784]/15 text-[#16c784]' : 'bg-[#ea3943]/15 text-[#ea3943]')}>
           {change == null ? '—' : formatPct(change)}
@@ -604,9 +890,13 @@ export function Market({ focusListing, focusTick = 0 }: { focusListing?: string 
   const [query, setQuery] = useState('');
   const [skinMatch, setSkinMatch] = useState(false);
   const [market, setMarket] = useState('all');
+  const [skinDesk, setSkinDesk] = useState<SkinHit | null>(null);
+  const [wearPick, setWearPick] = useState('all');
+  const [tapeFilter, setTapeFilter] = useState<TapeFilter>('all');
   const [open, setOpen] = useState<{ kind: string; key: string; name: string; symbol: string; priceEur: number | null; changePct: number | null; changeLabel: string; sparkline: number[] } | null>(null);
   const [desk, setDesk] = useState<'saved' | 'alerts' | 'csfloat' | null>(focusListing ? 'csfloat' : null);
   const [listingFocus, setListingFocus] = useState<string | null>(focusListing || null);
+  const dir = useRef(1);
 
   useEffect(() => {
     if (!focusListing) return;
@@ -643,34 +933,96 @@ export function Market({ focusListing, focusTick = 0 }: { focusListing?: string 
   if (!data) return <QuietLoad />;
 
   const needle = query.trim();
-  const keep = (items: MarketTapeItem[] | undefined) => (items || []).filter((item) => matches(needle, [item.name, item.symbol, item.sourceLabel]));
-  const sections = [
-    { id: 'crypto', title: 'Criptomonedas', icon: data.cryptos?.find((item) => item.image)?.image || '/markets/crypto.svg', items: keep(data.cryptos), ready: (data.cryptos || []).length > 0 },
-    { id: 'stock', title: 'Acciones', icon: '/markets/stock.svg', items: keep(data.stocks), ready: (data.stocks || []).length > 0 },
-    { id: 'etf', title: 'ETF', icon: '/markets/etf.svg', items: keep(data.etfs), ready: (data.etfs || []).length > 0 },
-    { id: 'index', title: 'Índices', icon: '/markets/index.svg', items: keep(data.indices), ready: (data.indices || []).length > 0 },
-    { id: 'gold', title: 'Oro', icon: '/platforms/oro.svg', items: keep(data.gold), ready: (data.gold || []).length > 0 },
-    { id: 'silver', title: 'Plata', icon: '/markets/silver.svg', items: keep(data.silver), ready: (data.silver || []).length > 0 },
-    { id: 'oil', title: 'Petróleo', icon: '/markets/oil.svg', items: keep(data.oil), ready: (data.oil || []).length > 0 },
-    { id: 'copper', title: 'Cobre', icon: '/markets/copper.svg', items: keep(data.copper), ready: (data.copper || []).length > 0 },
-    { id: 'cs2', title: 'CS2', icon: data.icons?.cs2 || '/platforms/cs2.svg', items: keep(data.cs2), ready: (data.cs2 || []).length > 0 },
-    { id: 'tf2', title: 'TF2', icon: data.icons?.tf2 || '/extras/tf2.svg', items: keep(data.tf2), ready: (data.tf2 || []).length > 0 },
+  const still = stillMotion();
+  const keep = (items: MarketTapeItem[]) => items.filter((item) => matches(needle, [item.name, item.symbol, item.sourceLabel]));
+  const ranked = (items: MarketTapeItem[]) => [...items].sort((a, b) => Math.abs(b.changePct ?? 0) - Math.abs(a.changePct ?? 0));
+  const packs = [
+    { id: 'crypto', title: 'Cripto', hint: 'criptomonedas bitcoin', icon: data.cryptos?.find((item) => item.image)?.image || '/markets/crypto.svg', raw: data.cryptos || [] },
+    { id: 'stock', title: 'Acciones', hint: 'bolsa', icon: '/markets/stock.svg', raw: data.stocks || [] },
+    { id: 'etf', title: 'ETF', hint: 'fondos', icon: '/markets/etf.svg', raw: data.etfs || [] },
+    { id: 'index', title: 'Índices', hint: 'indice ibex', icon: '/markets/index.svg', raw: data.indices || [] },
+    { id: 'gold', title: 'Oro', hint: 'gold', icon: '/platforms/oro.svg', raw: data.gold || [] },
+    { id: 'silver', title: 'Plata', hint: 'silver', icon: '/markets/silver.svg', raw: data.silver || [] },
+    { id: 'oil', title: 'Petróleo', hint: 'petroleo brent', icon: '/markets/oil.svg', raw: data.oil || [] },
+    { id: 'copper', title: 'Cobre', hint: 'copper', icon: '/markets/copper.svg', raw: data.copper || [] },
+    { id: 'cs2', title: 'CS2', hint: 'skins counter strike', icon: data.icons?.cs2 || '/platforms/cs2.svg', raw: data.cs2 || [] },
+    { id: 'tf2', title: 'TF2', hint: 'team fortress', icon: data.icons?.tf2 || '/extras/tf2.svg', raw: data.tf2 || [] },
   ];
-  const chips = sections.filter((section) => section.ready);
-  const visible = market === 'all' ? sections : sections.filter((section) => section.id === market);
-  const investments = data.items.filter((item) => matches(needle, [item.name, item.symbol, item.accountName]));
-  const pending = data.pending.filter((item) => matches(needle, [item.name, item.symbol, item.accountName]));
-  const tapes = sections.flatMap((section) => section.items);
-  const fresh = [...tapes, ...data.items].some((item) => !item.stale && !item.error);
+  const sections = packs.map((pack) => {
+    const items = keep(pack.raw);
+    const titleHit = needle.length > 0 && fold(`${pack.title} ${pack.hint}`).includes(fold(needle));
+    return { ...pack, items, ready: pack.raw.length > 0, show: pack.raw.length > 0 && (!needle || titleHit || items.length > 0), preview: ranked(items.length ? items : pack.raw).slice(0, 2) };
+  });
+  const doors = sections.filter((section) => section.show);
+  const active = sections.find((section) => section.id === market);
+  const hero = HERO_MARKETS.has(market);
+  const listed = hero ? (active?.raw || []) : (active?.items || []);
+  const shown = byMove(listed, tapeFilter);
+  const showMoves = !skinDesk && !hero && market !== 'all' && market !== 'cs2' && (active?.raw.length || 0) > 1;
+  const searchOn = market === 'all' || !hero;
+  const tone = MARKET_TONE[market];
+  const placeholder = market === 'all' ? 'Un mercado, Bitcoin o Pandora' : skinDesk ? 'Otra skin o desgaste…' : tone?.search || 'Buscar';
+  const heading = skinDesk ? skinDesk.label : market === 'all' ? 'Mercado' : active?.title || 'Mercado';
+  const stageKey = skinDesk ? `skin:${skinDesk.name}:${skinDesk.paintIndex ?? ''}` : market;
+  const openTape = (item: MarketTapeItem) => setOpen({ kind: item.kind, key: item.key, name: item.name, symbol: item.symbol, priceEur: item.priceEur, changePct: item.changePct, changeLabel: item.changeLabel, sparkline: item.sparkline });
+  const enter = (id: string) => {
+    const section = sections.find((item) => item.id === id);
+    const titleHit = Boolean(section && needle && fold(`${section.title} ${section.hint}`).includes(fold(needle)));
+    dir.current = 1;
+    if (needle && titleHit && section && section.items.length === 0) setQuery('');
+    setTapeFilter('all');
+    setSkinDesk(null);
+    setWearPick('all');
+    setMarket(id);
+  };
+  const back = () => {
+    dir.current = -1;
+    if (skinDesk) {
+      setSkinDesk(null);
+      setWearPick('all');
+      setQuery('');
+      setMarket('cs2');
+      return;
+    }
+    setMarket('all');
+    setTapeFilter('all');
+  };
+  const openSkin = (hit: SkinHit, wear: string | null) => {
+    dir.current = market === 'cs2' ? dir.current : 1;
+    setMarket('cs2');
+    setSkinDesk(hit);
+    setWearPick(wear && hit.wears.some((row) => row.wear === wear) ? wear : 'all');
+  };
+  const fresh = [...sections.flatMap((section) => section.raw), ...data.items].some((item) => !item.stale && !item.error);
   const empty = sections.every((section) => !section.ready) && data.items.length === 0;
-  const noMatch = !empty && needle.length > 0 && !skinMatch && tapes.length + investments.length + pending.length === 0;
+  const noMatch = market === 'all' && !empty && needle.length > 0 && !skinMatch && doors.length === 0;
+  const filtered = needle.length > 0 || tapeFilter !== 'all';
 
   return (
-    <div className="mx-auto min-w-0 max-w-5xl space-y-5">
+    <div className="relative mx-auto min-w-0 max-w-5xl space-y-5">
+      {tone && market !== 'all' && (
+        <div aria-hidden className="pointer-events-none absolute inset-x-0 -top-4 -z-10 h-56" style={{ background: `radial-gradient(560px 190px at 8% 0%, ${tone.wash}, transparent 72%)` }} />
+      )}
       <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <p className="text-xs font-black uppercase tracking-widest text-indigo-500">Cotizaciones</p>
-          <h1 className="text-2xl font-black tracking-tight sm:text-3xl">Mercado</h1>
+        <div className="min-w-0">
+          <AnimatePresence mode="wait" initial={false}>
+            {market === 'all' ? (
+              <motion.p key="kicker" initial={still ? false : { opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={still ? undefined : { opacity: 0, y: -6, transition: quickOut }} transition={softSpring} className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">Elige un mercado</motion.p>
+            ) : (
+              <motion.button key="back" type="button" onClick={back} initial={still ? false : { opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} exit={still ? undefined : { opacity: 0, x: -8, transition: quickOut }} transition={softSpring} className="mb-1 inline-flex items-center gap-0.5 rounded-full bg-white py-2 pl-2 pr-3.5 text-sm font-black text-slate-800 shadow-sm ring-1 ring-slate-200 dark:bg-white/10 dark:text-white dark:ring-white/10">
+                <ChevronLeft size={18} />
+                {skinDesk ? 'CS2' : 'Mercados'}
+              </motion.button>
+            )}
+          </AnimatePresence>
+          <h1 className="flex min-w-0 items-center gap-2.5 text-2xl font-semibold tracking-tight sm:text-3xl">
+            {skinDesk?.image ? (
+              <img src={skinDesk.image} alt="" referrerPolicy="no-referrer" className="h-9 w-12 shrink-0 object-contain" />
+            ) : active ? (
+              <img src={active.icon} alt="" referrerPolicy="no-referrer" className="h-8 w-8 shrink-0 rounded-2xl bg-white object-cover" />
+            ) : null}
+            <span className="truncate">{heading}</span>
+          </h1>
         </div>
         <div className="flex flex-col items-end gap-2">
           <p className="flex items-center gap-2 text-xs font-bold text-slate-500">
@@ -690,33 +1042,31 @@ export function Market({ focusListing, focusTick = 0 }: { focusListing?: string 
           </div>
         </div>
       </div>
-      <div className="sticky top-0 z-10 -mx-1 bg-[var(--app-bg)]/85 px-1 py-2 backdrop-blur-xl">
-        <Input
-          icon={<Search size={16} />}
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="Bitcoin, VWCE o AK Redline"
-          aria-label="Buscar en el mercado"
-          trailing={
-            query ? (
-              <button type="button" onClick={() => setQuery('')} aria-label="Borrar búsqueda" className="grid h-8 w-8 place-items-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-white/10 dark:hover:text-white">
-                <X size={16} />
-              </button>
-            ) : undefined
-          }
-        />
-      </div>
-      <div className="market-pills -mx-4 flex max-w-full flex-nowrap gap-2 px-4 pb-1">
-        <button type="button" onClick={() => setMarket('all')} className={cn('shrink-0 rounded-full px-3 py-1.5 text-sm font-bold', market === 'all' ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900' : 'bg-white text-slate-500 dark:bg-white/10')}>Todos</button>
-        {chips.map((section) => (
-          <button key={section.id} type="button" onClick={() => setMarket(section.id)} className={cn('inline-flex shrink-0 items-center gap-2 rounded-full py-1 pl-1 pr-3 text-sm font-bold', market === section.id ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900' : 'bg-white text-slate-600 dark:bg-white/10 dark:text-slate-200')}>
-            <img src={section.icon} alt="" width={28} height={28} referrerPolicy="no-referrer" className="h-7 w-7 rounded-full bg-white object-cover" />
-            {section.title}
-          </button>
-        ))}
-      </div>
-      <p className="text-sm font-medium text-slate-500">Pulsa una cotización para ver cómo ha ido. El porcentaje de la gráfica es el de ese tramo. En la lista, el verde y el rojo son el día o la sesión.</p>
-      {data.warning && <p className="rounded-2xl bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">{data.warning}</p>}
+      {searchOn && (
+        <div className="sticky top-0 z-20 -mx-1 bg-[var(--app-bg)]/85 px-1 py-2 backdrop-blur-xl">
+          <div className="relative">
+            <Input
+              icon={<Search size={16} />}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder={placeholder}
+              aria-label="Buscar en este mercado"
+              style={tone && market !== 'all' ? { boxShadow: `inset 3px 0 0 ${tone.accent}` } : undefined}
+              trailing={
+                query ? (
+                  <button type="button" onClick={() => setQuery('')} aria-label="Borrar búsqueda" className="grid h-8 w-8 place-items-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-white/10 dark:hover:text-white">
+                    <X size={16} />
+                  </button>
+                ) : undefined
+              }
+            />
+            {(market === 'all' || market === 'cs2') && needle.length >= 2 && (
+              <SkinSuggest query={needle} onMatch={setSkinMatch} onPick={openSkin} />
+            )}
+          </div>
+        </div>
+      )}
+      {data.warning && !skinDesk && <p className="rounded-2xl bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">{data.warning}</p>}
       {desk === 'saved' && (
         <Modal title="Me interesa" onClose={() => setDesk(null)}>
           <SavedDesk needle={needle} />
@@ -732,32 +1082,95 @@ export function Market({ focusListing, focusTick = 0 }: { focusListing?: string 
           <AlertDesk items={data.signals || []} catalog={sections.flatMap((section) => section.items)} onChanged={load} />
         </Modal>
       )}
-      {needle.length >= 2 && <CsfloatQuery query={needle} onMatch={setSkinMatch} />}
-      {empty && <p className="rounded-2xl bg-slate-100 px-4 py-6 text-sm font-medium text-slate-500 dark:bg-slate-900">El mercado no ha respondido todavía. Cuando haya un precio real, se queda aunque la fuente falle después.</p>}
-      {noMatch && <p className="rounded-2xl bg-slate-100 px-4 py-6 text-sm font-medium text-slate-500 dark:bg-slate-900">Ninguna cotización coincide con «{needle}».</p>}
-      {visible.map((section) => <TapeSection key={section.id} title={section.title} icon={section.icon} items={section.items} onPick={market === 'all' ? () => setMarket(section.id) : undefined} onOpen={(item) => setOpen({ kind: item.kind, key: item.key, name: item.name, symbol: item.symbol, priceEur: item.priceEur, changePct: item.changePct, changeLabel: item.changeLabel, sparkline: item.sparkline })} />)}
-      {market === 'all' && investments.length > 0 && (
-        <section className="space-y-2">
-          <h2 className="text-lg font-black">Tus inversiones</h2>
-          <Card className="px-4 py-1">
-            {investments.map((item) => (
-              <QuoteRow
-                key={item.holdingId}
-                item={item}
-                onChanged={load}
-                onOpen={() => setOpen({ kind: item.assetClass, key: item.quoteKey || '', name: item.name, symbol: item.symbol, priceEur: item.priceEur, changePct: item.changePct, changeLabel: item.changeLabel, sparkline: item.sparkline })}
-              />
-            ))}
-          </Card>
-        </section>
-      )}
+      <AnimatePresence mode="wait" initial={false} custom={dir.current}>
+        <motion.div
+          key={stageKey}
+          custom={dir.current}
+          variants={shift}
+          initial={still ? false : 'enter'}
+          animate="center"
+          exit={still ? undefined : 'exit'}
+          transition={softSpring}
+          className="space-y-4"
+        >
+          {skinDesk ? (
+            <DragRow className="-mx-4 flex max-w-full flex-nowrap gap-1.5 px-4">
+              <button type="button" onClick={() => setWearPick('all')} className={cn('shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-black uppercase tracking-wide', wearPick === 'all' ? 'bg-[#de9b35] text-[#1a1208]' : 'bg-[#1a1d24] text-white/80')}>General</button>
+              {skinDesk.wears.map((option) => (
+                <button key={option.wear} type="button" onClick={() => setWearPick(option.wear)} className={cn('shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-black uppercase tracking-wide', wearPick === option.wear ? 'bg-[#de9b35] text-[#1a1208]' : 'bg-[#1a1d24] text-white/80')}>
+                  {WEAR_CHIP[option.wear] || option.wear}
+                </button>
+              ))}
+            </DragRow>
+          ) : showMoves ? (
+            <MoveFilter tone={market === 'crypto' ? 'pills' : 'segment'} value={tapeFilter} onChange={setTapeFilter} />
+          ) : null}
+          {market === 'all' ? (
+            empty ? <EmptyNote>El mercado no ha respondido todavía.</EmptyNote>
+            : noMatch ? <EmptyNote>{`Nada coincide con «${needle}».`}</EmptyNote>
+            : (
+              <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+                {doors.map((section, index) => {
+                  const paint = MARKET_TONE[section.id]?.accent || '#94a3b8';
+                  const lead = section.preview[0];
+                  const solo = section.raw.length <= 1;
+                  return (
+                    <motion.button
+                      key={section.id}
+                      type="button"
+                      onClick={() => enter(section.id)}
+                      initial={still ? false : { opacity: 0, y: 14 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      whileTap={still ? undefined : { scale: 0.98 }}
+                      transition={still ? { duration: 0 } : { ...softSpring, delay: Math.min(index, 9) * 0.028 }}
+                      className="flex min-h-[9.25rem] flex-col rounded-[28px] bg-white p-3.5 text-left ring-1 ring-slate-200/70 dark:bg-slate-900 dark:ring-white/10"
+                      style={{ boxShadow: `inset 0 2px 0 ${paint}` }}
+                    >
+                      <span className="flex items-center justify-between gap-2">
+                        <img src={section.icon} alt="" width={36} height={36} referrerPolicy="no-referrer" className="h-9 w-9 rounded-2xl bg-white object-cover" />
+                        {section.raw.length > 1 && <span className="text-[11px] font-bold tabular-nums text-slate-400">{section.raw.length}</span>}
+                      </span>
+                      <span className="mt-3 block text-base font-semibold">{section.title}</span>
+                      {solo && lead ? (
+                        <span className="mt-auto pt-2">
+                          <span className="block text-lg font-black tabular-nums">{quoteAmount(lead.kind, lead.priceEur)}</span>
+                          <Pct value={lead.changePct} className="text-xs" />
+                        </span>
+                      ) : (
+                        <span className="mt-auto block space-y-1 pt-2">
+                          {section.preview.map((item) => (
+                            <span key={item.key} className="flex items-center justify-between gap-2 text-[11px] font-bold">
+                              <span className="truncate text-slate-500">{item.symbol}</span>
+                              <Pct value={item.changePct} className="text-[11px]" />
+                            </span>
+                          ))}
+                        </span>
+                      )}
+                    </motion.button>
+                  );
+                })}
+              </div>
+            )
+          ) : skinDesk ? (
+            <SkinMarket skin={skinDesk} wear={wearPick} />
+          ) : market === 'crypto' ? (
+            <CryptoBoard items={shown} filtered={filtered} quiet={skinMatch && shown.length === 0} onOpen={openTape} />
+          ) : market === 'stock' ? (
+            <StockBoard items={shown} filtered={filtered} onOpen={openTape} />
+          ) : market === 'etf' ? (
+            <EtfBoard items={shown} filtered={filtered} onOpen={openTape} />
+          ) : market === 'index' ? (
+            <IndexBoard items={shown} filtered={filtered} onOpen={openTape} />
+          ) : hero ? (
+            <HeroBoard item={active?.raw[0]} accent={tone?.accent || '#94a3b8'} onOpen={openTape} />
+          ) : market === 'cs2' ? (
+            <GameBoard items={shown} filtered={filtered} quiet={skinMatch && shown.length === 0} onOpen={openTape} />
+          ) : (
+            <GameBoard items={shown} filtered={filtered} quiet={false} warm onOpen={openTape} />
+          )}
+        </motion.div>
+      </AnimatePresence>
       {open && <StoryDialog item={open} onClose={() => setOpen(null)} />}
-      {market === 'all' && pending.length > 0 && (
-        <div className="space-y-3">
-          <h2 className="text-lg font-black">Sin cotización automática</h2>
-          {pending.map((item) => <PendingRow key={item.holdingId} item={item} onChanged={load} />)}
-        </div>
-      )}
     </div>
   );
 }

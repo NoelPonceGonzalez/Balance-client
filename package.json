@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:keep": "node scripts/keep-dev.mjs",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --port 4174",
     "lint": "tsc --noEmit"

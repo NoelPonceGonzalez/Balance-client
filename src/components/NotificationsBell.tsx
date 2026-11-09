@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Bell } from 'lucide-react';
 import { api } from '@/lib/api';
-import { enablePhonePush } from '@/lib/push';
+import { activatePush } from '@/lib/device';
 import { formatAgo } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import type { AppNotification } from '@/lib/types';
@@ -71,7 +71,7 @@ export function NotificationsBell({ align = 'left', onDue, onPlan, onOffer, onLi
   };
 
   const enableBrowser = async () => {
-    const message = await enablePhonePush().catch((err: Error) => err.message);
+    const message = await activatePush().catch((err: Error) => err.message);
     setPermission(typeof Notification === 'undefined' ? 'denied' : Notification.permission);
     setPhone(message);
   };
@@ -82,7 +82,7 @@ export function NotificationsBell({ align = 'left', onDue, onPlan, onOffer, onLi
     <div className="fixed z-[70] w-[min(20rem,calc(100vw-1.5rem))] rounded-3xl border border-slate-200 bg-white p-3 shadow-2xl dark:border-slate-800 dark:bg-slate-950" style={{ top: spot.top, left: spot.left }}>
       <div className="mb-2 flex items-center justify-between gap-2">
         <p className="font-black">Avisos</p>
-        {unread > 0 && <button type="button" onClick={() => void markRead()} className="text-xs font-bold text-indigo-600">Marcar leídos</button>}
+        {unread > 0 && <button type="button" onClick={() => void markRead()} className="text-xs font-semibold text-slate-900 dark:text-white">Marcar leídos</button>}
       </div>
       {permission !== 'granted' && (
         <button type="button" onClick={() => void enableBrowser()} className="mb-2 w-full rounded-2xl bg-slate-100 px-3 py-2 text-left text-xs font-bold text-slate-600 dark:bg-slate-900 dark:text-slate-300">

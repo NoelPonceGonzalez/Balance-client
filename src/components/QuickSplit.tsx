@@ -84,17 +84,17 @@ export function QuickSplit({ onClose, onSaved }: { onClose: () => void; onSaved:
           <button type="button" onClick={() => setPlatform(null)} className="flex items-center gap-3 text-left">
             <PlatformLogo name={platform.name} size={44} />
             <span>
-              <span className="block font-black">{platform.name}</span>
-              <span className="text-xs font-bold text-indigo-600">Cambiar sitio</span>
+              <span className="block font-semibold">{platform.name}</span>
+              <span className="text-xs font-semibold text-slate-900 dark:text-white">Cambiar sitio</span>
             </span>
           </button>
           <Input label="Líquido €" type="number" step="any" value={liquid} onChange={(event) => setLiquid(event.target.value)} placeholder="Dinero sin invertir" />
           <div>
             <div className="mb-2 flex items-center justify-between">
-              <p className="text-xs font-black uppercase tracking-widest text-slate-400">Inversiones</p>
+              <p className="text-[13px] font-semibold text-slate-500">Piezas</p>
               <div className="flex gap-1">
                 {KINDS.map((kind) => (
-                  <button key={kind.id} type="button" onClick={() => setLines([...lines, { assetClass: kind.id, name: '', amount: '' }])} className="rounded-lg bg-slate-100 px-2 py-1 text-[11px] font-black text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                  <button key={kind.id} type="button" onClick={() => setLines([...lines, { assetClass: kind.id, name: '', amount: '' }])} className="rounded-lg bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                     + {kind.label}
                   </button>
                 ))}
@@ -108,7 +108,7 @@ export function QuickSplit({ onClose, onSaved }: { onClose: () => void; onSaved:
                   </select>
                   <Input placeholder={line.assetClass === 'crypto' ? 'Bitcoin' : 'VWCE'} value={line.name} onChange={(event) => setLines(lines.map((item, i) => (i === index ? { ...item, name: event.target.value } : item)))} />
                   <Input type="number" step="any" placeholder="Importe €" value={line.amount} onChange={(event) => setLines(lines.map((item, i) => (i === index ? { ...item, amount: event.target.value } : item)))} />
-                  <button type="button" onClick={() => setLines(lines.filter((_, i) => i !== index))} className="px-2 text-sm font-black text-slate-400" aria-label="Quitar línea">×</button>
+                  <button type="button" onClick={() => setLines(lines.filter((_, i) => i !== index))} className="px-2 text-sm font-semibold text-slate-400" aria-label="Quitar línea">×</button>
                 </div>
               ))}
             </div>

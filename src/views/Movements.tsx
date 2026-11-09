@@ -2,12 +2,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { PlatformLogo } from '@/components/PlatformLogo';
 import { QuietLoad } from '@/components/QuietLoad';
 import { Button } from '@/components/ui/Button';
-import { Card } from '@/components/ui/Card';
 import { Field, Input, fieldClass } from '@/components/ui/Input';
-import { Modal } from '@/components/Modal';
+import { EntrySheet } from '@/components/EntrySheet';
 import { api, ApiError } from '@/lib/api';
 import { formatDay, formatEur } from '@/lib/format';
-import { CATEGORIES, TYPE_LABEL } from '@/lib/labels';
+import { TYPE_LABEL } from '@/lib/labels';
+import { verbFromType } from '@/lib/verbs';
 import { cn, docId } from '@/lib/utils';
 import type { AccountRow, HoldingRow, MovementRow } from '@/lib/types';
 
@@ -135,6 +135,20 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
     return out;
   }, [sorted]);
 
+  const sections = useMemo(() => {
+    const out: { title: string; groups: typeof grouped }[] = [];
+    for (const group of grouped) {
+      const row = group.rows[0];
+      const title = sort.key === 'date'
+        ? (group.rows.length > 1 ? `${MONTHS[Number(row.date.slice(5, 7)) - 1] || ''} ${row.date.slice(0, 4)}` : formatDay(row.date))
+        : '';
+      const last = out[out.length - 1];
+      if (last && last.title === title) last.groups.push(group);
+      else out.push({ title, groups: [group] });
+    }
+    return out;
+  }, [grouped, sort.key]);
+
   const accountOf = (id?: string | null) => accounts.find((account) => docId(account) === id);
   const nameOf = (id?: string | null) => accountOf(id)?.name || '—';
 
@@ -200,10 +214,9 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
 
   return (
     <div className={embedded ? 'space-y-4' : 'mx-auto max-w-3xl space-y-5'}>
-      <div className="flex flex-wrap items-end justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className={embedded ? 'text-lg font-black' : 'text-2xl font-black tracking-tight sm:text-3xl'}>Movimientos</h2>
-          <p className="mt-1 max-w-2xl text-sm font-medium text-slate-500">Compras, retiros, intereses y conversiones. Si no hay cambio a euros, el apunte se guarda en su moneda y no entra en el patrimonio en euros.</p>
+          <h2 className={embedded ? 'text-lg font-semibold tracking-tight' : 'text-2xl font-semibold tracking-tight'}>Movimientos</h2>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={exportCsv}>Exportar</Button>
@@ -211,7 +224,7 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
         </div>
       </div>
       {error && <p className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">{error}</p>}
-      <Card className="border-white/70 bg-white/45 shadow-[0_8px_32px_rgba(15,23,42,0.06)] backdrop-blur-2xl dark:border-white/10 dark:bg-white/10">
+      <div className="rounded-[28px] bg-white px-4 py-4 ring-1 ring-slate-200/70 dark:bg-slate-900 dark:ring-white/10">
         <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
           <Field label="Sitio">
             <select className={fieldClass} aria-label="Sitio" value={filters.accountId} onChange={(event) => setFilters({ ...filters, accountId: event.target.value })}>
@@ -265,149 +278,80 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
             <Input label="Hasta" type="date" value={filters.to} onChange={(e) => setFilters({ ...filters, to: e.target.value })} />
           </div>
         </details>
-      </Card>
-      <ul className="overflow-hidden rounded-[28px] border border-white/70 bg-white/55 shadow-[0_8px_32px_rgba(15,23,42,0.06)] backdrop-blur-2xl dark:border-white/10 dark:bg-slate-900/55">
-        {grouped.map((group) => {
-          const row = group.rows[0];
-          const many = group.rows.length > 1;
-          const open = openGroup === group.id;
-          const total = group.rows.reduce((sum, item) => sum + item.amount * moveSign(item), 0);
-          return (
-            <li key={group.id} className="border-t border-slate-100 first:border-t-0 dark:border-white/10">
-              <button type="button" onClick={() => { if (many) setOpenGroup(open ? null : group.id); else openEdit(row); }} className="flex w-full items-center gap-3 px-3 py-3 text-left">
-                <PlatformLogo name={accountOf(row.accountId)?.platform || nameOf(row.accountId)} size={32} />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-bold">{moveTitle(row)}</span>
-                  <span className="block truncate text-[11px] font-medium text-slate-400">
-                    {many ? `${MONTHS[Number(row.date.slice(5, 7)) - 1]} ${row.date.slice(0, 4)} · ${group.rows.length} apuntes` : `${formatDay(row.date)} · ${TYPE_LABEL[row.type] || row.type}`}
-                    {` · ${nameOf(row.accountId)}`}
-                  </span>
-                </span>
-                <span className={cn('shrink-0 text-right text-sm font-black tabular-nums', moveTone(row))}>
-                  {total > 0 ? '+' : total < 0 ? '−' : ''}{formatMove(total, row.currency)}
-                </span>
-              </button>
-              {many && open && (
-                <ul className="border-t border-slate-100 bg-slate-50/70 dark:border-white/10 dark:bg-black/20">
-                  {group.rows.map((item) => (
-                    <li key={docId(item)}>
-                      <button type="button" onClick={() => openEdit(item)} className="flex w-full items-center justify-between gap-3 px-4 py-2 text-left">
-                        <span className="text-[11px] font-medium text-slate-500">{formatDay(item.date)} · {(item.description.split('·')[1] || '').trim()}</span>
-                        <span className={cn('text-xs font-black tabular-nums', moveTone(item))}>{moveSign(item) < 0 ? '−' : '+'}{formatMove(item.amount, item.currency)}</span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </li>
-          );
-        })}
-        {!ready && (
-          <li className="px-2 py-3">
-            <QuietLoad kind="rows" />
-          </li>
-        )}
-        {ready && grouped.length === 0 && (
-          <li className="px-4 py-8 text-center text-sm text-slate-500">
-            No hay movimientos en este periodo.
-            <button type="button" className="mt-3 block w-full font-bold text-indigo-600" onClick={() => { setYear('2025'); setMonth(''); setFilters({ ...filters, ...periodRange('2025', '') }); }}>Ver 2025</button>
-          </li>
-        )}
-      </ul>
+      </div>
+      {!ready && <QuietLoad kind="rows" />}
+      {ready && sections.length === 0 && (
+        <div className="rounded-[28px] bg-white px-4 py-8 text-center text-sm text-slate-500 ring-1 ring-slate-200/70 dark:bg-slate-900 dark:ring-white/10">
+          No hay movimientos en este periodo.
+          <button type="button" className="mt-3 block w-full font-semibold text-slate-900 dark:text-white" onClick={() => { setYear('2025'); setMonth(''); setFilters({ ...filters, ...periodRange('2025', '') }); }}>Ver 2025</button>
+        </div>
+      )}
+      <div className="space-y-5">
+        {sections.map((section) => (
+          <section key={`${section.title}-${section.groups[0]?.id || ''}`}>
+            {section.title && <h3 className="px-1 pb-2 text-[13px] font-medium text-slate-400">{section.title}</h3>}
+            <ul className="overflow-hidden rounded-[28px] bg-white ring-1 ring-slate-200/70 dark:bg-slate-900 dark:ring-white/10">
+              {section.groups.map((group) => {
+                const row = group.rows[0];
+                const many = group.rows.length > 1;
+                const open = openGroup === group.id;
+                const total = group.rows.reduce((sum, item) => sum + item.amount * moveSign(item), 0);
+                return (
+                  <li key={group.id} className="border-t border-slate-100 first:border-t-0 dark:border-white/10">
+                    <button type="button" onClick={() => { if (many) setOpenGroup(open ? null : group.id); else openEdit(row); }} className="flex w-full items-center gap-3 px-4 py-3.5 text-left">
+                      <PlatformLogo name={accountOf(row.accountId)?.platform || nameOf(row.accountId)} size={32} />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-semibold">{moveTitle(row)}</span>
+                        <span className="block truncate text-[11px] font-medium text-slate-400">
+                          {many ? `${group.rows.length} apuntes · ${nameOf(row.accountId)}` : `${TYPE_LABEL[row.type] || row.type} · ${nameOf(row.accountId)}`}
+                        </span>
+                      </span>
+                      <span className={cn('shrink-0 text-right text-sm font-semibold tabular-nums', moveTone(row))}>
+                        {total > 0 ? '+' : total < 0 ? '−' : ''}{formatMove(total, row.currency)}
+                      </span>
+                    </button>
+                    {many && open && (
+                      <ul className="border-t border-slate-100 dark:border-white/10">
+                        {group.rows.map((item) => (
+                          <li key={docId(item)} className="border-t border-slate-100 first:border-t-0 dark:border-white/10">
+                            <button type="button" onClick={() => openEdit(item)} className="flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left">
+                              <span className="text-[13px] font-medium text-slate-500">{formatDay(item.date)} · {(item.description.split('·')[1] || '').trim()}</span>
+                              <span className={cn('text-xs font-semibold tabular-nums', moveTone(item))}>{moveSign(item) < 0 ? '−' : '+'}{formatMove(item.amount, item.currency)}</span>
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        ))}
+      </div>
       {draft && (
-        <Modal title={editing ? 'Editar movimiento' : 'Nuevo movimiento'} onClose={() => setDraft(null)}>
-          <div className="grid gap-3">
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Tipo">
-                <select className={fieldClass} value={draft.type} onChange={(e) => { setFormMore(e.target.value !== 'expense' && e.target.value !== 'income'); setDraft({ ...draft, type: e.target.value }); }}>
-                  {Object.entries(TYPE_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                </select>
-              </Field>
-              {simpleMove && !formMore && !editing ? (
-                <>
-                  <Input label="Qué es" value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} />
-                  <Input label="Importe" type="number" step="any" value={draft.amount} onChange={(e) => setDraft({ ...draft, amount: e.target.value })} />
-                  <Field label="Cuenta">
-                    <select className={fieldClass} value={draft.accountId} onChange={(e) => pickAccount(e.target.value)}>
-                      <option value="">Elige</option>
-                      {accounts.filter((account) => !account.archived).map((account) => <option key={docId(account)} value={docId(account)}>{account.name}</option>)}
-                    </select>
-                  </Field>
-                </>
-              ) : (
-                <>
-              <Input label="Fecha" type="date" value={draft.date} onChange={(e) => setDraft({ ...draft, date: e.target.value })} />
-              <Input label="Importe" type="number" step="any" value={draft.amount} onChange={(e) => setDraft({ ...draft, amount: e.target.value })} />
-              <Input label="Moneda" value={draft.currency} onChange={(e) => setDraft({ ...draft, currency: e.target.value.toUpperCase(), applyToBalances: e.target.value.toUpperCase() === 'EUR' ? draft.applyToBalances : false })} />
-              <Field label="Cuenta">
-                <select className={fieldClass} value={draft.accountId} onChange={(e) => pickAccount(e.target.value)}>
-                  <option value="">Elige</option>
-                  {accounts.filter((account) => !account.archived).map((account) => <option key={docId(account)} value={docId(account)}>{account.name}</option>)}
-                </select>
-              </Field>
-              {draft.type === 'transfer' && (
-                <Field label="Destino">
-                  <select className={fieldClass} value={draft.counterAccountId} onChange={(e) => setDraft({ ...draft, counterAccountId: e.target.value })}>
-                    <option value="">Elige</option>
-                    {accounts.filter((account) => docId(account) !== draft.accountId && !account.archived).map((account) => <option key={docId(account)} value={docId(account)}>{account.name}</option>)}
-                  </select>
-                </Field>
-              )}
-              {(draft.type === 'buy' || draft.type === 'sell') && (
-                <>
-                  <Field label="Activo">
-                    <select className={fieldClass} value={draft.holdingId} onChange={(e) => setDraft({ ...draft, holdingId: e.target.value })}>
-                      <option value="">Elige</option>
-                      {accountHoldings.map((item) => <option key={docId(item)} value={docId(item)}>{item.name}</option>)}
-                    </select>
-                  </Field>
-                  <Input label="Recibí" type="number" step="any" value={draft.quantity} onChange={(e) => setDraft({ ...draft, quantity: e.target.value })} />
-                  <p className="text-xs font-medium text-slate-500 sm:col-span-2">En la cuenta, con la fecha y la hora, se calcula lo que recibiste.</p>
-                </>
-              )}
-              {draft.type === 'adjustment' && (
-                <Field label="El saldo">
-                  <select className={fieldClass} value={draft.direction} onChange={(e) => setDraft({ ...draft, direction: e.target.value as 'in' | 'out' })}>
-                    <option value="in">Sube</option>
-                    <option value="out">Baja</option>
-                  </select>
-                </Field>
-              )}
-              <Field label="Categoría">
-                <input list="categories" className={fieldClass} value={draft.category} onChange={(e) => setDraft({ ...draft, category: e.target.value })} />
-                <datalist id="categories">{CATEGORIES.map((item) => <option key={item} value={item} />)}</datalist>
-              </Field>
-              <Input label="Comisión informativa" type="number" step="any" value={draft.fee} onChange={(e) => setDraft({ ...draft, fee: e.target.value })} placeholder="No se resta otra vez" />
-                </>
-              )}
-            </div>
-            {simpleMove && !formMore && !editing && (
-              <button type="button" onClick={() => setFormMore(true)} className="text-left text-sm font-bold text-slate-500">Fecha, categoría y comisión</button>
-            )}
-            {(formMore || editing || !simpleMove) && (
-              <>
-            <Input label="Descripción" value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} />
-            {draft.currency === 'EUR' ? (
-              <label className="flex items-center gap-2 text-sm font-medium">
-                <input type="checkbox" checked={draft.applyToBalances} onChange={(e) => setDraft({ ...draft, applyToBalances: e.target.checked })} />
-                Actualizar el saldo de la cuenta
-              </label>
-            ) : (
-              <p className="text-xs font-medium text-slate-500">Se guarda en {draft.currency} y el saldo en euros no cambia.</p>
-            )}
-              </>
-            )}
-            <div className="flex items-center justify-between gap-2">
-              {editing ? (
-                <Button variant="outline" onClick={() => { if (confirmRemove) void remove(); else setConfirmRemove(true); }}>{confirmRemove ? 'Confirmar' : 'Eliminar'}</Button>
-              ) : <span />}
-              <div className="flex gap-2">
-                {duplicate && <Button variant="outline" onClick={() => save(true)}>Guardar igualmente</Button>}
-                <Button onClick={() => save(false)}>Guardar</Button>
-              </div>
-            </div>
-          </div>
-        </Modal>
+        <EntrySheet
+          accounts={accounts.filter((account) => !account.archived).map((account) => ({ id: docId(account), name: account.name, kind: account.kind, tracking: account.tracking, currency: account.currency, balance: account.balance }))}
+          pieces={holdings.map((item) => ({ id: docId(item), accountId: String(item.accountId), name: item.name }))}
+          accountId={draft.accountId}
+          verb={verbFromType(draft.type, draft.direction, draft.holdingId)}
+          editing={editing}
+          initial={{
+            amount: draft.amount,
+            date: draft.date,
+            description: draft.description,
+            category: draft.category,
+            fee: draft.fee,
+            counterAccountId: draft.counterAccountId,
+            holdingId: draft.holdingId,
+            otherHoldingId: '',
+            quantity: draft.quantity,
+            otherQuantity: '',
+          }}
+          onClose={() => { setDraft(null); setEditing(null); }}
+          onSaved={load}
+          onDelete={editing ? () => { if (confirmRemove) void remove(); else setConfirmRemove(true); } : undefined}
+        />
       )}
     </div>
   );

@@ -2,7 +2,7 @@ import { useEffect, type PointerEvent as ReactPointerEvent, type ReactNode } fro
 import { createPortal } from 'react-dom';
 
 const MENU_WIDTH = 148;
-const MENU_HEIGHT = 72;
+const MENU_HEIGHT = 168;
 
 export function placeMenu(x: number, y: number) {
   const margin = 12;

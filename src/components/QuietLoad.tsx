@@ -10,7 +10,7 @@ export function QuietLoad({ kind = 'page' }: { kind?: 'screen' | 'page' | 'rows'
     return (
       <div className="grid h-dvh place-items-center bg-[var(--app-bg)]" role="status" aria-live="polite">
         <span className="sr-only">Cargando</span>
-        <span className="quiet-mark grid h-9 w-9 place-items-center rounded-xl bg-indigo-600 text-white">
+        <span className="quiet-mark grid h-9 w-9 place-items-center rounded-xl bg-slate-950 text-white dark:bg-white dark:text-slate-950">
           <Mark size={22} />
         </span>
       </div>

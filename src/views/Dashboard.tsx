@@ -14,12 +14,15 @@ import { PLATFORM_COLORS } from '@/lib/platform-colors';
 import { findPlatform } from '@/lib/platforms';
 import { accountProducts, KIND_LABEL, kindClass, kindFromClass, partSection, type ProductKind, type ProductSection } from '@/lib/products';
 import { cn } from '@/lib/utils';
-import type { DashboardData } from '@/lib/types';
+import { nextOffer } from '@/components/OfferNotice';
+import { useOpenOffer } from '@/components/offer-focus';
+import type { AppNotification, DashboardData } from '@/lib/types';
 import { useHideChrome } from '@/components/Shell';
 import { CashChart, Wallets, type LinePoint } from '@/views/Wallets';
 import { SkinSearch, wearName, type SkinPhase } from '@/components/SkinSearch';
 import { OriginPicker } from '@/components/OriginMark';
 import { glide, jelly, quickOut, softSpring, SPRING_EASE } from '@/lib/motion';
+import { smoothPath } from '@/lib/curve';
 const HIDE_KEY = 'pat_hide_money';
 const SORT_KEY = 'pat_dash_sort';
 
@@ -141,12 +144,6 @@ function isLight(hex: string): boolean {
   const rgb = channel(hex);
   if (!rgb) return false;
   return (rgb.r * 299 + rgb.g * 587 + rgb.b * 114) / 1000 > 210;
-}
-
-function wash(hex: string): string {
-  const rgb = channel(hex);
-  if (!rgb || isLight(hex)) return 'rgba(255,255,255,0.5)';
-  return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.2)`;
 }
 
 function narrowScreen(): boolean {
@@ -311,20 +308,19 @@ function RisingAmount({ value, hidden, signed = false, card = false, delay = 0 }
 
 const rise = glide;
 
-function Donut({ slices }: { slices: { key: string; eur: number; color: string }[] }) {
+function Donut({ slices }: { slices: { key: string; eur: number }[] }) {
   const progress = useRise(1, true, 700, 40);
   const total = slices.reduce((sum, slice) => sum + slice.eur, 0);
   const radius = 68;
   const circumference = 2 * Math.PI * radius;
   let cursor = 0;
   return (
-    <svg viewBox="0 0 200 200" className="mx-auto h-40 w-40 sm:h-52 sm:w-52" role="img" aria-label="De dónde viene el patrimonio">
+    <svg viewBox="0 0 200 200" className="mx-auto h-40 w-40 text-slate-900 sm:h-52 sm:w-52 dark:text-white" role="img" aria-label="De dónde viene el patrimonio">
       <circle cx="100" cy="100" r={radius} fill="none" stroke="currentColor" strokeWidth="24" className="text-slate-100 dark:text-slate-800" />
-      {total > 0 && slices.map((slice) => {
+      {total > 0 && slices.map((slice, index) => {
         const length = (slice.eur / total) * circumference * progress;
         const gap = slices.length > 1 ? 3 * progress : 0;
         const drawn = Math.max(0, length - gap);
-        const light = isLight(slice.color);
         const node = (
           <circle
             key={slice.key}
@@ -332,12 +328,12 @@ function Donut({ slices }: { slices: { key: string; eur: number; color: string }
             cy="100"
             r={radius}
             fill="none"
-            stroke={light ? '#FFFFFF' : slice.color}
-            strokeWidth={light ? 20 : 24}
+            stroke="currentColor"
+            strokeWidth="24"
+            strokeOpacity={1 - (index / Math.max(slices.length - 1, 1)) * 0.62}
             strokeDasharray={`${drawn} ${circumference - drawn}`}
             strokeDashoffset={-cursor}
             transform="rotate(-90 100 100)"
-            style={light ? { filter: 'drop-shadow(0 0 0.6px rgba(15,23,42,0.35))' } : undefined}
           />
         );
         cursor += length;
@@ -509,7 +505,7 @@ function PieceLine({ accountId, holdingId, assetClass, now }: { accountId: strin
   return (
     <div>
       <div className="flex items-baseline justify-between gap-3">
-        <p className="text-[28px] font-black leading-none tracking-tight tabular-nums">{formatEur(live ?? now)}</p>
+        <p className="text-[2rem] font-semibold leading-none tracking-tight tabular-nums text-slate-900 dark:text-white">{formatEur(live ?? now)}</p>
         {day && <p className="text-[13px] font-semibold text-slate-400">{formatDay(day)}</p>}
       </div>
       <CashChart points={points} now={now} hidden={false} quiet tone="ink" onValue={setLive} onDay={setDay} emptyText="" />
@@ -875,15 +871,91 @@ function ExtraDialog({ draft, error, setDraft, onClose, onSave, onDelete }: { dr
   );
 }
 
+type PlanPack = {
+  plan: {
+    _id: string;
+    name: string;
+    kind?: string;
+    plannedExpenses?: { name: string; amount: number; date: string; paid?: boolean; automatic?: boolean }[];
+    incomes?: { name: string; amount: number; date: string; paid?: boolean }[];
+  };
+  forecast?: { plannedToday: number; plannedWithExpectedToday: number };
+};
+
+function madridToday(): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+}
+
+function todayMark(packs: PlanPack[], today: string): { planId: string; label: string; amount: number } | null {
+  for (const row of packs) {
+    if (row.plan.kind === 'gastos') continue;
+    const expense = (row.plan.plannedExpenses || []).find((item) => String(item.date).slice(0, 10) === today && item.paid !== true && item.automatic !== true);
+    if (expense) return { planId: String(row.plan._id), label: expense.name, amount: expense.amount };
+    const income = (row.plan.incomes || []).find((item) => String(item.date).slice(0, 10) === today && item.paid !== true);
+    if (income) return { planId: String(row.plan._id), label: income.name, amount: income.amount };
+  }
+  return null;
+}
+
+function liquidityMonth(packs: PlanPack[]): { confirmed: number; estimated: number } | null {
+  let confirmed = 0;
+  let estimated = 0;
+  let count = 0;
+  for (const row of packs) {
+    if (row.plan.kind !== 'liquidez' || !row.forecast) continue;
+    confirmed += row.forecast.plannedToday;
+    estimated += row.forecast.plannedWithExpectedToday;
+    count += 1;
+  }
+  return count > 0 ? { confirmed, estimated } : null;
+}
+
+function monthText(row: { confirmed: number; estimated: number }): string {
+  const gap = row.estimated - row.confirmed;
+  if (Math.abs(gap) < 0.5) return `Disponible previsto ${formatEur(row.confirmed)}. Todo confirmado.`;
+  return `Disponible previsto ${formatEur(row.estimated)}. Confirmado ${formatEur(row.confirmed)} · estimado ${formatSignedEur(gap)}.`;
+}
+
+function pendingMonth(data: DashboardData | null): number {
+  if (!data) return 0;
+  return data.accounts.reduce((sum, account) => sum + (account.flows || []).filter((flow) => flow.open).reduce((inner, flow) => inner + Math.abs(flow.amount), 0), 0);
+}
+
+function WorthLine({ values }: { values: number[] }) {
+  const clean = values.filter((value) => Number.isFinite(value));
+  if (clean.length < 2) return null;
+  const min = Math.min(...clean);
+  const max = Math.max(...clean);
+  const span = max - min || 1;
+  const width = 320;
+  const height = 36;
+  const xy: [number, number][] = clean.map((value, index) => {
+    const x = (index / (clean.length - 1)) * width;
+    const y = height - ((value - min) / span) * (height - 4) - 2;
+    return [x, y];
+  });
+  return (
+    <motion.svg viewBox={`0 0 ${width} ${height}`} className="mt-1 h-9 w-full text-slate-900 dark:text-white" aria-hidden initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={glide}>
+      <path d={smoothPath(xy)} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
+    </motion.svg>
+  );
+}
+
 export function Dashboard({ heroMs, home, books }: { heroMs: number; home: number; books: number }) {
   const [data, setData] = useState<DashboardData | null>(null);
   const [view, setView] = useState<'general' | 'cartera'>('general');
   const [openWallet, setOpenWallet] = useState<string | null>(null);
   const [live, setLive] = useState<number | null>(null);
   const [liveDay, setLiveDay] = useState<string | null>(null);
+  const [liveMove, setLiveMove] = useState<{ amount: number; pct: number | null } | null>(null);
   const [paneSlot, setPaneSlot] = useState<HTMLDivElement | null>(null);
   const [error, setError] = useState('');
   const [hidden, setHidden] = useState(() => localStorage.getItem(HIDE_KEY) === '1');
+  const [dueLine, setDueLine] = useState<{ label: string; amount: number; direction: 'in' | 'out' } | null>(null);
+  const [markLine, setMarkLine] = useState<{ planId: string; label: string; amount: number } | null>(null);
+  const [offerLine, setOfferLine] = useState<AppNotification | null>(null);
+  const [monthLine, setMonthLine] = useState<{ confirmed: number; estimated: number } | null>(null);
+  const openOffer = useOpenOffer();
   const [adding, setAdding] = useState(false);
   const [openKey, setOpenKey] = useState<string | null>(null);
   const [beat, setBeat] = useState(0);
@@ -951,6 +1023,29 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
   }, [books]);
 
   useEffect(() => {
+    let cancelled = false;
+    api<{ prompts: { label: string; amount: number; direction: 'in' | 'out' }[] }>('/api/plans/due')
+      .then((payload) => { if (!cancelled) setDueLine(payload.prompts?.[0] || null); })
+      .catch(() => { if (!cancelled) setDueLine(null); });
+    api<{ plans: PlanPack[] }>('/api/plans')
+      .then((payload) => {
+        if (cancelled) return;
+        const packs = payload.plans || [];
+        setMarkLine(todayMark(packs, madridToday()));
+        setMonthLine(liquidityMonth(packs));
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setMarkLine(null);
+        setMonthLine(null);
+      });
+    api<{ notifications: AppNotification[] }>('/api/market/notifications')
+      .then((payload) => { if (!cancelled) setOfferLine(nextOffer(payload.notifications || [])); })
+      .catch(() => { if (!cancelled) setOfferLine(null); });
+    return () => { cancelled = true; };
+  }, [books]);
+
+  useEffect(() => {
     const timer = window.setInterval(() => setBeat((value) => value + 1), heroMs);
     return () => window.clearInterval(timer);
   }, [heroMs]);
@@ -972,6 +1067,9 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
         fixed: account.fixed || [],
         purchases: account.planId ? (data.extras || []).filter((item) => item.boughtOn).map((item) => ({ name: item.name, amount: -Math.abs(item.costEur ?? item.valueEur), date: item.boughtOn || '', image: item.imageUrl || null })) : [],
         tracking: account.tracking,
+        kind: account.kind,
+        currency: account.currency,
+        balance: account.balance,
         sides: accountSides(account.parts || [], name),
         sections: account.sections || [],
         gainEur: gain?.eur ?? null,
@@ -1335,7 +1433,10 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
   const hideChrome = useHideChrome();
   useEffect(() => {
     hideChrome(inAccount);
-    if (!inAccount) setLiveDay(null);
+    if (!inAccount) {
+      setLiveDay(null);
+      setLiveMove(null);
+    }
     return () => hideChrome(false);
   }, [hideChrome, inAccount]);
   const barValue = inAccount && openAccount ? (live ?? openAccount.value) : shownWorth;
@@ -1355,7 +1456,7 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
       <div className="order-2 min-w-0">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <div className="flex shrink-0 items-center gap-2">
-            <p className={cn('whitespace-nowrap text-[clamp(1.45rem,7.2vw,2rem)] font-black leading-none tabular-nums', hidden || inAccount ? 'text-slate-900 dark:text-white' : totalClass)}>
+            <p className="whitespace-nowrap text-[clamp(1.65rem,7.2vw,2.15rem)] font-semibold leading-none tabular-nums tracking-tight text-slate-900 dark:text-white">
               {barValue == null ? '—' : inAccount ? (hidden ? '*****' : formatEur(barValue)) : <RisingAmount value={barValue} hidden={hidden} card />}
             </p>
             <button
@@ -1363,10 +1464,22 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
               onClick={toggleHidden}
               aria-pressed={hidden}
               aria-label={hidden ? 'Mostrar importes' : 'Ocultar importes'}
-              className="grid h-8 w-8 shrink-0 place-items-center rounded-xl text-slate-400"
+              className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-slate-300"
             >
               {hidden ? <EyeOff size={16} /> : <Eye size={16} />}
             </button>
+            {!inAccount && data?.variation.available && data.variation.amount != null && (
+              <p className={cn('text-[13px] font-semibold tabular-nums', hidden ? 'text-slate-400' : totalClass)}>
+                <RisingAmount value={data.variation.amount} hidden={hidden} signed delay={120} />
+                {data.variation.percent != null && <span className="ml-1.5">{hidden ? '*****' : formatPct(data.variation.percent)}</span>}
+              </p>
+            )}
+            {inAccount && liveMove && (
+              <p className={cn('text-[13px] font-semibold tabular-nums', hidden || liveMove.amount === 0 ? 'text-slate-400' : liveMove.amount > 0 ? 'text-[#16c784]' : 'text-[#ea3943]')}>
+                {hidden ? '*****' : formatSignedEur(liveMove.amount)}
+                {liveMove.pct != null && !hidden && <span className="ml-1.5">{formatPct(liveMove.pct)}</span>}
+              </p>
+            )}
           </div>
           {!inAccount && <div className="ml-auto"><ViewSwitch value={view} onChange={chooseView} /></div>}
           {inAccount && <div ref={setPaneSlot} className="ml-auto shrink-0" />}
@@ -1381,14 +1494,45 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
             {formatDay(liveDay)}
           </motion.p>
         )}
+        {!inAccount && !hidden && (data?.series.length || 0) > 1 && <WorthLine values={data!.series.map((point) => point.eur)} />}
+        {!inAccount && dueLine && (
+          <button type="button" onClick={() => window.dispatchEvent(new Event('pat-due'))} className="text-left text-[13px] font-semibold text-slate-500">
+            {dueLine.direction === 'in' ? 'Ha entrado' : 'Toca confirmar'} {dueLine.label}, {hidden ? '*****' : formatEur(dueLine.amount)}
+          </button>
+        )}
+        {!inAccount && markLine && markLine.label !== dueLine?.label && (
+          <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('pat-plan', { detail: markLine.planId }))} className="text-left text-[13px] font-semibold text-slate-500">
+            Hoy, {markLine.label}{hidden ? '' : `, ${formatEur(markLine.amount)}`}
+          </button>
+        )}
+        {!inAccount && offerLine && (
+          <button type="button" onClick={() => openOffer(offerLine)} className="text-left text-[13px] font-semibold text-slate-500">
+            {hidden ? 'Hay una oferta.' : offerLine.priceEur == null ? `Oferta, ${offerLine.title.split(' por debajo de ')[0] || offerLine.title}` : `Oferta, ${offerLine.title.split(' por debajo de ')[0] || offerLine.title}, ${formatEur(offerLine.priceEur)}`}
+          </button>
+        )}
+        {!inAccount && data?.variation.available && data.variation.amount != null && data.contributions.complete && (
+          <p className="text-[13px] font-medium text-slate-400">
+            {hidden ? 'Aportado y mercado, aparte.' : `Aportado ${formatSignedEur(data.contributions.eur)} · mercado ${formatSignedEur(data.variation.amount - data.contributions.eur)}`}
+          </p>
+        )}
+        {!inAccount && monthLine && (
+          <p className="text-[13px] font-medium text-slate-400">
+            {hidden ? 'Hay un disponible previsto.' : monthText(monthLine)}
+          </p>
+        )}
+        {!inAccount && !monthLine && pendingMonth(data) > 0 && (
+          <p className="text-[13px] font-medium text-slate-400">
+            {hidden ? 'Hay fijos por confirmar.' : `Por confirmar ${formatEur(pendingMonth(data))}. Lo ya anotado está en el saldo.`}
+          </p>
+        )}
       </div>
       {inAccount && openAccount && (
         <div className="order-1 flex items-center gap-2">
-          <button type="button" onClick={() => setOpenWallet(null)} className="inline-flex items-center gap-1 rounded-full bg-white/80 px-3 py-1.5 text-sm font-bold text-slate-700 shadow-sm dark:bg-white/10 dark:text-white" aria-label="Volver a carteras">
+          <button type="button" onClick={() => setOpenWallet(null)} className="inline-flex items-center gap-0.5 text-sm font-semibold text-slate-500" aria-label="Volver a carteras">
             <ChevronLeft size={16} /> Carteras
           </button>
           <PlatformLogo name={openAccount.logoName} size={28} />
-          <h2 className="min-w-0 truncate text-base font-black">{openAccount.name}</h2>
+          <h2 className="min-w-0 truncate text-base font-semibold">{openAccount.name}</h2>
         </div>
       )}
     </div>
@@ -1413,6 +1557,7 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
             onOpen={setOpenWallet}
             onFigure={setLive}
             onDay={setLiveDay}
+            onMove={setLiveMove}
             accounts={[...ordered.map((row) => ({
               key: row.key,
               name: row.name,
@@ -1423,6 +1568,10 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
               gainEur: row.gainEur,
               gainPct: row.gainPct,
               cash: row.cash,
+              kind: row.kind,
+              tracking: row.tracking,
+              currency: row.currency,
+              balance: row.balance,
               planId: row.planId,
               flows: row.flows,
               fixed: row.fixed,
@@ -1543,16 +1692,10 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
             localStorage.setItem('pat_count_extras', next ? '1' : '0');
             return next;
           })}
-          className={cn('mt-2 rounded-full border px-3 py-1 text-xs font-bold', countExtras ? 'border-slate-900 text-slate-900 dark:border-white dark:text-white' : 'border-slate-200 text-slate-400')}
+          className={cn('mt-3 text-xs font-medium', countExtras ? 'text-slate-500' : 'text-slate-300')}
         >
           {countExtras ? 'Con extras' : 'Sin extras'}
         </button>
-        {data.variation.available && data.variation.amount != null && (
-          <p className={cn('mt-1 text-[13px] font-semibold', hidden ? 'text-slate-400' : totalClass)}>
-            <RisingAmount value={data.variation.amount} hidden={hidden} signed delay={120} />
-            {data.variation.percent != null && <span className="ml-1.5">{mask(formatPct(data.variation.percent))}</span>}
-          </p>
-        )}
       </motion.section>
 
       {slices.length > 0 && (
@@ -1561,15 +1704,16 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
         </motion.div>
       )}
 
-      <section className="space-y-2">
+      <section className="space-y-3">
         {ordered.length > 0 && (
           <div className="flex justify-end">
-            <button type="button" onClick={cycleSort} className="inline-flex items-center gap-1.5 rounded-full border border-white/70 bg-white/45 px-3 py-1.5 text-xs font-bold text-slate-600 backdrop-blur-xl dark:border-white/10 dark:bg-white/5 dark:text-slate-300">
+            <button type="button" onClick={cycleSort} className="inline-flex items-center gap-1.5 px-1 py-1 text-xs font-medium text-slate-400">
               <ArrowUpDown size={13} />
               {SORTS.find((item) => item.id === sort)?.label}
             </button>
           </div>
         )}
+        {(ordered.length > 0 || (countExtras && extraWealth > 0)) && <div className="divide-y divide-slate-100 overflow-hidden rounded-[28px] bg-white ring-1 ring-slate-200/70 dark:divide-white/10 dark:bg-slate-900 dark:ring-white/10">
         {ordered.map((row, index) => {
           const frame = row.frames[beat % row.frames.length];
           const open = openKey === row.key;
@@ -1598,10 +1742,8 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
                     setOpenKey(open ? null : row.key);
                   }
                 }}
-                className="hold-target relative flex w-full cursor-pointer items-center gap-3 overflow-hidden rounded-2xl border border-white/70 py-3 pl-4 pr-3 text-left shadow-[0_8px_24px_rgba(15,23,42,0.05)] backdrop-blur-xl dark:border-white/10 sm:gap-4 sm:rounded-[28px] sm:py-4 sm:pl-5 sm:pr-4"
-                style={{ background: wash(row.color) }}
+                className="hold-target flex w-full cursor-pointer items-center gap-3 px-4 py-3.5 text-left"
               >
-                <span className="absolute inset-y-0 left-0 w-2" style={{ background: isLight(row.color) ? 'rgba(28,28,30,0.14)' : row.color }} />
                 <PlatformLogo name={row.logoName} size={32} />
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center gap-2">
@@ -1613,25 +1755,24 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
                         setView('cartera');
                         setOpenWallet(row.key);
                       }}
-                      className="inline-flex min-w-0 items-center gap-0.5 text-sm font-semibold"
-                      style={{ color: isLight(row.color) ? '#1C1C1E' : row.color }}
+                      className="inline-flex min-w-0 items-center gap-0.5 text-sm font-semibold text-slate-900 dark:text-white"
                       aria-label={`Entrar en ${row.name}`}
                     >
                       <span className="truncate">{row.name}</span>
                       <ChevronRight size={14} className="shrink-0 opacity-50" />
                     </button>
                     {narrowScreen() && (
-                      <Flip id={hidden ? 'hidden' : frame.text} className={cn('ml-auto shrink-0 text-[11px] font-black tabular-nums sm:hidden', hidden ? 'text-slate-400' : frame.className)}>
+                      <Flip id={hidden ? 'hidden' : frame.text} className={cn('ml-auto shrink-0 text-[11px] font-semibold tabular-nums sm:hidden', hidden ? 'text-slate-400' : frame.className)}>
                         {mask(frame.text)}
                       </Flip>
                     )}
                   </span>
-                  <span className="mt-0.5 block whitespace-nowrap text-[clamp(1rem,5.2vw,1.75rem)] font-black leading-none tabular-nums text-slate-900 dark:text-white sm:text-[28px]">
+                  <span className="mt-0.5 block whitespace-nowrap text-lg font-semibold leading-none tabular-nums tracking-tight text-slate-900 dark:text-white">
                     {row.value == null ? '—' : <RisingAmount value={row.value} hidden={hidden} card delay={40} />}
                   </span>
                 </span>
                 {narrowScreen() ? (
-                  <Flip id={hidden ? 'hidden' : frame.text} className={cn('hidden shrink-0 text-right text-xs font-black tabular-nums leading-tight sm:inline sm:text-base', hidden ? 'text-slate-400' : frame.className)}>
+                  <Flip id={hidden ? 'hidden' : frame.text} className={cn('hidden shrink-0 text-right text-xs font-semibold tabular-nums leading-tight sm:inline sm:text-base', hidden ? 'text-slate-400' : frame.className)}>
                     {mask(frame.text)}
                   </Flip>
                 ) : (
@@ -1642,7 +1783,7 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
                       animate={{ opacity: 1, y: 0, scale: 1 }}
                       exit={{ opacity: 0, y: -8, scale: 0.9, transition: quickOut }}
                       transition={jelly}
-                      className={cn('inline-block shrink-0 text-sm font-black tabular-nums sm:text-base', hidden ? 'text-slate-400' : frame.className)}
+                      className={cn('inline-block shrink-0 text-sm font-semibold tabular-nums sm:text-base', hidden ? 'text-slate-400' : frame.className)}
                     >
                       {mask(frame.text)}
                     </motion.span>
@@ -1650,7 +1791,7 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
                 )}
               </div>
               <AccountFold open={open}>
-                <ul className="mt-2 rounded-[28px] border border-white/70 bg-white/70 px-4 shadow-[0_8px_32px_rgba(15,23,42,0.04)] backdrop-blur-xl dark:border-white/10 dark:bg-white/10">
+                <ul className="border-t border-slate-100 px-4 dark:border-white/10">
                     {row.sides.length > 1 && (
                       <li className="pt-4 pb-1">
                         <FoldShare sides={row.sides} color={row.color} />
@@ -1665,7 +1806,7 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
                             {side.group !== 'cash' && side.items.length > 1 && (
                               <div className="flex items-baseline justify-between gap-3 pt-3.5">
                                 <span className="text-xs font-semibold text-slate-400">{side.title}</span>
-                                <span className="text-xs font-black tabular-nums text-slate-500">
+                                <span className="text-xs font-semibold tabular-nums text-slate-500">
                                   <RisingAmount value={side.total} hidden={hidden} />
                                 </span>
                               </div>
@@ -1673,7 +1814,7 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
                             {side.group === 'cash' && (
                               <div className="flex items-center justify-between gap-3 py-3.5">
                                 <span className="text-[15px] font-bold">{side.title}</span>
-                                <span className="text-[15px] font-black tabular-nums">
+                                <span className="text-[15px] font-semibold tabular-nums">
                                   <RisingAmount value={side.total} hidden={hidden} />
                                 </span>
                               </div>
@@ -1693,10 +1834,10 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
                                     {detail && <span className="mt-0.5 block truncate text-xs font-medium text-slate-400">{detail}</span>}
                                   </span>
                                   <span className="shrink-0 text-right">
-                                    <span className="block text-[15px] font-black tabular-nums">
+                                    <span className="block text-[15px] font-semibold tabular-nums">
                                       <RisingAmount value={item.eur} hidden={hidden} />
                                     </span>
-                                    {move && <span className={cn('mt-0.5 block text-xs font-black tabular-nums', move.className)}>{mask(move.text)}</span>}
+                                    {move && <span className={cn('mt-0.5 block text-xs font-semibold tabular-nums', move.className)}>{mask(move.text)}</span>}
                                   </span>
                                 </button>
                               );
@@ -1718,10 +1859,10 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
                               <span className="mt-0.5 block truncate text-xs font-medium text-slate-400">{caption}</span>
                             </span>
                             <span className="shrink-0 text-right">
-                              <span className="block text-[15px] font-black tabular-nums">
+                              <span className="block text-[15px] font-semibold tabular-nums">
                                 <RisingAmount value={alone.eur} hidden={hidden} />
                               </span>
-                              {move && <span className={cn('mt-0.5 block text-xs font-black tabular-nums', move.className)}>{mask(move.text)}</span>}
+                              {move && <span className={cn('mt-0.5 block text-xs font-semibold tabular-nums', move.className)}>{mask(move.text)}</span>}
                             </span>
                           </button>
                         </li>
@@ -1740,14 +1881,15 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
           );
         })}
         {countExtras && extraWealth > 0 && (
-          <button type="button" onClick={() => { setView('cartera'); setOpenWallet('extras'); }} className="flex w-full items-center gap-4 rounded-[28px] border border-white/70 bg-white/50 px-5 py-4 text-left dark:border-white/10 dark:bg-white/5">
-            <img src="/extras/objeto.svg" alt="" className="h-9 w-9 rounded-xl" />
+          <button type="button" onClick={() => { setView('cartera'); setOpenWallet('extras'); }} className="flex w-full items-center gap-3 px-4 py-3.5 text-left">
+            <img src="/extras/objeto.svg" alt="" className="h-8 w-8 rounded-xl" />
             <span className="min-w-0 flex-1">
               <span className="block text-sm font-semibold">Extras</span>
-              <span className="mt-0.5 block whitespace-nowrap text-[clamp(1.05rem,4.8vw,1.35rem)] font-black leading-none tabular-nums sm:text-[28px]"><RisingAmount value={extraWealth} hidden={hidden} card /></span>
+              <span className="mt-0.5 block text-lg font-semibold leading-none tabular-nums tracking-tight"><RisingAmount value={extraWealth} hidden={hidden} card /></span>
             </span>
           </button>
         )}
+        </div>}
         <motion.button
           type="button"
           onClick={() => setAdding(true)}

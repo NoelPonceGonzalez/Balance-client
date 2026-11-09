@@ -39,12 +39,12 @@ async function cameraGate(): Promise<Gate> {
 }
 
 export async function activatePush(): Promise<string> {
-  const message = await enablePhonePush();
+  if (!installedApp() && /iphone|ipad|ipod/i.test(navigator.userAgent)) {
+    return 'En el iPhone, instala Balance en la pantalla de inicio y ábrelo desde ese icono. Safari no entrega los avisos.';
+  }
+  const message = await enablePhonePush(true);
   if (typeof Notification !== 'undefined' && Notification.permission === 'denied') {
     return 'El teléfono tiene los avisos bloqueados. En los ajustes del móvil, entra en Balance y permite las notificaciones.';
-  }
-  if (!installedApp() && /iphone|ipad|ipod/i.test(navigator.userAgent)) {
-    return 'En el iPhone, instala Balance en la pantalla de inicio. Desde Safari el sistema no entrega los avisos.';
   }
   return message;
 }

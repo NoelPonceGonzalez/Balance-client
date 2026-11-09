@@ -13,12 +13,21 @@ self.addEventListener('push', (event) => {
   } catch {
     payload.body = event.data ? event.data.text() : '';
   }
-  event.waitUntil(self.registration.showNotification(payload.title, {
+  const title = payload.title || 'Balance';
+  const url = payload.url || '/';
+  const shown = {
     body: payload.body,
+    lang: 'es',
     icon: '/icons/icon-192.png',
-    badge: '/icons/icon-192.png',
-    data: { url: payload.url || '/' },
-  }));
+    data: { url },
+  };
+  event.waitUntil((async () => {
+    try {
+      await self.registration.showNotification(title, shown);
+    } catch {
+      await self.registration.showNotification(title, { body: payload.body, lang: 'es', data: { url } });
+    }
+  })());
 });
 
 self.addEventListener('notificationclick', (event) => {

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } f
 import { bindHold, HoldMenu, holdItemClass, placeMenu } from '@/components/HoldMenu';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'motion/react';
-import { Banknote, Check, ChevronLeft, ChevronRight, Copy, GripVertical, ImageIcon, MoreHorizontal, Pencil, Plus, Trash2 } from 'lucide-react';
+import { Check, ChevronLeft, ChevronRight, Copy, GripVertical, ImageIcon, MoreHorizontal, Pencil, Plus, Trash2 } from 'lucide-react';
 import { ModalClose, modalPanelClass, Overlay } from '@/components/Modal';
 import { OriginGlyph, OriginPicker } from '@/components/OriginMark';
 import { PlatformLogo } from '@/components/PlatformLogo';
@@ -496,7 +496,6 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
   const arrival = finished ? null : arrivalNote(forecast?.estimatedDate, plan?.targetDate);
   const linked = accounts.filter((account) => (plan?.linkedAccountIds || []).map(String).includes(String(account._id)) && !account.archived);
   const payday = accounts.find((account) => String(account._id) === String(plan?.salaryAccountId) && !account.archived) || (linked.length === 1 ? linked[0] : undefined);
-  const liquidity = linked[0];
   const spends = plan ? spendNotes(plan) : [];
 
   const beginEdit = (line: PlanMonthLine) => {
@@ -805,30 +804,20 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
   return (
     <div className={embedded ? 'space-y-4' : 'mx-auto max-w-3xl space-y-4'}>
       {plan && (
-        <div className="sticky top-0 z-30 -mx-4 bg-gradient-to-b from-[color-mix(in_srgb,var(--app-bg)_42%,transparent)] via-[color-mix(in_srgb,var(--app-bg)_18%,transparent)] to-transparent px-4 pb-8 pt-1 backdrop-blur-2xl md:-mx-8 md:px-8">
+        <div className="sticky top-0 z-30 -mx-4 bg-[var(--app-bg)] px-4 pb-5 pt-1 md:-mx-8 md:px-8">
           <div className="mx-auto max-w-3xl">
-            <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-xs font-bold">
-              <span className="inline-flex items-center gap-2 text-slate-500">
-                <button type="button" onClick={() => setSelected(null)} className="grid h-7 w-7 place-items-center rounded-full text-slate-500 transition-colors hover:bg-white/80" aria-label="Todos los planes"><ChevronLeft size={16} /></button>
-                {liquidity && <PlatformLogo name={liquidity.platform || liquidity.name} size={22} />}
-                {lookingAhead ? (
-                  <button type="button" onClick={() => setPreviewDay(null)} className="text-slate-500" title="Volver a hoy">
-                    Así <span className="text-slate-400">· {shortDay(previewDay || '')}</span>
-                  </button>
-                ) : (
-                  'Hoy'
-                )}
-                <span className="text-base font-black text-slate-900 dark:text-white"><SoftEur value={shownBalance} /></span>
-              </span>
-              <span className="text-slate-400">{formatEur(plan.targetAmount)}</span>
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <button type="button" onClick={() => setSelected(null)} className="inline-flex items-center gap-0.5 text-sm font-semibold text-slate-500" aria-label="Todos los planes"><ChevronLeft size={16} /> Planes</button>
+              <span className="text-xs font-medium text-slate-400">{formatEur(plan.targetAmount)}</span>
             </div>
-            <div className="mt-2 h-3 w-36 overflow-hidden rounded-full bg-slate-900/10 dark:bg-white/15">
-              <div className="h-full rounded-full bg-slate-900/80 transition-[width] duration-700 ease-out dark:bg-white" style={{ width: `${barWidth(shownBalance, plan.targetAmount)}%` }} />
+            <p className="text-[2rem] font-semibold leading-none tabular-nums tracking-tight text-slate-900 dark:text-white"><SoftEur value={shownBalance} /></p>
+            <div className="mt-4 h-0.5 w-full overflow-hidden rounded-full bg-slate-900/10 dark:bg-white/15">
+              <div className="h-full rounded-full bg-slate-900 transition-[width] duration-700 ease-out dark:bg-white" style={{ width: `${barWidth(shownBalance, plan.targetAmount)}%` }} />
             </div>
             {finished ? (
-              <p className="mt-2 inline-flex items-center gap-1 text-xs font-black text-[#16c784]"><Check size={13} strokeWidth={3} /> Completado el {shortDay(finished.day)}</p>
+              <p className="mt-3 text-[13px] font-medium text-[#16c784]">Completado el {shortDay(finished.day)}</p>
             ) : arrival ? (
-              <p className={cn('mt-2 text-xs font-semibold leading-snug', arrival.className)}>{arrival.text}</p>
+              <p className={cn('mt-3 text-[13px] font-medium leading-snug', arrival.className)}>{arrival.text}</p>
             ) : null}
           </div>
         </div>
@@ -862,7 +851,7 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
                     }
                     setSelected(id);
                   }}
-                  className="hold-target plan-rise cursor-pointer rounded-2xl border border-white/70 bg-white/70 p-3 text-left shadow-lg shadow-slate-900/5 backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/60"
+                  className="hold-target plan-rise cursor-pointer rounded-[28px] bg-white p-4 text-left ring-1 ring-slate-200/70 dark:bg-slate-900 dark:ring-white/10"
                 >
                   <TripFace
                     plan={item.plan}
@@ -895,12 +884,12 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
                   }
                   setSelected(id);
                 }}
-                className="hold-target plan-rise cursor-pointer rounded-2xl border border-white/70 bg-white/70 p-3 text-left shadow-lg shadow-slate-900/5 backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/60"
+                className="hold-target plan-rise cursor-pointer rounded-[28px] bg-white p-4 text-left ring-1 ring-slate-200/70 dark:bg-slate-900 dark:ring-white/10"
               >
                 <span className="flex items-start justify-between gap-2">
                   <span className="flex min-w-0 items-center gap-2">
                     {site && <PlatformLogo name={site.platform || site.name} size={22} />}
-                    <span className="min-w-0 truncate text-sm font-black">{item.plan.name}</span>
+                    <span className="min-w-0 truncate text-sm font-semibold">{item.plan.name}</span>
                     <button
                       type="button"
                       data-menu
@@ -925,18 +914,18 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
                   )}
                 </span>
                 <span className="mt-2 block text-[11px] font-semibold text-slate-400">{kindLabel(item.plan)}</span>
-                <span className="mt-1 block whitespace-nowrap text-[clamp(1.35rem,6.2vw,1.85rem)] font-black leading-none tabular-nums sm:text-[28px]"><SoftEur value={balance} /></span>
-                <span className="mt-3 block h-1.5 overflow-hidden rounded-full bg-slate-200/80 dark:bg-white/10">
-                  <span className={cn('block h-full rounded-full transition-[width] duration-700', done ? 'bg-[#16c784]' : 'bg-slate-800 dark:bg-white')} style={{ width: `${barWidth(balance, item.plan.targetAmount)}%` }} />
+                <span className="mt-3 block whitespace-nowrap text-[1.65rem] font-semibold leading-none tabular-nums tracking-tight"><SoftEur value={balance} /></span>
+                <span className="mt-4 block h-0.5 overflow-hidden rounded-full bg-slate-200/80 dark:bg-white/10">
+                  <span className={cn('block h-full rounded-full transition-[width] duration-700', done ? 'bg-[#16c784]' : 'bg-slate-900 dark:bg-white')} style={{ width: `${barWidth(balance, item.plan.targetAmount)}%` }} />
                 </span>
-                <span className="mt-2 block text-[11px] font-semibold text-slate-400">{done ? `Llegó el ${shortDay(done.day)}` : `de ${formatEur(item.plan.targetAmount)}`}</span>
+                <span className="mt-2 block text-[13px] font-medium text-slate-400">{done ? `Llegó el ${shortDay(done.day)}` : `Objetivo ${formatEur(item.plan.targetAmount)}`}</span>
               </div>
             );
           })}
           <button
             type="button"
             onClick={() => { setEditing(null); setDraft(blank()); }}
-            className="flex min-h-28 flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-slate-300 bg-white/40 text-sm font-bold text-slate-500 transition-colors hover:bg-white/70 dark:border-white/15 dark:bg-white/5"
+            className="flex min-h-28 flex-col items-center justify-center gap-2 rounded-[28px] border border-dashed border-slate-300 text-sm font-semibold text-slate-500 transition-colors hover:bg-white dark:border-white/15 dark:hover:bg-white/5"
           >
             <Plus size={18} />
             Nuevo plan
@@ -1002,20 +991,13 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
         </HoldMenu>
       )}
       {plan && forecast && (
-        <article className="rounded-[28px] border border-white/60 bg-white/55 p-4 shadow-2xl shadow-slate-900/10 backdrop-blur-2xl dark:border-white/10 dark:bg-slate-900/55 sm:p-5">
+        <article className="rounded-[28px] bg-white p-4 ring-1 ring-slate-200/70 dark:bg-slate-900 dark:ring-white/10 sm:p-5">
           <div>
-            <h3 className="text-base font-black tracking-tight">{planTitle(plan)}</h3>
-              <p className="mt-1 text-xs font-medium text-slate-500">
-                {(plan.salary || 0) > 0 && <span className="inline-flex items-center gap-1"><Banknote size={12} /> Nómina {formatEur(plan.salary)}{payday ? ` va a ${payday.name}` : ''} · </span>}
+            <h3 className="text-base font-semibold tracking-tight">{planTitle(plan)}</h3>
+              <p className="mt-1 text-[13px] font-medium text-slate-400">
+                {(plan.salary || 0) > 0 && <span>Nómina {formatEur(plan.salary)}{payday ? ` · ${payday.name}` : ''}. </span>}
                 Apartas {formatEur(plan.monthlySavings)} el día {plan.savingsDay || Number(plan.startDate.slice(8, 10))}
-                {forecast.anchor && (
-                  <span className="mt-1 flex items-center gap-2 text-slate-700 dark:text-slate-200">
-                    {liquidity && <PlatformLogo name={liquidity.platform || liquidity.name} size={18} />}
-                    El saldo es {forecast.anchor.label}
-                  </span>
-                )}
-                {spends.length > 0 && <span className="mt-1 block">Gastos: {spends.join(' · ')}</span>}
-                <span className="mt-1 block">Marcar suma o resta ese importe, aunque el día no haya llegado. Quitar la marca lo devuelve. Lo que ya está en el efectivo no se mueve otra vez.</span>
+                {spends.length > 0 && <span> · {spends.join(' · ')}</span>}
               </p>
           </div>
           <div className="mt-5 space-y-5">
@@ -1031,17 +1013,17 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
               <section
                 key={month.month}
                 data-drop-month={month.month}
-                className={cn('rounded-2xl transition-all duration-200', dropping && 'bg-indigo-50/90 ring-2 ring-indigo-400 dark:bg-indigo-500/15')}
+                className={cn('rounded-2xl transition-all duration-200', dropping && 'bg-slate-100 ring-2 ring-slate-900/15 dark:bg-white/10 dark:ring-white/25')}
               >
                 <button
                   type="button"
                   onClick={() => setMonthOpen((prev) => ({ ...prev, [month.month]: !shown }))}
                   className="mb-2 flex w-full items-baseline justify-between gap-3 px-1 text-left"
                 >
-                  <h4 className="text-sm font-black">{month.title}</h4>
-                  {dropping ? <span className="text-[11px] font-bold text-indigo-600 dark:text-indigo-300">Soltar aquí</span> : <span className="text-[11px] font-semibold text-slate-400">{gap != null ? `Solo hace falta ${formatEur(gap)} para llegar` : shown && expected != null ? `Cierre previsto ${formatEur(expected)}` : 'Ver el mes'}</span>}
+                  <h4 className="text-sm font-semibold">{month.title}</h4>
+                  {dropping ? <span className="text-[11px] font-semibold text-slate-900 dark:text-white">Soltar aquí</span> : <span className="text-[11px] font-semibold text-slate-400">{gap != null ? `Solo hace falta ${formatEur(gap)} para llegar` : shown && expected != null ? `Cierre previsto ${formatEur(expected)}` : 'Ver el mes'}</span>}
                 </button>
-                {shown && <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white/70 transition-colors duration-300 dark:border-white/10 dark:bg-black/20">
+                {shown && <div className="divide-y divide-slate-100 dark:divide-white/10">
                   {month.lines.filter((line) => gap == null || line.tone === 'in' || line.tone === 'out').map((line, index) => (
                     <PlanLine
                       key={line.markKey || `${month.month}-${line.label}`}
@@ -1062,7 +1044,7 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
                   {gap != null && (
                     <p className="border-t border-slate-200/70 px-3 py-2.5 text-sm font-semibold text-slate-700 dark:border-white/10 dark:text-slate-200">Solo hace falta {formatEur(gap)} para llegar</p>
                   )}
-                  {dropping && <p className="border-t border-indigo-200 px-3 py-2 text-xs font-bold text-indigo-600">Soltar en {month.title}</p>}
+                  {dropping && <p className="border-t border-slate-200 px-3 py-2 text-xs font-semibold text-slate-900 dark:border-white/10 dark:text-white">Soltar en {month.title}</p>}
                   <button
                     type="button"
                     onClick={() => { setError(''); setExtra({ month: month.month, name: '', amount: '', date: dayInMonth(month.month, forecast.today || month.month + '-15'), direction: 'out', image: '' }); }}
@@ -1077,7 +1059,7 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
           </div>
           {drag && createPortal(
             <div
-              className="pointer-events-none fixed z-[70] flex w-52 -translate-x-1/2 -translate-y-1/2 items-center gap-2 rounded-xl bg-white px-2.5 py-2 text-[13px] shadow-lg ring-2 ring-indigo-300 dark:bg-slate-900 dark:ring-indigo-400/60"
+              className="pointer-events-none fixed z-[70] flex w-52 -translate-x-1/2 -translate-y-1/2 items-center gap-2 rounded-xl bg-white px-2.5 py-2 text-[13px] shadow-lg ring-2 ring-slate-900/20 dark:bg-slate-900 dark:ring-white/30"
               style={{ left: drag.x, top: drag.y }}
             >
               <LineIcon label={drag.line.label} image={plan ? eventImage(plan, drag.line) : ''} />
@@ -1422,7 +1404,7 @@ function PlanDraft({
         {picked && steps.length > 1 && (
           <div className="mt-4 flex items-center gap-1.5" aria-hidden>
             {steps.map((item, dot) => (
-              <span key={item} className={cn('h-1 rounded-full', dot === index ? 'w-5 bg-indigo-500' : dot < index ? 'w-1.5 bg-indigo-200 dark:bg-indigo-400/40' : 'w-1.5 bg-slate-200 dark:bg-white/15')} />
+              <span key={item} className={cn('h-1 rounded-full', dot === index ? 'w-5 bg-slate-950 dark:bg-white' : dot < index ? 'w-1.5 bg-slate-300 dark:bg-white/40' : 'w-1.5 bg-slate-200 dark:bg-white/15')} />
             ))}
           </div>
         )}
@@ -1473,22 +1455,22 @@ function PlanDraft({
                   key={id}
                   type="button"
                   onClick={() => setDraft({ ...draft, linkedAccountIds: on ? [] : [id], openingBalance: on ? draft.openingBalance : '' })}
-                  className={cn('flex w-full items-center gap-3 px-3.5 py-3 text-left', on && 'bg-indigo-50/80 dark:bg-white/10')}
+                  className={cn('flex w-full items-center gap-3 px-3.5 py-3 text-left', on && 'bg-slate-100 dark:bg-white/10')}
                 >
                   <PlatformLogo name={account.platform || account.name} size={22} />
-                  <span className={cn('min-w-0 flex-1 truncate text-sm font-semibold', on ? 'text-indigo-700 dark:text-white' : 'text-slate-800 dark:text-slate-100')}>{account.name}</span>
+                  <span className={cn('min-w-0 flex-1 truncate text-sm font-semibold', on ? 'text-slate-950 dark:text-white' : 'text-slate-800 dark:text-slate-100')}>{account.name}</span>
                   <span className="shrink-0 text-[12px] font-medium tabular-nums text-slate-400">{accountMoney(account)}</span>
-                  {on && <Check size={15} className="shrink-0 text-indigo-600" />}
+                  {on && <Check size={15} className="shrink-0 text-slate-950 dark:text-white" />}
                 </button>
               );
             })}
             <button
               type="button"
               onClick={() => setDraft({ ...draft, linkedAccountIds: [] })}
-              className={cn('flex w-full items-center gap-3 px-3.5 py-3 text-left', draft.linkedAccountIds.length === 0 && 'bg-indigo-50/80 dark:bg-white/10')}
+              className={cn('flex w-full items-center gap-3 px-3.5 py-3 text-left', draft.linkedAccountIds.length === 0 && 'bg-slate-100 dark:bg-white/10')}
             >
-              <span className={cn('min-w-0 flex-1 text-sm font-semibold', draft.linkedAccountIds.length === 0 ? 'text-indigo-700 dark:text-white' : 'text-slate-500')}>Sin cuenta</span>
-              {draft.linkedAccountIds.length === 0 && <Check size={15} className="shrink-0 text-indigo-600" />}
+              <span className={cn('min-w-0 flex-1 text-sm font-semibold', draft.linkedAccountIds.length === 0 ? 'text-slate-950 dark:text-white' : 'text-slate-500')}>Sin cuenta</span>
+              {draft.linkedAccountIds.length === 0 && <Check size={15} className="shrink-0 text-slate-950 dark:text-white" />}
             </button>
           </div>
         )}
@@ -1548,7 +1530,7 @@ function PlanDraft({
             </button>
           ) : <span />}
           {(step !== 'tipo' || picked) && (
-            <button type="submit" disabled={busy} className="rounded-full bg-indigo-600 px-4 py-2 text-[13px] font-semibold text-white disabled:opacity-50">
+            <button type="submit" disabled={busy} className="rounded-full bg-slate-950 px-4 py-2 text-[13px] font-semibold text-white disabled:opacity-50 dark:bg-white dark:text-slate-950">
               {last ? (busy ? 'Guardando…' : editing ? 'Guardar' : 'Crear plan') : 'Siguiente'}
             </button>
           )}

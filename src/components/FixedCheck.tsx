@@ -17,7 +17,6 @@ interface DuePrompt {
   day: string;
 }
 
-type Answer = 'yes' | 'no' | null;
 type Fit = 'same' | 'more' | 'less' | null;
 
 function sameDue(prompt: DuePrompt, focusKey: string | null): boolean {
@@ -27,17 +26,26 @@ function sameDue(prompt: DuePrompt, focusKey: string | null): boolean {
 
 export function FixedCheck({ nonce, focusKey, onSettled }: { nonce: number; focusKey: string | null; onSettled: () => void }) {
   const [prompts, setPrompts] = useState<DuePrompt[]>([]);
-  const [answer, setAnswer] = useState<Answer>(null);
   const [fit, setFit] = useState<Fit>(null);
   const [amount, setAmount] = useState('');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
-  const [later, setLater] = useState(false);
+  const [later, setLater] = useState(true);
   const [token, setToken] = useState(nonce);
   if (token !== nonce) {
     setToken(nonce);
     setLater(false);
   }
+
+  useEffect(() => {
+    if (focusKey) setLater(false);
+  }, [focusKey]);
+
+  useEffect(() => {
+    const openDue = () => setLater(false);
+    window.addEventListener('pat-due', openDue);
+    return () => window.removeEventListener('pat-due', openDue);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -47,7 +55,6 @@ export function FixedCheck({ nonce, focusKey, onSettled }: { nonce: number; focu
         const rows = data.prompts || [];
         const focus = rows.findIndex((item) => sameDue(item, focusKey));
         setPrompts(focus > 0 ? [rows[focus], ...rows.slice(0, focus), ...rows.slice(focus + 1)] : rows);
-        setAnswer(null);
         setFit(null);
         setAmount('');
       })
@@ -64,33 +71,25 @@ export function FixedCheck({ nonce, focusKey, onSettled }: { nonce: number; focu
   const open = Boolean(current) && !later;
 
   const reset = () => {
-    setAnswer(null);
     setFit(null);
     setAmount('');
     setError('');
   };
 
-  const actual = () => {
-    if (answer !== 'yes') return 0;
-    if (fit === 'same') return current.amount;
-    return Number(amount);
-  };
-
-  const ready = answer === 'no' || (answer === 'yes' && fit === 'same') || (answer === 'yes' && (fit === 'more' || fit === 'less') && Number(amount) > 0 && (fit === 'more' ? Number(amount) > current.amount : Number(amount) < current.amount));
-
-  const accept = async () => {
-    if (!ready || saving) return;
-    if (answer === 'no') {
+  const settle = async (done: boolean, value: number) => {
+    if (saving) return;
+    if (!done) {
       setPrompts(prompts.slice(1));
       reset();
       return;
     }
+    if (!(value > 0)) return;
     setSaving(true);
     setError('');
     try {
       await api(`/api/plans/${current.planId}/settle`, {
         method: 'POST',
-        body: JSON.stringify({ key: current.key, done: true, amount: actual() }),
+        body: JSON.stringify({ key: current.key, done: true, amount: value }),
       });
       const rest = prompts.slice(1);
       setPrompts(rest);
@@ -105,7 +104,6 @@ export function FixedCheck({ nonce, focusKey, onSettled }: { nonce: number; focu
 
   if (!current) return null;
   const question = current.direction === 'in' ? '¿Ha entrado?' : '¿Lo has pagado?';
-  const choice = (on: boolean) => cn('relative overflow-hidden rounded-full border py-2 text-sm font-black', on ? 'border-slate-900 text-white dark:border-white dark:text-slate-900' : 'border-slate-200 text-slate-500');
 
   return createPortal(
     <AnimatePresence>
@@ -128,71 +126,39 @@ export function FixedCheck({ nonce, focusKey, onSettled }: { nonce: number; focu
             exit={still ? undefined : { opacity: 0, scale: 0.94, y: 16, transition: quickOut }}
             transition={{ ...softSpring, opacity: { duration: 0.18 } }}
           >
-            <p className="text-[11px] font-black uppercase tracking-widest text-slate-400">{current.planName}{prompts.length > 1 ? ` · 1 de ${prompts.length}` : ''}</p>
-            <h2 id="fixed-check-title" className="mt-1 text-xl font-black">{question}</h2>
-            <p className="mt-3 text-base font-black">{current.label}</p>
-            <p className={cn('mt-1 text-lg font-black tabular-nums', current.direction === 'in' ? 'text-[#16c784]' : 'text-[#ea3943]')}>
+            <p className="text-[13px] font-semibold text-slate-400">{current.planName}{prompts.length > 1 ? ` · 1 de ${prompts.length}` : ''}</p>
+            <h2 id="fixed-check-title" className="mt-1 text-xl font-semibold">{question}</h2>
+            <p className="mt-3 text-base font-semibold">{current.label}</p>
+            <p className={cn('mt-1 text-lg font-semibold tabular-nums', current.direction === 'in' ? 'text-[#16c784]' : 'text-[#ea3943]')}>
               {current.direction === 'in' ? '+' : '−'}{formatEur(current.amount).replace('−', '')}
             </p>
             <p className="text-sm font-medium text-slate-500">{formatDay(current.day)}</p>
-            <div className="mt-4 grid grid-cols-2 gap-2">
-              {([['yes', 'Sí'], ['no', 'No']] as const).map(([id, label]) => (
-                <button key={id} type="button" onClick={() => { setAnswer(id); setFit(null); setAmount(''); }} className={choice(answer === id)}>
-                  {answer === id && <motion.span layoutId="due-answer" transition={still ? { duration: 0 } : softSpring} className="absolute inset-0 rounded-full bg-slate-900 dark:bg-white" />}
-                  <span className="relative z-10">{label}</span>
-                </button>
-              ))}
-            </div>
+            <button type="button" disabled={saving} onClick={() => void settle(true, current.amount)} className="mt-4 w-full rounded-full bg-slate-950 py-3 text-sm font-semibold text-white disabled:opacity-40 dark:bg-white dark:text-slate-950">
+              {saving && fit !== 'more' ? 'Guardando…' : 'Sí, esa'}
+            </button>
+            <button type="button" onClick={() => { setFit(fit === 'more' ? null : 'more'); setAmount(''); }} className="mt-2 w-full py-2 text-sm font-semibold text-slate-500">
+              Otra cantidad
+            </button>
             <AnimatePresence initial={false}>
-              {answer === 'yes' && (
+              {fit === 'more' && (
                 <motion.div
-                  key="fit"
-                  className="mt-4 overflow-hidden"
-                  initial={still ? false : { opacity: 0, height: 0, y: 8 }}
-                  animate={{ opacity: 1, height: 'auto', y: 0 }}
-                  exit={still ? undefined : { opacity: 0, height: 0, y: -6, transition: quickOut }}
+                  key="amount"
+                  className="overflow-hidden"
+                  initial={still ? false : { opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={still ? undefined : { opacity: 0, height: 0, transition: quickOut }}
                   transition={jelly}
                 >
-                  <p className="text-sm font-black">¿Ha sido esta cantidad?</p>
-                  <div className="mt-2 grid grid-cols-3 gap-2">
-                    {([['same', 'Eso'], ['more', 'Más'], ['less', 'Menos']] as const).map(([id, label]) => (
-                      <button key={id} type="button" onClick={() => setFit(id)} className={choice(fit === id)}>
-                        {fit === id && <motion.span layoutId="due-fit" transition={still ? { duration: 0 } : jelly} className="absolute inset-0 rounded-full bg-slate-900 dark:bg-white" />}
-                        <span className="relative z-10">{label}</span>
-                      </button>
-                    ))}
-                  </div>
-                  <AnimatePresence initial={false}>
-                    {(fit === 'more' || fit === 'less') && (
-                      <motion.label
-                        key="amount"
-                        className="mt-3 block overflow-hidden"
-                        initial={still ? false : { opacity: 0, height: 0 }}
-                        animate={{ opacity: 1, height: 'auto' }}
-                        exit={still ? undefined : { opacity: 0, height: 0, transition: quickOut }}
-                        transition={jelly}
-                      >
-                        <span className="text-[11px] font-black uppercase tracking-widest text-slate-400">Cuánto ha sido</span>
-                        <input type="number" min="0" step="any" value={amount} onChange={(event) => setAmount(event.target.value)} className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black outline-none dark:border-white/10 dark:bg-black" />
-                      </motion.label>
-                    )}
-                  </AnimatePresence>
+                  <input type="number" min="0" step="any" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="Cuánto ha sido" className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold outline-none dark:border-white/10 dark:bg-black" />
+                  <button type="button" disabled={saving || !(Number(amount) > 0)} onClick={() => void settle(true, Number(amount))} className="mt-2 w-full rounded-full bg-slate-950 py-3 text-sm font-semibold text-white disabled:opacity-40 dark:bg-white dark:text-slate-950">
+                    {saving ? 'Guardando…' : 'Guardar'}
+                  </button>
                 </motion.div>
               )}
             </AnimatePresence>
-            {answer === 'no' && <p className="mt-3 text-sm font-medium text-slate-500">Te lo volveremos a preguntar hasta que lo marques.</p>}
-            {error && <p className="mt-3 text-sm font-bold text-[#ea3943]">{error}</p>}
-            <motion.button
-              type="button"
-              disabled={!ready || saving}
-              onClick={() => void accept()}
-              animate={still ? undefined : { scale: ready ? 1 : 0.98 }}
-              transition={softSpring}
-              className="mt-4 w-full rounded-full bg-slate-900 py-3 text-sm font-black text-white disabled:opacity-40 dark:bg-white dark:text-slate-900"
-            >
-              {saving ? 'Guardando…' : 'OK'}
-            </motion.button>
-            <button type="button" onClick={() => setLater(true)} className="mt-2 w-full py-2 text-sm font-bold text-slate-400">Ahora no</button>
+            {error && <p className="mt-3 text-sm font-semibold text-[#ea3943]">{error}</p>}
+            <button type="button" onClick={() => void settle(false, 0)} className="mt-2 w-full py-2 text-sm font-semibold text-slate-400">Todavía no</button>
+            <button type="button" onClick={() => setLater(true)} className="w-full py-2 text-sm font-semibold text-slate-400">Ahora no</button>
           </motion.div>
         </motion.div>
       )}
