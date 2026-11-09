@@ -349,15 +349,11 @@ function Donut({ slices, hidden }: { slices: { key: string; name: string; eur: n
         })}
       </svg>
       <div className="pointer-events-none absolute inset-0 grid place-items-center px-10 text-center">
-        {selected && share != null ? (
-          <div>
-            <p className="truncate text-[13px] font-semibold text-slate-500">{selected.name}</p>
-            <p className="text-lg font-semibold tabular-nums text-slate-900 dark:text-white">{hidden ? '*****' : `${share} %`}</p>
-            <p className="text-[13px] font-semibold tabular-nums text-slate-500">{hidden ? '*****' : formatEur(selected.eur)}</p>
-          </div>
-        ) : (
-          <p className="text-[13px] font-medium text-slate-400">Toca una cartera</p>
-        )}
+        <div>
+          <p className="truncate text-[13px] font-semibold text-slate-500">{selected ? selected.name : 'Total'}</p>
+          <p className="text-lg font-semibold tabular-nums text-slate-900 dark:text-white">{hidden ? '*****' : `${selected && share != null ? share : 100} %`}</p>
+          <p className="text-[13px] font-semibold tabular-nums text-slate-500">{hidden ? '*****' : formatEur(selected ? selected.eur : total)}</p>
+        </div>
       </div>
     </div>
   );
@@ -948,6 +944,7 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
   const [liveDay, setLiveDay] = useState<string | null>(null);
   const [liveMove, setLiveMove] = useState<{ amount: number; pct: number | null } | null>(null);
   const [paneSlot, setPaneSlot] = useState<HTMLDivElement | null>(null);
+  const [actionSlot, setActionSlot] = useState<HTMLDivElement | null>(null);
   const [error, setError] = useState('');
   const [hidden, setHidden] = useState(() => localStorage.getItem(HIDE_KEY) === '1');
   const [chart, setChart] = useState<'line' | 'ring'>(() => (localStorage.getItem('pat_chart') === 'ring' ? 'ring' : 'line'));
@@ -1496,6 +1493,24 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
         {!inAccount && chart === 'line' && lineDay && (
           <p className="mt-1.5 text-[13px] font-semibold text-slate-400">{formatDay(lineDay)}</p>
         )}
+        {!inAccount && view === 'general' && (
+          <div className="flex gap-4">
+            {([['line', 'Línea'], ['ring', 'Reparto']] as const).map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                aria-pressed={chart === id}
+                onClick={() => {
+                  setChart(id);
+                  localStorage.setItem('pat_chart', id);
+                }}
+                className={cn('text-[13px] font-semibold', chart === id ? 'text-slate-950 dark:text-white' : 'text-slate-400')}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
         {inAccount && liveDay && (
           <motion.p
             className="mt-1.5 text-[13px] font-semibold text-slate-400"
@@ -1546,6 +1561,7 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
           <h2 className="min-w-0 truncate text-base font-semibold">{openAccount.name}</h2>
         </div>
       )}
+      {inAccount && <div ref={setActionSlot} className="order-3 flex flex-wrap gap-2" />}
     </div>
   );
 
@@ -1565,6 +1581,7 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
             beat={beat}
             openId={openWallet}
             paneSlot={paneSlot}
+            actionSlot={actionSlot}
             onOpen={setOpenWallet}
             onDay={setLiveDay}
             onMove={setLiveMove}
@@ -1708,28 +1725,6 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
         </button>
       </motion.section>
 
-      <div className="flex justify-center">
-        <div className="grid grid-cols-2 rounded-full bg-slate-900/5 p-0.5 dark:bg-white/10">
-          {([['line', 'General'], ['ring', 'Carteras']] as const).map(([id, label]) => {
-            const on = chart === id;
-            return (
-              <button
-                key={id}
-                type="button"
-                aria-pressed={on}
-                onClick={() => {
-                  setChart(id);
-                  localStorage.setItem('pat_chart', id);
-                }}
-                className={cn('relative rounded-full px-4 py-1.5 text-[13px] font-semibold', on ? 'text-white dark:text-slate-900' : 'text-slate-500')}
-              >
-                {on && <motion.span layoutId="dash-chart-pill" transition={prefersStill() ? { duration: 0 } : softSpring} className="pointer-events-none absolute inset-0 rounded-full bg-slate-900 dark:bg-white" />}
-                <span className="relative z-10">{label}</span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
       {chart === 'line' ? (
         data.series.length > 1 ? (
           <CashChart

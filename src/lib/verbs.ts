@@ -32,7 +32,7 @@ const GOODS: Verb[] = [
   { id: 'add', label: 'Añadir' },
   { id: 'buy', label: 'Comprar' },
   { id: 'sell', label: 'Vender' },
-  { id: 'remove', label: 'Quitar' },
+  { id: 'remove', label: 'Sacar' },
 ];
 
 export function verbsFor(kind: string, tracking: string): Verb[] {

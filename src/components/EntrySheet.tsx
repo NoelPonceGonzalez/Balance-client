@@ -109,7 +109,7 @@ export function EntrySheet({ accounts, pieces, accountId, verb, allowed, editing
       else if (active === 'add' || active === 'remove') {
         const count = Number(extra.quantity || amount);
         if (!(count > 0)) throw new Error('Escribe la cantidad.');
-        await post({ ...base, type: 'adjustment', amount: count, quantity: count, holdingId: extra.holdingId, direction: active === 'add' ? 'in' : 'out', description: extra.description || (active === 'add' ? 'Añadir' : 'Quitar') }, confirmDuplicate);
+        await post({ ...base, type: 'adjustment', amount: count, quantity: count, holdingId: extra.holdingId, direction: active === 'add' ? 'in' : 'out', description: extra.description || (active === 'add' ? 'Añadir' : 'Sacar') }, confirmDuplicate);
       } else if (active === 'balance') {
         const target = value;
         const delta = editing ? target : target - site.balance;

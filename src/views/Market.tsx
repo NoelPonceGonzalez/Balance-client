@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Bell, ChevronLeft, Heart, Search, Star, X } from 'lucide-react';
+import { ChevronLeft, Heart, Search, Star, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { CsfloatFinder, SkinMarket, SkinSuggest, type SkinHit } from '@/components/CsfloatFinder';
 import { DragRow } from '@/components/DragRow';
@@ -1037,7 +1037,7 @@ export function Market({ focusListing, focusTick = 0 }: { focusListing?: string 
   const doors = sections.filter((section) => section.show);
   const active = sections.find((section) => section.id === market);
   const hero = HERO_MARKETS.has(market);
-  const listed = hero ? (active?.raw || []) : (active?.items || []);
+  const listed = hero || market === 'cs2' ? (active?.raw || []) : (active?.items || []);
   const shown = byMove(listed, tapeFilter);
   const showMoves = !skinDesk && !hero && market !== 'all' && market !== 'cs2' && (active?.raw.length || 0) > 1;
   const searchOn = market === 'all' || !hero;
@@ -1117,14 +1117,11 @@ export function Market({ focusListing, focusTick = 0 }: { focusListing?: string 
             <button type="button" aria-label="Me interesa" onClick={() => setDesk('saved')} className={cn('grid h-10 w-10 place-items-center rounded-full', desk === 'saved' ? 'text-slate-950 dark:text-white' : 'text-slate-500')}>
               <Heart size={18} />
             </button>
-            <button type="button" aria-label="Avisos" onClick={() => setDesk('alerts')} className={cn('grid h-10 w-10 place-items-center rounded-full', desk === 'alerts' ? 'text-slate-950 dark:text-white' : 'text-slate-500')}>
-              <Bell size={18} />
-            </button>
           </div>
         </div>
       </div>
       {searchOn && (
-        <div className="sticky top-0 z-20 -mx-1 px-1 py-2">
+        <div className="sticky top-0 z-30 -mx-1 px-1 py-2">
           <div className="relative">
             <Input
               icon={<Search size={16} />}

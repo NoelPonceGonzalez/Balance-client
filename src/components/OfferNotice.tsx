@@ -101,8 +101,10 @@ export function OfferNotice({ focused = null, onFocusedClose }: { focused?: AppN
   const [index, setIndex] = useState(0);
   const [nudge, setNudge] = useState(0);
   const dragX = useMotionValue(0);
-  const dragRotate = useTransform(dragX, [-180, 180], [-8, 8]);
-  const dragOrigin = useRef<number | null>(null);
+  const dragY = useMotionValue(0);
+  const dragRotate = useTransform(dragX, [-220, 220], [-4, 4]);
+  const dragOrigin = useRef<{ x: number; y: number } | null>(null);
+  const dragAxis = useRef<'x' | 'y' | null>(null);
   const deckReady = useRef('');
 
   useEffect(() => {
@@ -166,27 +168,46 @@ export function OfferNotice({ focused = null, onFocusedClose }: { focused?: AppN
     if (picked) onFocusedClose?.();
     setAside(true);
   };
+  const settle = { type: 'spring' as const, stiffness: 170, damping: 26, mass: 0.9 };
   const grab = (event: ReactPointerEvent<HTMLDivElement>) => {
     if ((event.target as HTMLElement).closest('button')) return;
-    dragOrigin.current = event.clientX;
+    dragOrigin.current = { x: event.clientX, y: event.clientY };
+    dragAxis.current = null;
     event.currentTarget.setPointerCapture(event.pointerId);
   };
   const pull = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (dragOrigin.current == null) return;
-    dragX.set(event.clientX - dragOrigin.current);
+    const origin = dragOrigin.current;
+    if (!origin) return;
+    const dx = event.clientX - origin.x;
+    const dy = event.clientY - origin.y;
+    if (!dragAxis.current && Math.hypot(dx, dy) > 8) dragAxis.current = Math.abs(dy) > Math.abs(dx) ? 'y' : 'x';
+    if (dragAxis.current === 'y') dragY.set(Math.max(0, dy));
+    else if (dragAxis.current === 'x') dragX.set(dx);
   };
-  const drop = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (dragOrigin.current == null) return;
-    const delta = event.clientX - dragOrigin.current;
+  const drop = () => {
+    if (!dragOrigin.current) return;
+    const dx = dragX.get();
+    const dy = dragY.get();
+    const axis = dragAxis.current;
     dragOrigin.current = null;
-    if (delta <= -60) turn(1);
-    else if (delta >= 60) turn(-1);
-    else void animate(dragX, 0, { type: 'spring', stiffness: 420, damping: 32 });
+    dragAxis.current = null;
+    if (axis === 'y') {
+      if (dy > 88) leave();
+      else void animate(dragY, 0, settle);
+      return;
+    }
+    if (dx <= -72) void animate(dragX, -280, settle).then(() => turn(1));
+    else if (dx >= 72) void animate(dragX, 280, settle).then(() => turn(-1));
+    else void animate(dragX, 0, settle);
   };
   const turn = (step: number) => {
-    if (unique.length < 2) return;
+    if (unique.length < 2) {
+      void animate(dragX, 0, settle);
+      return;
+    }
     const next = (place + step + unique.length) % unique.length;
     dragX.set(0);
+    dragY.set(0);
     setNudge(step);
     setIndex(next);
   };
@@ -226,9 +247,9 @@ export function OfferNotice({ focused = null, onFocusedClose }: { focused?: AppN
   return createPortal(
     <AnimatePresence>
       {open && (
-        <motion.div
-          className={cn(modalOverlayClass, 'z-[82]')}
-          onClick={leave}
+          <motion.div
+            className={cn(modalOverlayClass, 'z-[82]')}
+            onPointerDown={(event) => { if (event.target === event.currentTarget) leave(); }}
           initial={still ? false : { opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={still ? undefined : { opacity: 0, transition: quickOut }}
@@ -238,7 +259,7 @@ export function OfferNotice({ focused = null, onFocusedClose }: { focused?: AppN
             role="dialog"
             aria-labelledby="offer-notice-title"
             aria-roledescription="Mazo de ofertas"
-            style={{ x: dragX, rotate: still ? 0 : dragRotate }}
+            style={{ x: dragX, y: dragY, rotate: still ? 0 : dragRotate }}
             onPointerDown={grab}
             onPointerMove={pull}
             onPointerUp={drop}

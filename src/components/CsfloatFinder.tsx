@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { DragRow } from '@/components/DragRow';
 import { Modal } from '@/components/Modal';
 import { Input } from '@/components/ui/Input';
+import { CashChart, type LinePoint } from '@/views/Wallets';
 import { api } from '@/lib/api';
 import { formatAgo, formatDay, formatEur } from '@/lib/format';
 import { quickOut, softSpring } from '@/lib/motion';
@@ -322,6 +323,7 @@ function bestGap(listing: Listing): number {
 
 export function SkinSuggest({ query, onPick, onMatch }: { query: string; onPick: (hit: SkinHit, wear: string | null) => void; onMatch?: (found: boolean) => void }) {
   const [hits, setHits] = useState<SkinHit[]>([]);
+  const [note, setNote] = useState('');
   const still = stillMotion();
   const pick = useRef(onPick);
   const match = useRef(onMatch);
@@ -332,10 +334,12 @@ export function SkinSuggest({ query, onPick, onMatch }: { query: string; onPick:
     const text = query.trim();
     if (text.length < 2) {
       setHits([]);
+      setNote('');
       match.current?.(false);
       return;
     }
     let cancel = false;
+    setNote('Buscando en CSFloat…');
     const timer = window.setTimeout(() => {
       api<Catalog>(`/api/market/csfloat/catalog?q=${encodeURIComponent(text)}`)
         .then((data) => {
@@ -345,15 +349,18 @@ export function SkinSuggest({ query, onPick, onMatch }: { query: string; onPick:
           match.current?.(results.length > 0);
           if (data.wear && exact.length === 1) {
             setHits([]);
+            setNote('');
             pick.current(exact[0], data.wear);
             return;
           }
           setHits(results);
+          setNote(results.length ? '' : `Ninguna skin coincide con «${text}».`);
         })
-        .catch(() => {
+        .catch((err: Error) => {
           if (!cancel) {
             setHits([]);
             match.current?.(false);
+            setNote(err.message || 'CSFloat no ha respondido.');
           }
         });
     }, 250);
@@ -363,7 +370,7 @@ export function SkinSuggest({ query, onPick, onMatch }: { query: string; onPick:
     };
   }, [query]);
 
-  if (hits.length === 0) return null;
+  if (hits.length === 0) return note ? <p className="absolute left-0 right-0 top-full z-40 mt-2 rounded-2xl bg-[#1a1d24] px-3 py-3 text-sm font-medium text-white/70 shadow-2xl">{note}</p> : null;
   const rows = suggestRows(hits);
 
   return (
@@ -372,7 +379,7 @@ export function SkinSuggest({ query, onPick, onMatch }: { query: string; onPick:
       animate={{ opacity: 1, y: 0 }}
       exit={still ? undefined : { opacity: 0, y: 6, transition: quickOut }}
       transition={softSpring}
-      className="absolute left-0 right-0 top-full z-30 mt-2 overflow-hidden rounded-2xl bg-[#1a1d24] text-white shadow-2xl ring-1 ring-white/10"
+      className="absolute left-0 right-0 top-full z-40 mt-2 overflow-hidden rounded-2xl bg-[#1a1d24] text-white shadow-2xl ring-1 ring-white/10"
     >
       <div className="max-h-80 overflow-y-auto py-1">
         {rows.map((row) => row.type === 'group' ? (
@@ -398,6 +405,8 @@ export function SkinMarket({ skin, wear }: { skin: SkinHit; wear: string }) {
   const [listings, setListings] = useState<Listing[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [story, setStory] = useState<LinePoint[]>([]);
+  const [storyNow, setStoryNow] = useState<number | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [starred, setStarred] = useState(false);
   const [starring, setStarring] = useState(false);
@@ -445,6 +454,21 @@ export function SkinMarket({ skin, wear }: { skin: SkinHit; wear: string }) {
   };
 
   useEffect(() => {
+    const wearName = wear === 'all' ? (skin.wears[0]?.wear || '') : wear;
+    const hash = wearName ? `${skin.name} (${wearName})` : skin.name;
+    const params = new URLSearchParams({ kind: 'cs2', key: `cs2:${hash}`, name: hash, symbol: 'CS2' });
+    let cancel = false;
+    setStory([]);
+    api<{ series: { at: string; eur: number }[] }>(`/api/market/story?${params}`)
+      .then((data) => {
+        if (cancel) return;
+        setStory((data.series || []).filter((point) => point.eur > 0).map((point) => ({ day: point.at, eur: point.eur })));
+      })
+      .catch(() => { if (!cancel) setStory([]); });
+    return () => { cancel = true; };
+  }, [skin, wear]);
+
+  useEffect(() => {
     let cancel = false;
     setLoading(true);
     setError('');
@@ -465,8 +489,20 @@ export function SkinMarket({ skin, wear }: { skin: SkinHit; wear: string }) {
     return () => { cancel = true; };
   }, [skin, wear]);
 
+  const chartNow = storyNow ?? story[story.length - 1]?.eur ?? skin.wears.find((row) => row.wear === (wear === 'all' ? skin.wears[0]?.wear : wear))?.refEur ?? 0;
   return (
     <div className="space-y-3">
+      <CashChart
+        key={`${skin.name}:${wear}:${story.length}`}
+        quiet
+        tall
+        tone="ink"
+        hidden={false}
+        points={story}
+        now={chartNow}
+        onValue={setStoryNow}
+        emptyText={story.length ? '' : 'La línea sale cuando CSFloat manda las ventas de esta skin.'}
+      />
       <div className="flex items-center justify-between gap-3">
         <p className="text-[13px] font-medium text-slate-500">{starred ? 'Te aviso si se mueve la más barata.' : 'Destácala y te aviso de su precio, no de un anuncio suelto.'}</p>
         <button

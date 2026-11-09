@@ -132,7 +132,8 @@ export function Shell({
         <div className="min-h-0 overflow-hidden">
           <div className="flex items-center justify-end gap-0.5 px-3 pb-1 pt-[max(0.35rem,env(safe-area-inset-top))] md:px-8">
             <InstallApp compact />
-            <NotificationsBell align="right" onPlan={onPlan} onListing={onListing} onOffer={setFocusedOffer} onDue={(quoteKey) => { setDueKey(quoteKey); setDueNonce((value) => value + 1); }} />
+            {section !== 'market' && <NotificationsBell align="right" onPlan={onPlan} onListing={onListing} onOffer={setFocusedOffer} onDue={(quoteKey) => { setDueKey(quoteKey); setDueNonce((value) => value + 1); }} />}
+            {section !== 'market' && (
             <button
               type="button"
               onClick={() => onChange('settings')}
@@ -141,6 +142,7 @@ export function Shell({
             >
               <Settings size={18} />
             </button>
+            )}
           </div>
         </div>
       </header>
