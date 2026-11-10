@@ -150,11 +150,6 @@ export function Shell({
     <ChromeHidden.Provider value={hideChrome}>
     <OfferFocusContext.Provider value={setFocusedOffer}>
     <div className="relative flex h-dvh flex-col overflow-hidden bg-[var(--app-bg)] text-[var(--app-text)]">
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-x-0 -top-32 z-0 h-[78vh]"
-        style={{ background: 'radial-gradient(160% 100% at 50% -8%, var(--market-wash, transparent), transparent 76%)' }}
-      />
       <header aria-hidden={bare} className={cn('relative z-10 grid shrink-0 transition-[grid-template-rows,opacity] duration-300 ease-out', bare ? 'pointer-events-none grid-rows-[0fr] opacity-0' : 'grid-rows-[1fr] opacity-100')}>
         <div className="min-h-0 overflow-hidden">
           <div className="flex items-center justify-end gap-0.5 px-3 pb-1 pt-[max(0.35rem,env(safe-area-inset-top))] md:px-8">

@@ -997,14 +997,6 @@ export function Market({ focusListing, focusTick = 0 }: { focusListing?: string 
   useEffect(() => {
     sessionStorage.setItem('pat_market', market);
   }, [market]);
-  useEffect(() => {
-    const root = document.documentElement;
-    const wash = market === 'all' ? 'rgba(142, 142, 147, 0.28)' : MARKET_TONE[market]?.wash;
-    if (wash) root.style.setProperty('--market-wash', wash);
-    return () => {
-      root.style.removeProperty('--market-wash');
-    };
-  }, [market]);
   const [, setTick] = useState(0);
 
   const load = () => {
@@ -1102,46 +1094,32 @@ export function Market({ focusListing, focusTick = 0 }: { focusListing?: string 
 
   return (
     <div className="relative mx-auto min-w-0 max-w-5xl space-y-5">
-      <div
-        className="sticky top-0 z-30 -mx-3 px-3 pb-3 pt-1 sm:-mx-4 sm:px-4 md:-mx-8 md:px-8"
-        style={{ background: 'linear-gradient(to bottom, color-mix(in srgb, var(--market-wash, transparent) 62%, var(--app-bg)) 0%, color-mix(in srgb, var(--market-wash, transparent) 28%, var(--app-bg)) 70%, var(--app-bg) 100%)' }}
-      >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <AnimatePresence mode="wait" initial={false}>
-            {market === 'all' ? (
-              <motion.p key="kicker" initial={still ? false : { opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={still ? undefined : { opacity: 0, y: -6, transition: quickOut }} transition={softSpring} className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">Elige un mercado</motion.p>
-            ) : (
-              <motion.button key="back" type="button" onClick={back} initial={still ? false : { opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} exit={still ? undefined : { opacity: 0, x: -8, transition: quickOut }} transition={softSpring} className="mb-1 inline-flex items-center gap-0.5 py-2 pr-3 text-sm font-semibold text-slate-800 dark:text-white">
-                <ChevronLeft size={18} />
-                {skinDesk ? 'CS2' : 'Mercados'}
-              </motion.button>
-            )}
-          </AnimatePresence>
-          <h1 className="flex min-w-0 items-center gap-2 text-xl font-semibold tracking-tight sm:gap-2.5 sm:text-3xl">
-            {skinDesk?.image ? (
-              <img src={skinDesk.image} alt="" referrerPolicy="no-referrer" className="h-9 w-12 shrink-0 object-contain" />
-            ) : active ? (
-              <img src={active.icon} alt="" referrerPolicy="no-referrer" className="h-8 w-8 shrink-0 rounded-2xl bg-white object-cover" />
-            ) : null}
-            <span className="truncate">{heading}</span>
-          </h1>
-        </div>
-        <div className="flex shrink-0 flex-col items-end gap-1">
-          <p className="flex max-w-[7.5rem] items-center gap-1.5 text-[11px] font-bold text-slate-500 sm:max-w-none sm:text-xs">
-            <i className={cn('h-2 w-2 shrink-0 rounded-full', fresh ? 'bg-[#16c784]' : 'bg-amber-500')} />
-            <span className="truncate">{fresh ? `En vivo · ${formatAgo(data.updatedAt)}` : `Último intento ${formatAgo(data.updatedAt)}`}</span>
-          </p>
-          <div className="flex gap-2">
-            <button type="button" aria-label="CSFloat" onClick={() => setDesk('csfloat')} className={cn('grid h-10 w-10 place-items-center rounded-full', desk === 'csfloat' ? 'text-slate-950 dark:text-white' : 'text-slate-500')}>
-              <Star size={18} />
+      <div className="sticky top-0 z-30 -mx-3 flex flex-col gap-1 bg-[var(--app-bg)] px-3 py-2 sm:-mx-4 sm:px-4 md:-mx-8 md:px-8">
+        <div className="flex items-center gap-2">
+          {market !== 'all' && (
+            <button type="button" onClick={back} className="inline-flex shrink-0 items-center gap-0.5 text-sm font-semibold text-slate-500" aria-label={skinDesk ? 'Volver a CS2' : 'Volver a mercados'}>
+              <ChevronLeft size={16} />
+              {skinDesk ? 'CS2' : 'Mercados'}
             </button>
-            <button type="button" aria-label="Me interesa" onClick={() => setDesk('saved')} className={cn('grid h-10 w-10 place-items-center rounded-full', desk === 'saved' ? 'text-slate-950 dark:text-white' : 'text-slate-500')}>
-              <Heart size={18} />
+          )}
+          {skinDesk?.image ? (
+            <img src={skinDesk.image} alt="" referrerPolicy="no-referrer" className="h-7 w-9 shrink-0 object-contain" />
+          ) : active ? (
+            <img src={active.icon} alt="" referrerPolicy="no-referrer" className="h-7 w-7 shrink-0 rounded-lg bg-white object-cover" />
+          ) : null}
+          <h1 className="min-w-0 flex-1 truncate text-base font-semibold">{heading}</h1>
+          <div className="flex shrink-0 items-center">
+            <button type="button" aria-label="CSFloat" onClick={() => setDesk('csfloat')} className={cn('grid h-8 w-8 place-items-center rounded-full', desk === 'csfloat' ? 'text-slate-950 dark:text-white' : 'text-slate-400')}>
+              <Star size={16} />
+            </button>
+            <button type="button" aria-label="Me interesa" onClick={() => setDesk('saved')} className={cn('grid h-8 w-8 place-items-center rounded-full', desk === 'saved' ? 'text-slate-950 dark:text-white' : 'text-slate-400')}>
+              <Heart size={16} />
             </button>
           </div>
         </div>
-      </div>
+        <p className="text-[13px] font-semibold text-slate-400">
+          {fresh ? `En vivo · ${formatAgo(data.updatedAt)}` : `Último intento ${formatAgo(data.updatedAt)}`}
+        </p>
       </div>
       {searchOn && (
         <div className="relative z-20 -mx-1 px-1">
