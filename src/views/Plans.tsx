@@ -833,8 +833,9 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
   return (
     <div className={embedded ? 'space-y-4' : 'mx-auto max-w-3xl space-y-4'}>
       {plan && (
-        <div className="sticky top-0 z-30 -mx-4 bg-[var(--app-bg)] px-4 pb-5 pt-1 md:-mx-8 md:px-8">
-          <div className="mx-auto max-w-3xl">
+        <div className="sticky -top-2 z-30 -mt-2 mx-[calc(50%-50vw)] bg-[var(--app-bg)] px-3 pb-4 pt-4 sm:px-4 md:px-8">
+          <div aria-hidden className="pointer-events-none absolute inset-x-0 top-full h-24 bg-[linear-gradient(to_bottom,var(--app-bg)_0%,color-mix(in_srgb,var(--app-bg)_72%,transparent)_42%,transparent_100%)]" />
+          <div className="relative mx-auto max-w-3xl">
             <div className="mb-3 flex items-center justify-between gap-3">
               <button type="button" onClick={() => setSelected(null)} className="inline-flex items-center gap-0.5 text-sm font-semibold text-slate-500" aria-label="Todos los planes"><ChevronLeft size={16} /> Planes</button>
               <span className="text-xs font-medium text-slate-400">{formatEur(plan.targetAmount)}</span>

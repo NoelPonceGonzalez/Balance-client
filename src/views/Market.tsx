@@ -1102,9 +1102,9 @@ export function Market({ focusListing, focusTick = 0 }: { focusListing?: string 
     <div className="relative mx-auto min-w-0 max-w-5xl space-y-5">
       <div
         className="sticky -top-2 z-30 -mt-2 mx-[calc(50%-50vw)] px-3 pb-3 pt-4 sm:px-4 md:px-8"
-        style={{ background: 'linear-gradient(to bottom, var(--market-tint, var(--app-bg)) 0%, var(--market-tint, var(--app-bg)) 35%, var(--app-bg) 100%)' }}
+        style={{ background: 'linear-gradient(to bottom, var(--market-tint, var(--app-bg)) 0%, var(--market-tint, var(--app-bg)) 58%, var(--app-bg) 100%)' }}
       >
-        <div aria-hidden className="pointer-events-none absolute inset-x-0 top-full h-5 bg-gradient-to-b from-[var(--app-bg)] to-transparent" />
+        <div aria-hidden className="pointer-events-none absolute inset-x-0 top-full h-24 bg-[linear-gradient(to_bottom,var(--app-bg)_0%,color-mix(in_srgb,var(--app-bg)_72%,transparent)_42%,transparent_100%)]" />
         <div className="mx-auto flex w-full min-w-0 max-w-5xl flex-col gap-1.5">
         <div className="flex min-w-0 items-center gap-2">
           {market !== 'all' && (

@@ -150,7 +150,7 @@ export function Shell({
     <ChromeHidden.Provider value={hideChrome}>
     <OfferFocusContext.Provider value={setFocusedOffer}>
     <div className="relative flex h-dvh flex-col overflow-hidden bg-[var(--app-bg)] text-[var(--app-text)]">
-      <header aria-hidden={bare} style={section === 'market' ? { background: 'var(--market-tint, transparent)' } : undefined} className={cn('relative z-10 grid shrink-0 transition-[grid-template-rows,opacity] duration-300 ease-out', bare ? 'pointer-events-none grid-rows-[0fr] opacity-0' : 'grid-rows-[1fr] opacity-100')}>
+      <header aria-hidden={bare} style={section === 'market' ? { background: 'var(--market-tint, transparent)' } : section === 'plans' ? { background: 'var(--app-bg)' } : undefined} className={cn('relative z-10 grid shrink-0 transition-[grid-template-rows,opacity] duration-300 ease-out', bare ? 'pointer-events-none grid-rows-[0fr] opacity-0' : 'grid-rows-[1fr] opacity-100')}>
         <div className="min-h-0 overflow-hidden">
           <div className="flex items-center justify-end gap-0.5 px-3 pb-1 pt-[max(0.35rem,env(safe-area-inset-top))] md:px-8">
             <InstallApp compact />
