@@ -90,7 +90,7 @@ export const PLATFORM_COLORS: Record<string, string> = {
   swissborg: '#00CC99',
   swissquote: '#FF5533',
   tangem: '#000000',
-  traderepublic: '#FFFFFF',
+  traderepublic: '#47704C',
   trading212: '#000000',
   trezor: '#000000',
   triodos: '#004433',

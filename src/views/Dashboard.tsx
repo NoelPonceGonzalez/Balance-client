@@ -141,14 +141,10 @@ function channel(hex: string): { r: number; g: number; b: number } | null {
   return { r: (value >> 16) & 255, g: (value >> 8) & 255, b: value & 255 };
 }
 
-function tone(hex: string): number {
-  const rgb = channel(hex);
-  if (!rgb) return 0;
-  return (rgb.r * 299 + rgb.g * 587 + rgb.b * 114) / 1000;
-}
-
 function isLight(hex: string): boolean {
-  return tone(hex) > 210;
+  const rgb = channel(hex);
+  if (!rgb) return false;
+  return (rgb.r * 299 + rgb.g * 587 + rgb.b * 114) / 1000 > 210;
 }
 
 function narrowScreen(): boolean {
@@ -321,8 +317,30 @@ function RisingAmount({ value, hidden, signed = false, card = false, delay = 0, 
 
 const rise = glide;
 
+function sliceInk(hex: string, dark: boolean): string {
+  const rgb = channel(hex);
+  if (!rgb) return dark ? '#E4E4E7' : '#3F3F46';
+  const lum = (rgb.r * 299 + rgb.g * 587 + rgb.b * 114) / 1000;
+  if (lum < 28) return dark ? '#E7E7EC' : '#3C3C43';
+  if (lum > 210) return dark ? '#D6D6DB' : '#5C6560';
+  return hex;
+}
+
+function useAppDark(): boolean {
+  const [dark, setDark] = useState(() => document.documentElement.classList.contains('dark'));
+  useEffect(() => {
+    const root = document.documentElement;
+    const read = () => setDark(root.classList.contains('dark'));
+    const watch = new MutationObserver(read);
+    watch.observe(root, { attributes: true, attributeFilter: ['class'] });
+    return () => watch.disconnect();
+  }, []);
+  return dark;
+}
+
 function Donut({ slices, hidden }: { slices: { key: string; name: string; eur: number; color: string }[]; hidden: boolean }) {
   const [picked, setPicked] = useState<string | null>(null);
+  const dark = useAppDark();
   const progress = useRise(1, true, 700, 40);
   const total = slices.reduce((sum, slice) => sum + slice.eur, 0);
   const radius = 68;
@@ -339,24 +357,24 @@ function Donut({ slices, hidden }: { slices: { key: string; name: string; eur: n
           const gap = slices.length > 1 ? 3 * progress : 0;
           const drawn = Math.max(0, length - gap);
           const on = !selected || selected.key === slice.key;
-          const ink = tone(slice.color);
-          const edge = ink > 210 || ink < 28;
-          const arc = {
-            cx: 100,
-            cy: 100,
-            r: radius,
-            fill: 'none' as const,
-            strokeDasharray: `${drawn} ${circumference - drawn}`,
-            strokeDashoffset: -cursor,
-            transform: 'rotate(-90 100 100)',
-          };
           const node = (
-            <g key={slice.key} className="cursor-pointer" onClick={() => setPicked((current) => (current === slice.key ? null : slice.key))}>
-              {edge && <circle {...arc} stroke="currentColor" strokeWidth={28} className="text-slate-400 dark:text-slate-500" strokeOpacity={on ? 1 : 0.35} />}
-              <circle {...arc} stroke={slice.color} strokeWidth={24} strokeOpacity={on ? 1 : 0.22}>
-                <title>{slice.name}</title>
-              </circle>
-            </g>
+            <circle
+              key={slice.key}
+              cx="100"
+              cy="100"
+              r={radius}
+              fill="none"
+              stroke={sliceInk(slice.color, dark)}
+              strokeWidth="24"
+              strokeOpacity={on ? 0.82 : 0.18}
+              strokeDasharray={`${drawn} ${circumference - drawn}`}
+              strokeDashoffset={-cursor}
+              transform="rotate(-90 100 100)"
+              className="cursor-pointer"
+              onClick={() => setPicked((current) => (current === slice.key ? null : slice.key))}
+            >
+              <title>{slice.name}</title>
+            </circle>
           );
           cursor += length;
           return node;
