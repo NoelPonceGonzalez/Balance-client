@@ -14,6 +14,7 @@ import { formatDay, formatEur, formatNumber, formatPct, formatSignedEur } from '
 import type { VerbId } from '@/lib/verbs';
 import { glide, jelly, quickOut, softSpring } from '@/lib/motion';
 import { placeOnCurve, smoothPath } from '@/lib/curve';
+import { skinArtSteam } from '@/lib/skin-art';
 import { cn } from '@/lib/utils';
 import type { AccountProducts, ProductSection } from '@/lib/products';
 
@@ -136,11 +137,41 @@ function toneClass(value: number): string {
   return 'text-slate-400';
 }
 
+function pictureSources(src: string | null | undefined, label: string): string[] {
+  const steam = skinArtSteam(label);
+  return [src, steam].filter((item, index, list): item is string => Boolean(item && (item.startsWith('https://') || item.startsWith('/')) && list.indexOf(item) === index));
+}
+
 function ItemPicture({ src, large, round, label }: { src?: string | null; large?: boolean; round?: boolean; label: string }) {
-  const local = Boolean(src && (src.startsWith('https://') || src.startsWith('/')));
-  const [visible, setVisible] = useState(local);
-  if (!local || !visible || !src) return <SpendIcon label={label} />;
-  return <img src={src} alt="" referrerPolicy="no-referrer" onError={() => setVisible(false)} className={cn('shrink-0 bg-white object-contain', round ? 'h-11 w-11 rounded-full border border-slate-200/80 p-1 dark:border-white/10' : 'rounded-xl', !round && (large ? 'h-28 w-44 p-1' : 'h-11 w-11 object-cover'))} />;
+  const options = pictureSources(src, label);
+  const [index, setIndex] = useState(0);
+  const [ready, setReady] = useState(false);
+  const current = options[index] || '';
+  useEffect(() => { setIndex(0); setReady(false); }, [src, label]);
+  useEffect(() => {
+    if (!current || current.startsWith('/') || ready) return;
+    const timer = window.setTimeout(() => setIndex((value) => value + 1), 8000);
+    return () => window.clearTimeout(timer);
+  }, [current, ready]);
+  if (!current) return <SpendIcon label={label} />;
+  const shot = current.includes('csfloat.com');
+  return (
+    <img
+      src={current}
+      alt=""
+      referrerPolicy="no-referrer"
+      decoding="async"
+      onLoad={() => setReady(true)}
+      onError={() => setIndex((value) => value + 1)}
+      className={cn(
+        'shrink-0',
+        shot ? 'h-12 w-[4.5rem] rounded-xl bg-[#0e1116] object-contain px-1' : 'bg-white object-contain',
+        !shot && round && 'h-11 w-11 rounded-full border border-slate-200/80 p-1 dark:border-white/10',
+        !shot && !round && 'rounded-xl',
+        !shot && !round && (large ? 'h-28 w-44 p-1' : 'h-11 w-11 object-cover'),
+      )}
+    />
+  );
 }
 
 function money(value: number, hidden: boolean): string {
@@ -305,21 +336,24 @@ export function CashChart({ points, now, hidden, base = null, label, showPct = f
   const line = [...byStamp.entries()].sort((a, b) => pointTime(a[0]) - pointTime(b[0])).map(([day, eur]) => ({ day, eur }));
   const height = plain ? 300 : tall ? 228 : 168;
   const still = stillMotion();
-  const enough = line.length >= 2 && width > 0;
+  const fresh = line.length < 2 && Number.isFinite(now);
+  const enough = (fresh || line.length >= 2) && width > 0;
   const times = line.map((point) => pointTime(point.day));
   const t0 = times[0] ?? 0;
   const tSpan = (times[times.length - 1] ?? 0) - t0 || 1;
-  const values = line.map((point) => point.eur);
+  const values = fresh ? [now] : line.map((point) => point.eur);
   const reference = base != null && base > 0 ? base : null;
   const low = Math.min(...values, ...(reference != null ? [reference] : []));
   const high = Math.max(...values, ...(reference != null ? [reference] : []));
   const pad = (high - low || Math.max(1, Math.abs(high) * 0.1)) * 0.12;
-  const top = high + pad;
-  const bottom = low - pad;
-  const xy: [number, number][] = line.map((point, index) => [
-    ((times[index] - t0) / tSpan) * width,
-    height - ((point.eur - bottom) / (top - bottom)) * height,
-  ]);
+  const top = fresh ? now + 1 : high + pad;
+  const bottom = fresh ? now - 1 : low - pad;
+  const xy: [number, number][] = fresh
+    ? [[0, height / 2], [width, height / 2]]
+    : line.map((point, index) => [
+      ((times[index] - t0) / tSpan) * width,
+      height - ((point.eur - bottom) / (top - bottom)) * height,
+    ]);
   const d = enough ? smoothPath(xy) : '';
   const area = enough ? `${d} L${width} ${height} L0 ${height} Z` : '';
   const first = reference ?? line[0]?.eur ?? now;
@@ -328,7 +362,7 @@ export function CashChart({ points, now, hidden, base = null, label, showPct = f
   const change = value - first;
   const pct = first > 0 ? (change / first) * 100 : null;
   const baseY = enough ? height - ((first - bottom) / (top - bottom)) * height : 0;
-  const ticks = enough ? monthTicks(t0, t0 + tSpan) : [];
+  const ticks = enough && !fresh ? monthTicks(t0, t0 + tSpan) : [];
   const lined = Boolean(tone);
   const accent = tone && tone !== 'ink' ? tone : null;
   const color = accent || 'var(--app-text)';

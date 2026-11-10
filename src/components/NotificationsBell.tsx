@@ -4,8 +4,17 @@ import { Bell } from 'lucide-react';
 import { api } from '@/lib/api';
 import { activatePush } from '@/lib/device';
 import { formatAgo } from '@/lib/format';
+import { skinArt, skinArtSteam } from '@/lib/skin-art';
 import { cn } from '@/lib/utils';
 import type { AppNotification } from '@/lib/types';
+
+function OfferThumb({ item }: { item: AppNotification }) {
+  const sources = [...new Set([item.image || '', skinArt(item.title) || '', skinArtSteam(item.title) || ''].filter(Boolean))];
+  const [miss, setMiss] = useState(0);
+  const src = sources[miss];
+  if (!src) return null;
+  return <img key={src} src={src} alt="" referrerPolicy="no-referrer" decoding="async" onError={() => setMiss((value) => value + 1)} className="h-10 w-14 shrink-0 object-contain" />;
+}
 
 function noticeKind(item: AppNotification): string {
   const key = item.quoteKey || '';
@@ -152,8 +161,9 @@ export function NotificationsBell({ align = 'left', onDue, onPlan, onOffer, onLi
           }
           if (item.quoteKey?.startsWith('listing:') && onOffer) {
             return (
-              <button key={item.id} type="button" onClick={() => { setOpen(false); onOffer(item); }} className={cn('block w-full rounded-2xl px-3 py-2 text-left', item.read ? 'bg-transparent' : 'bg-slate-50 dark:bg-slate-900')}>
-                {body}
+              <button key={item.id} type="button" onClick={() => { setOpen(false); onOffer(item); }} className={cn('flex w-full items-center gap-3 rounded-2xl px-3 py-2 text-left', item.read ? 'bg-transparent' : 'bg-slate-50 dark:bg-slate-900')}>
+                <OfferThumb item={item} />
+                <span className="min-w-0">{body}</span>
               </button>
             );
           }

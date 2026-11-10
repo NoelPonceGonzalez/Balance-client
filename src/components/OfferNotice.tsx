@@ -5,6 +5,7 @@ import { ModalClose, modalOverlayClass, modalPanelClass } from '@/components/Mod
 import { api, ApiError } from '@/lib/api';
 import { formatDay, formatEur } from '@/lib/format';
 import { quickOut, softSpring } from '@/lib/motion';
+import { skinArt, skinArtSteam } from '@/lib/skin-art';
 import { cn } from '@/lib/utils';
 import type { AppNotification } from '@/lib/types';
 
@@ -63,6 +64,19 @@ function listingOf(quoteKey: string | null | undefined): string | null {
   return quoteKey?.match(/csfloat:([^:]+)/)?.[1] ?? null;
 }
 
+// El aviso de Skinport guarda el precio pero no el float. Estos son los del anuncio concreto, leídos de su ficha.
+const SKINPORT_LISTING: Record<string, { floatValue: number; paintSeed: number }> = {
+  'sport-gloves-nocts-field-tested@450': { floatValue: 0.365846186876297, paintSeed: 276 },
+  'sport-gloves-nocts-field-tested@454.51': { floatValue: 0.35444554686546326, paintSeed: 68 },
+};
+
+function listedFloat(url: string | null | undefined, quoteKey: string | null | undefined): { floatValue: number; paintSeed: number } | null {
+  const slug = url?.match(/skinport\.com\/item\/([^/?#]+)/)?.[1];
+  const ask = quoteKey?.match(/skinport:([\d.]+)/)?.[1];
+  if (!slug || !ask) return null;
+  return SKINPORT_LISTING[`${slug}@${ask}`] ?? null;
+}
+
 function dismissed(item: AppNotification, skip: Set<string>, passed: PassedOffer[]): boolean {
   if (skip.has(item.id)) return true;
   const listing = listingOf(item.quoteKey);
@@ -88,7 +102,13 @@ function listingId(url: string | null | undefined): string | null {
   return url?.match(/csfloat\.com\/item\/(\d+)/)?.[1] ?? null;
 }
 
-type LiveQuote = { referenceEur: number | null; paintSeed: number | null; state: string };
+type LiveQuote = { referenceEur: number | null; paintSeed: number | null; state: string; floatValue?: number | null; pictures?: string[] };
+
+function listingPictures(photos: string[] | undefined, image: string | null | undefined): string[] {
+  const shot = photos?.[0]?.match(/\/m\/(\d+)\/playside\.png/)?.[1];
+  const list = [shot ? `https://s.csfloat.com/m/${shot}/playside.png` : '', photos?.[0] || '', image || ''];
+  return [...new Set(list.filter((url) => /^https:\/\//.test(url)))];
+}
 
 const liveQuotes = new Map<string, LiveQuote>();
 const liveWatchers = new Set<() => void>();
@@ -127,14 +147,29 @@ function offerName(title: string): { name: string; below: string } {
   return { name: name || title, below: below || '' };
 }
 
+const WEAR_BANDS = [
+  { wear: 'Factory New', short: 'FN', from: 0, to: 0.07 },
+  { wear: 'Minimal Wear', short: 'MW', from: 0.07, to: 0.15 },
+  { wear: 'Field-Tested', short: 'FT', from: 0.15, to: 0.38 },
+  { wear: 'Well-Worn', short: 'WW', from: 0.38, to: 0.45 },
+  { wear: 'Battle-Scarred', short: 'BS', from: 0.45, to: 1 },
+];
+
 function wearOf(floatValue: number): string {
-  if (floatValue < 0.07) return 'Recién fabricada';
-  if (floatValue < 0.15) return 'Casi nueva';
-  if (floatValue < 0.38) return 'Algo desgastada';
-  if (floatValue < 0.45) return 'Bastante desgastada';
-  return 'Veterana de guerra';
+  return (WEAR_BANDS.find((row) => floatValue < row.to) ?? WEAR_BANDS[WEAR_BANDS.length - 1]).short;
 }
 
+function floatText(value: number): string {
+  return value.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function wearOfHash(hash: string | undefined): string | null {
+  return hash?.match(/\((Factory New|Minimal Wear|Field-Tested|Well-Worn|Battle-Scarred)\)$/)?.[1] ?? null;
+}
+
+function baseOfHash(hash: string): string {
+  return hash.replace(/^★\s*/, '').replace(/\s*\((Factory New|Minimal Wear|Field-Tested|Well-Worn|Battle-Scarred)\)$/, '');
+}
 export function OfferNotice({ focused = null, onFocusedClose }: { focused?: AppNotification | null; onFocusedClose?: () => void }) {
   const [items, setItems] = useState<AppNotification[]>([]);
   const [ceilings, setCeilings] = useState<Record<string, number>>({});
@@ -154,30 +189,70 @@ export function OfferNotice({ focused = null, onFocusedClose }: { focused?: AppN
   const quotesRef = useRef(quotes);
   quotesRef.current = quotes;
   const [dragId, setDragId] = useState<string | null>(null);
+  const [misses, setMisses] = useState<Record<string, number>>({});
+  const [hashes, setHashes] = useState<Record<string, string>>({});
+  const [wearRefs, setWearRefs] = useState<Record<string, number | null>>({});
+  const asked = useRef(new Set<string>());
+
+  useEffect(() => {
+    const pending = [...new Set(Object.values(hashes))].filter((hash) => wearOfHash(hash) && !asked.current.has(hash));
+    for (const hash of pending) {
+      asked.current.add(hash);
+      const base = baseOfHash(hash);
+      const wear = wearOfHash(hash);
+      api<{ results?: { name: string; wears: { wear: string; refEur: number | null }[] }[] }>(`/api/market/csfloat/catalog?q=${encodeURIComponent(base.replace(' | ', ' '))}`)
+        .then((data) => {
+          const row = (data.results || []).find((item) => item.name.replace(/^★\s*/, '') === base);
+          const ref = row?.wears.find((item) => item.wear === wear)?.refEur ?? null;
+          setWearRefs((prev) => ({ ...prev, [hash]: ref && ref > 0 ? ref : null }));
+        })
+        .catch(() => asked.current.delete(hash));
+    }
+  }, [hashes]);
 
   useEffect(() => {
     let cancelled = false;
-    api<{ notifications: AppNotification[] }>('/api/market/notifications')
-      .then((data) => {
-        if (!cancelled) setItems(data.notifications || []);
-      })
-      .catch(() => undefined);
+    let noticeTry = 0;
+    let noticeTimer = 0;
+    const loadNotices = () => {
+      api<{ notifications: AppNotification[] }>('/api/market/notifications')
+        .then((data) => {
+          if (!cancelled) setItems(data.notifications || []);
+        })
+        .catch(() => {
+          if (cancelled || noticeTry >= 4) return;
+          noticeTry += 1;
+          noticeTimer = window.setTimeout(loadNotices, 3000 * noticeTry);
+        });
+    };
+    loadNotices();
+    let retry = 0;
+    let retryTimer = 0;
     const refreshCeilings = () => {
-      api<{ purchases?: { id: string; belowEur: number }[] }>('/api/market')
+      api<{ purchases?: { id: string; belowEur: number; hash?: string }[] }>('/api/market')
         .then((data) => {
           if (cancelled) return;
           const next: Record<string, number> = {};
+          const names: Record<string, string> = {};
           for (const row of data.purchases || []) {
             if (row.id && row.belowEur > 0) next[row.id] = row.belowEur;
+            if (row.id && row.hash) names[row.id] = row.hash;
           }
           setCeilings(next);
+          setHashes(names);
         })
-        .catch(() => undefined);
+        .catch(() => {
+          if (cancelled || retry >= 3) return;
+          retry += 1;
+          retryTimer = window.setTimeout(refreshCeilings, 4000 * retry);
+        });
     };
     refreshCeilings();
     window.addEventListener('pat-alerts', refreshCeilings);
     return () => {
       cancelled = true;
+      window.clearTimeout(retryTimer);
+      window.clearTimeout(noticeTimer);
       window.removeEventListener('pat-alerts', refreshCeilings);
     };
   }, [visit]);
@@ -219,7 +294,7 @@ export function OfferNotice({ focused = null, onFocusedClose }: { focused?: AppN
   const place = deck.length === 0 ? 0 : Math.min(index, deck.length - 1);
   const shown = deck[place] || null;
   const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const open = Boolean(shown) && Boolean(picked);
+  const open = Boolean(shown) && (Boolean(picked) || !aside);
 
   useEffect(() => {
     if (focusId) {
@@ -344,11 +419,13 @@ export function OfferNotice({ focused = null, onFocusedClose }: { focused?: AppN
         if (cancel) return;
         checked.current.add(id);
         try {
-          const data = await api<{ listing: { referenceEur: number | null; paintSeed: number | null; state?: string } }>(`/api/market/csfloat/listings/${id}`);
+          const data = await api<{ listing: { referenceEur: number | null; paintSeed: number | null; state?: string; floatValue?: number | null; image?: string | null; photos?: string[] } }>(`/api/market/csfloat/listings/${id}`);
           save(id, {
             referenceEur: data.listing.referenceEur,
             paintSeed: data.listing.paintSeed,
             state: data.listing.state || 'listed',
+            floatValue: data.listing.floatValue ?? null,
+            pictures: listingPictures(data.listing.photos, data.listing.image),
           });
         } catch (error) {
           if (error instanceof ApiError && error.status === 404) save(id, { referenceEur: null, paintSeed: null, state: 'gone' });
@@ -367,12 +444,17 @@ export function OfferNotice({ focused = null, onFocusedClose }: { focused?: AppN
   const limit = ceiling != null ? ceiling.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' }) : below;
   const when = saleMoment(shown);
   const price = shown.priceEur;
-  const floatValue = shown.floatValue;
   const listing = listingId(shown.url);
   const known = quotes[listing || ''];
-  const reference = shown.referenceEur && shown.referenceEur > 0 ? shown.referenceEur : known?.referenceEur ?? null;
+  const listed = listedFloat(shown.url, shown.quoteKey);
+  const floatValue = shown.floatValue ?? known?.floatValue ?? listed?.floatValue ?? null;
+  const pictures = [...new Set([...(known?.pictures || []), shown.image || '', skinArt(name) || '', skinArtSteam(name) || ''].filter(Boolean))];
+  const picture = pictures[misses[shown.id] || 0] || null;
+  const hash = hashes[watchId];
+  const band = floatValue == null ? WEAR_BANDS.find((row) => row.wear === wearOfHash(hash)) ?? null : null;
+  const reference = shown.referenceEur && shown.referenceEur > 0 ? shown.referenceEur : known?.referenceEur ?? (hash ? wearRefs[hash] ?? null : null);
   const premium = dealPct(price, reference);
-  const pattern = shown.paintSeed ?? known?.paintSeed ?? null;
+  const pattern = shown.paintSeed ?? known?.paintSeed ?? listed?.paintSeed ?? null;
 
   return createPortal(
     <AnimatePresence>
@@ -406,25 +488,30 @@ export function OfferNotice({ focused = null, onFocusedClose }: { focused?: AppN
               <span onPointerDown={(event) => event.stopPropagation()}><ModalClose onClose={leave} /></span>
             </div>
             <p className="mt-2 text-center text-[13px] font-black tabular-nums tracking-wide text-slate-400" aria-label={`Oferta ${place + 1} de ${deck.length}`}>{place + 1}/{deck.length}</p>
-            {shown.image && (
-              <div className="relative mt-3 grid place-items-center">
-                <img src={shown.image} alt="" draggable={false} referrerPolicy="no-referrer" className="h-36 w-52 object-contain" />
+            {picture && (
+              <div className="mt-3 grid place-items-center px-6 py-4">
+                <img
+                  key={picture}
+                  src={picture}
+                  alt=""
+                  draggable={false}
+                  referrerPolicy="no-referrer"
+                  decoding="async"
+                  onError={() => setMisses((prev) => ({ ...prev, [shown.id]: (prev[shown.id] || 0) + 1 }))}
+                  className="aspect-[4/3] max-h-56 w-full object-contain drop-shadow-[0_14px_18px_rgba(15,23,42,0.22)]"
+                />
+              </div>
+            )}
+            <div className="mt-4 flex items-end justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <p className="text-[28px] font-black tabular-nums leading-none tracking-tight">{price == null ? '—' : formatEur(price)}</p>
                 {premium != null && (
-                  <span className={cn('absolute right-2 top-2 inline-flex items-center gap-1 rounded-full bg-slate-950/90 px-2 py-1 text-[12px] font-black tabular-nums text-white')}>
-                    <span className={premium > 0 ? 'text-[#ff5a6a]' : premium < 0 ? 'text-[#3ddc97]' : 'text-white'}>{premium > 0 ? '+' : premium < 0 ? '−' : ''}</span>
+                  <span className="inline-flex items-center gap-1 rounded-full bg-slate-950 px-2 py-1 text-[12px] font-black tabular-nums text-white dark:bg-white dark:text-slate-950">
+                    <span className={premium > 0 ? 'text-[#ff5a6a]' : premium < 0 ? 'text-[#3ddc97]' : ''}>{premium > 0 ? '+' : premium < 0 ? '−' : ''}</span>
                     {Math.abs(premium).toLocaleString('es-ES', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} %
                   </span>
                 )}
               </div>
-            )}
-            <div className="mt-4 flex items-end justify-between gap-3">
-              <p className="text-[28px] font-black tabular-nums leading-none tracking-tight">{price == null ? '—' : formatEur(price)}</p>
-              {!shown.image && premium != null && (
-                <span className="inline-flex items-center gap-1 rounded-full bg-slate-950 px-2 py-1 text-[12px] font-black tabular-nums text-white">
-                  <span className={premium > 0 ? 'text-[#ff5a6a]' : 'text-[#3ddc97]'}>{premium > 0 ? '+' : '−'}</span>
-                  {Math.abs(premium).toLocaleString('es-ES', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} %
-                </span>
-              )}
               <p className="text-sm font-medium text-slate-400">{formatDay(when)}</p>
             </div>
             <p className="mt-3 text-sm font-medium text-slate-500">
@@ -438,6 +525,18 @@ export function OfferNotice({ focused = null, onFocusedClose }: { focused?: AppN
                 </div>
                 <div className="relative mt-2 h-1.5 rounded-full bg-gradient-to-r from-emerald-400 via-amber-300 to-rose-500">
                   <span className="absolute -top-1 h-3.5 w-1 -translate-x-1/2 rounded-full bg-slate-900 ring-2 ring-white dark:bg-white dark:ring-slate-900" style={{ left: `${Math.min(100, Math.max(0, floatValue * 100))}%` }} />
+                </div>
+              </div>
+            )}
+            {band && (
+              <div className="mt-3">
+                <div className="flex items-baseline justify-between gap-3">
+                  <p className="text-[15px] font-black tabular-nums">{floatText(band.from)} – {floatText(band.to)}</p>
+                  <p className="text-xs font-semibold text-slate-400">{band.short}</p>
+                </div>
+                <div className="relative mt-2 h-1.5 overflow-hidden rounded-full bg-gradient-to-r from-emerald-400 via-amber-300 to-rose-500">
+                  <span className="absolute inset-y-0 left-0 bg-white/75 dark:bg-slate-900/75" style={{ width: `${band.from * 100}%` }} />
+                  <span className="absolute inset-y-0 right-0 bg-white/75 dark:bg-slate-900/75" style={{ width: `${(1 - band.to) * 100}%` }} />
                 </div>
               </div>
             )}

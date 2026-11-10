@@ -13,6 +13,7 @@ import { formatDay, formatEur, formatNumber, formatPct, formatPrice, formatSigne
 import { PLATFORM_COLORS } from '@/lib/platform-colors';
 import { findPlatform } from '@/lib/platforms';
 import { accountProducts, KIND_LABEL, kindClass, kindFromClass, partSection, type ProductKind, type ProductSection } from '@/lib/products';
+import { skinArt, skinArtSteam } from '@/lib/skin-art';
 import { cn } from '@/lib/utils';
 import { rankedOffers, watchListings, watchOfferSkips } from '@/components/OfferNotice';
 import { useOpenOffer } from '@/components/offer-focus';
@@ -519,14 +520,13 @@ function PieceLine({ accountId, holdingId, assetClass, now }: { accountId: strin
   const points = useHoldingSeries(accountId, holdingId, assetClass);
   const [live, setLive] = useState<number | null>(null);
   const [day, setDay] = useState<string | null>(null);
-  if (!points || points.length < 2) return null;
   return (
     <div>
       <div className="flex items-baseline justify-between gap-3">
         <p className="text-[2rem] font-semibold leading-none tracking-tight tabular-nums text-slate-900 dark:text-white">{formatEur(live ?? now)}</p>
         {day && <p className="text-[13px] font-semibold text-slate-400">{formatDay(day)}</p>}
       </div>
-      <CashChart points={points} now={now} hidden={false} quiet tone="ink" onValue={setLive} onDay={setDay} emptyText="" />
+      <CashChart points={points ?? []} now={now} hidden={false} quiet tone="ink" onValue={setLive} onDay={setDay} emptyText="" />
     </div>
   );
 }
@@ -632,6 +632,10 @@ function PieceDialog({
   const skins = piece.skins || piece.assetClass === 'personal_good';
   const editing = Boolean(piece.id);
   const wear = skins ? wearName(piece.floatText) : '';
+  const [show, setShow] = useState<'imagen' | 'grafico'>('imagen');
+  const [broken, setBroken] = useState(false);
+  const shot = skins ? skinArt(piece.name) : null;
+  const art = broken ? (skins ? skinArtSteam(piece.name) : null) : (shot || piece.image || null);
   useEffect(() => {
     if (!skins || piece.image || piece.name.trim().length < 2) return;
     let cancelled = false;
@@ -650,12 +654,27 @@ function PieceDialog({
     <Modal title={piece.name.trim() || `Añadir en ${piece.accountName}`} onClose={() => setPiece(null)}>
       <div className="grid gap-4">
         {pieceError && <p className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">{pieceError}</p>}
-        {piece.image && (
-          <div className="grid place-items-center">
-            <img src={piece.image} alt="" referrerPolicy="no-referrer" className="h-40 w-56 object-contain" />
+        {art && editing && piece.id && (
+          <div className="flex rounded-full bg-slate-900/[0.06] p-0.5 text-[13px] font-bold dark:bg-white/10">
+            {(['imagen', 'grafico'] as const).map((id) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setShow(id)}
+                aria-pressed={show === id}
+                className={cn('flex-1 rounded-full px-3 py-1.5', show === id ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950' : 'text-slate-500')}
+              >
+                {id === 'imagen' ? 'Imagen' : 'Gráfico'}
+              </button>
+            ))}
           </div>
         )}
-        {editing && piece.id && <PieceLine accountId={piece.accountId} holdingId={piece.id} assetClass={piece.assetClass} now={Number(piece.value) || 0} />}
+        {art && (!editing || !piece.id || show === 'imagen') && (
+          <div className={cn('grid place-items-center overflow-hidden rounded-2xl', art.includes('csfloat.com') && 'bg-[#0e1116]')}>
+            <img src={art} alt="" referrerPolicy="no-referrer" onError={() => setBroken(true)} className="h-48 w-full object-contain" />
+          </div>
+        )}
+        {editing && piece.id && (!art || show === 'grafico') && <PieceLine accountId={piece.accountId} holdingId={piece.id} assetClass={piece.assetClass} now={Number(piece.value) || 0} />}
         {!editing && !skins && piece.kinds.length > 1 && (
           <Field label="Tipo">
             <select
@@ -1700,7 +1719,7 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
                 invested: side.invested,
                 gain: side.gain,
                 icon: side.icon,
-                items: side.items.map((item) => ({ id: item.id || undefined, label: item.label, eur: item.eur, detail: item.detail, image: item.image, costEur: item.costEur ?? null, group: item.group, moves: item.moves || [] })),
+                items: side.items.map((item) => ({ id: item.id || undefined, label: item.label, eur: item.eur, detail: item.detail, image: item.image || skinArt(item.label), costEur: item.costEur ?? null, group: item.group, moves: item.moves || [] })),
               })),
             })), extraWallet(data.extras)]}
             onSaved={load}
@@ -1829,21 +1848,17 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
       </motion.section>
 
       {chart === 'line' ? (
-        data.series.length > 1 ? (
-          <CashChart
-            quiet
-            tone="ink"
-            hidden={hidden}
-            points={data.series.map((point) => ({ day: point.day, eur: point.eur }))}
-            now={shownWorth ?? data.series[data.series.length - 1]?.eur ?? 0}
-            onValue={setLineNow}
-            onDay={setLineDay}
-            onMove={setLineMove}
-            emptyText=""
-          />
-        ) : (
-          <p className="text-center text-[13px] font-medium text-slate-400">La línea aparece cuando haya más de un día.</p>
-        )
+        <CashChart
+          quiet
+          tone="ink"
+          hidden={hidden}
+          points={data.series.map((point) => ({ day: point.day, eur: point.eur }))}
+          now={shownWorth ?? data.series[data.series.length - 1]?.eur ?? 0}
+          onValue={setLineNow}
+          onDay={setLineDay}
+          onMove={setLineMove}
+          emptyText=""
+        />
       ) : slices.length > 0 ? (
         <Donut slices={slices} hidden={hidden} />
       ) : (
