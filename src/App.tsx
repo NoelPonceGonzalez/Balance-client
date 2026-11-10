@@ -40,6 +40,7 @@ export default function App() {
   const [focusPlan, setFocusPlan] = useState<string | null>(null);
   const [focusTick, setFocusTick] = useState(0);
   const [focusListing, setFocusListing] = useState<string | null>(null);
+  const [focusSkin, setFocusSkin] = useState<{ name: string; wear: string; label: string; image: string | null } | null>(null);
 
   useEffect(() => {
     const openPlan = (event: Event) => {
@@ -49,8 +50,30 @@ export default function App() {
       setFocusTick((value) => value + 1);
       setSection('plans');
     };
+    const openListing = (event: Event) => {
+      const id = (event as CustomEvent<string>).detail;
+      if (!id) return;
+      setFocusSkin(null);
+      setFocusListing(id);
+      setFocusTick((value) => value + 1);
+      setSection('market');
+    };
+    const openSkin = (event: Event) => {
+      const detail = (event as CustomEvent<{ name: string; wear: string; label: string; image: string | null }>).detail;
+      if (!detail?.name) return;
+      setFocusListing(null);
+      setFocusSkin(detail);
+      setFocusTick((value) => value + 1);
+      setSection('market');
+    };
     window.addEventListener('pat-plan', openPlan);
-    return () => window.removeEventListener('pat-plan', openPlan);
+    window.addEventListener('pat-listing', openListing);
+    window.addEventListener('pat-skin', openSkin);
+    return () => {
+      window.removeEventListener('pat-plan', openPlan);
+      window.removeEventListener('pat-listing', openListing);
+      window.removeEventListener('pat-skin', openSkin);
+    };
   }, []);
 
   const restoreSession = () => {
@@ -160,7 +183,7 @@ export default function App() {
         transition={glide}
       >
         {section === 'dashboard' && <Dashboard heroMs={heroMs} home={home} books={books} />}
-        {section === 'market' && <Market focusListing={focusListing} focusTick={focusTick} />}
+        {section === 'market' && <Market focusListing={focusListing} focusTick={focusTick} focusSkin={focusSkin} />}
         {section === 'plans' && <Plans books={books} userId={user.id} focusId={focusPlan} focusTick={focusTick} />}
         {section === 'movements' && <Movements />}
         {section === 'settings' && <Settings user={user} heroMs={heroMs} onHero={changeHero} onUser={setUser} onLogout={logout} />}

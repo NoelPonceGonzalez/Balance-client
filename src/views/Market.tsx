@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronLeft, Heart, Search, Star, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { CsfloatFinder, SkinMarket, SkinSuggest, type SkinHit } from '@/components/CsfloatFinder';
+import { CsfloatFeed, CsfloatFinder, SkinMarket, SkinSuggest, type SkinHit } from '@/components/CsfloatFinder';
 import { DragRow } from '@/components/DragRow';
 import { Modal } from '@/components/Modal';
 import { QuietLoad } from '@/components/QuietLoad';
@@ -529,7 +529,7 @@ function SavedDesk({ needle }: { needle: string }) {
   );
 }
 type Picked =
-  | { kind: 'quote'; source: 'coingecko' | 'yahoo'; externalId: string; name: string; priceEur: number | null; image: string | null }
+  | { kind: 'quote'; source: 'coingecko' | 'yahoo'; externalId: string; name: string; symbol: string; priceEur: number | null; image: string | null }
   | { kind: 'skin'; name: string; wear: string; wears: string[]; image: string | null };
 
 function sameAlert(item: MarketSignal, note: AppNotification): boolean {
@@ -538,7 +538,71 @@ function sameAlert(item: MarketSignal, note: AppNotification): boolean {
   return Boolean(item.quoteKey) && note.quoteKey === item.quoteKey;
 }
 
-function AlertDesk({ items, catalog, onChanged }: { items: MarketSignal[]; catalog: MarketTapeItem[]; onChanged: () => void }) {
+function ruleLine(item: MarketSignal): string {
+  const parts = [
+    item.above != null ? `Por encima de ${formatEur(item.above)}` : '',
+    item.below != null ? `Por debajo de ${formatEur(item.below)}` : '',
+    item.maxFloat != null ? `Float hasta ${item.maxFloat}` : '',
+    item.paintSeed != null ? `Patrón ${item.paintSeed}` : '',
+  ].filter(Boolean);
+  return parts.join(' · ') || 'Escuchando';
+}
+
+function withCeiling(text: string, ceiling: number | null): string {
+  if (ceiling == null) return text;
+  return text.replace(/por debajo de\s+\d[\d.\s]*,\d{2}\s*€/gi, `por debajo de ${formatEur(ceiling)}`);
+}
+
+function optionalBound(value: string, min: number, max: number, integer = false): number | null {
+  const text = value.trim().replace(',', '.');
+  if (!text) return null;
+  const number = Number(text);
+  if (!Number.isFinite(number) || number < min || number > max || (integer && !Number.isInteger(number))) return Number.NaN;
+  return number;
+}
+
+type CreateKind = 'cs2' | 'crypto' | 'stock' | 'etf' | 'index' | 'gold' | 'silver' | 'oil' | 'copper';
+
+const CREATE_KINDS: { id: CreateKind; label: string }[] = [
+  { id: 'crypto', label: 'Cripto' },
+  { id: 'stock', label: 'Acciones' },
+  { id: 'etf', label: 'ETF' },
+  { id: 'index', label: 'Índices' },
+  { id: 'gold', label: 'Oro' },
+  { id: 'silver', label: 'Plata' },
+  { id: 'oil', label: 'Petróleo' },
+  { id: 'copper', label: 'Cobre' },
+  { id: 'cs2', label: 'CS2' },
+];
+
+function kindFromMarket(market: string): CreateKind | null {
+  return CREATE_KINDS.some((item) => item.id === market) ? market as CreateKind : null;
+}
+
+function groupOf(item: MarketSignal, catalog: MarketTapeItem[]): { id: string; label: string } {
+  if (item.kind === 'compra') return { id: 'cs2', label: 'CS2' };
+  const known = CREATE_KINDS.find((row) => catalog.some((entry) => entry.key === item.quoteKey && entry.kind === row.id));
+  if (known) return { id: known.id, label: known.label };
+  if (item.quoteKey?.startsWith('coingecko:')) return { id: 'crypto', label: 'Cripto' };
+  return { id: 'otros', label: 'Otros' };
+}
+
+function groupAlerts(items: MarketSignal[], catalog: MarketTapeItem[]) {
+  const order = ['cs2', 'crypto', 'stock', 'etf', 'index', 'gold', 'silver', 'oil', 'copper', 'otros'];
+  const buckets = new Map<string, { label: string; items: MarketSignal[] }>();
+  for (const item of items) {
+    const group = groupOf(item, catalog);
+    const bucket = buckets.get(group.id) || { label: group.label, items: [] };
+    bucket.items.push(item);
+    buckets.set(group.id, bucket);
+  }
+  return order.flatMap((id) => {
+    const bucket = buckets.get(id);
+    return bucket ? [{ id, ...bucket }] : [];
+  });
+}
+
+function AlertDesk({ items, catalog, hashes, market, onChanged }: { items: MarketSignal[]; catalog: MarketTapeItem[]; hashes: Record<string, string>; market: string; onChanged: () => void }) {
   const openOffer = useOpenOffer();
   const [query, setQuery] = useState('');
   const [quotes, setQuotes] = useState<QuoteCandidate[]>([]);
@@ -549,7 +613,15 @@ function AlertDesk({ items, catalog, onChanged }: { items: MarketSignal[]; catal
   const [note, setNote] = useState('');
   const [phone, setPhone] = useState('');
   const [history, setHistory] = useState<MarketSignal | null>(null);
+  const [editing, setEditing] = useState<MarketSignal | null>(null);
+  const [busy, setBusy] = useState(false);
   const [notes, setNotes] = useState<AppNotification[] | null>(null);
+  const [pane, setPane] = useState<'list' | 'create'>('list');
+  const [createFor, setCreateFor] = useState<CreateKind | null>(() => kindFromMarket(market));
+  const [maxFloat, setMaxFloat] = useState('');
+  const [pattern, setPattern] = useState('');
+  const [priceWait, setPriceWait] = useState(false);
+  const [dropping, setDropping] = useState<string | null>(null);
 
   useEffect(() => {
     if (!history) {
@@ -571,30 +643,89 @@ function AlertDesk({ items, catalog, onChanged }: { items: MarketSignal[]; catal
     setQuery(value);
     setPicked(null);
     const text = value.trim();
-    if (text.length < 2) {
+    if (text.length < 2 || !createFor) {
       setQuotes([]);
       setSkins([]);
       return;
     }
-    const [found, gloves] = await Promise.all([
-      api<{ results: QuoteCandidate[] }>(`/api/market/search?q=${encodeURIComponent(text)}`).catch(() => ({ results: [] })),
-      api<{ results: { name: string; wears: string[]; image: string | null }[] }>(`/api/market/skins?q=${encodeURIComponent(text)}`).catch(() => ({ results: [] })),
-    ]);
-    setQuotes(found.results || []);
-    setSkins(gloves.results || []);
+    if (createFor === 'cs2') {
+      const gloves = await api<{ results: { name: string; wears: string[]; image: string | null }[] }>(`/api/market/skins?q=${encodeURIComponent(text)}`).catch(() => ({ results: [] }));
+      setSkins(gloves.results || []);
+      setQuotes([]);
+      return;
+    }
+    if (createFor === 'crypto' || createFor === 'stock' || createFor === 'etf') {
+      const found = await api<{ results: QuoteCandidate[] }>(`/api/market/search?q=${encodeURIComponent(text)}&assetClass=${encodeURIComponent(createFor)}`).catch(() => ({ results: [] }));
+      setQuotes(found.results || []);
+      setSkins([]);
+      return;
+    }
+    setQuotes([]);
+    setSkins([]);
   };
 
-  const local = query.trim().length < 2 ? [] : catalog.filter((item) => matches(query, [item.name, item.symbol])).slice(0, 6);
-  const adding = query.trim().length > 0 || picked != null;
+  const local = query.trim().length < 2 || !createFor || createFor === 'cs2'
+    ? []
+    : catalog.filter((item) => item.kind === createFor && matches(query, [item.name, item.symbol])).slice(0, 6);
+  const fixed = createFor && createFor !== 'cs2' && createFor !== 'crypto' && createFor !== 'stock' && createFor !== 'etf'
+    ? catalog.filter((item) => item.kind === createFor)
+    : [];
+  const createPlaceholder = createFor === 'cs2' ? 'Pandora, guantes, AK…' : createFor === 'crypto' ? 'Bitcoin, ether, solana…' : createFor === 'stock' ? 'Apple, NVIDIA, ASML…' : createFor === 'etf' ? 'VWCE, S&P 500…' : createFor === 'index' ? 'Ibex, S&P, Nasdaq…' : 'Buscar en este mercado';
+  const lockedKind = kindFromMarket(market);
+  const shownFixed = query.trim().length >= 2 ? local : fixed;
+
+  useEffect(() => {
+    if (pane !== 'create' || !createFor || createFor === 'cs2' || createFor === 'crypto' || createFor === 'stock' || createFor === 'etf') return;
+    const rows = catalog.filter((item) => item.kind === createFor);
+    if (rows.length !== 1) return;
+    const quote = quoteOf(rows[0].key);
+    if (!quote) return;
+    const row = rows[0];
+    setPicked((current) => current ?? { kind: 'quote', ...quote, name: row.name, symbol: row.symbol, priceEur: row.priceEur, image: row.image });
+  }, [pane, createFor, catalog]);
 
   const amount = (value: string) => {
     const number = Number(value.replace(',', '.'));
     return number > 0 ? number : null;
   };
 
-  const save = async () => {
-    if (!picked) return;
+  const beginEdit = (item: MarketSignal) => {
+    setHistory(null);
+    setPicked(null);
+    setQuery('');
+    setQuotes([]);
+    setSkins([]);
+    setEditing(item);
+    setAbove(item.above != null ? String(item.above) : '');
+    setBelow(item.below != null ? String(item.below) : '');
+    setMaxFloat(item.maxFloat != null ? String(item.maxFloat) : '');
+    setPattern(item.paintSeed != null ? String(item.paintSeed) : '');
+    setDropping(null);
     setNote('');
+  };
+
+  const finish = () => {
+    setPicked(null);
+    setEditing(null);
+    setHistory(null);
+    setQuery('');
+    setAbove('');
+    setBelow('');
+    setMaxFloat('');
+    setPattern('');
+    setPriceWait(false);
+    setDropping(null);
+    setQuotes([]);
+    setSkins([]);
+    setPane('list');
+    window.dispatchEvent(new Event('pat-alerts'));
+    onChanged();
+  };
+
+  const save = async () => {
+    if (!picked || busy) return;
+    setNote('');
+    setBusy(true);
     try {
       if (picked.kind === 'skin') {
         const price = amount(below);
@@ -602,10 +733,16 @@ function AlertDesk({ items, catalog, onChanged }: { items: MarketSignal[]; catal
           setNote('Pon el precio por debajo del cual avisar.');
           return;
         }
+        const cap = optionalBound(maxFloat, 0, 1);
+        const seed = optionalBound(pattern, 0, 1000, true);
+        if (Number.isNaN(cap) || Number.isNaN(seed)) {
+          setNote('El float va de 0 a 1 y el patrón es un número entero.');
+          return;
+        }
         const marketHashName = picked.wear ? `${picked.name} (${picked.wear})` : picked.name;
         await api('/api/market/watch', {
           method: 'POST',
-          body: JSON.stringify({ label: picked.name.replace(/^★\s*/, ''), marketHashName, below: price }),
+          body: JSON.stringify({ label: picked.name.replace(/^★\s*/, ''), marketHashName, below: price, maxFloat: cap, paintSeed: seed }),
         });
       } else {
         const high = amount(above);
@@ -619,15 +756,61 @@ function AlertDesk({ items, catalog, onChanged }: { items: MarketSignal[]; catal
           body: JSON.stringify({ source: picked.source, externalId: picked.externalId, above: high, below: low }),
         });
       }
-      setPicked(null);
-      setQuery('');
-      setAbove('');
-      setBelow('');
-      setQuotes([]);
-      setSkins([]);
-      onChanged();
+      finish();
     } catch (err) {
       setNote(err instanceof Error ? err.message : 'No se ha podido guardar el aviso.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveEdit = async () => {
+    if (!editing || busy) return;
+    setNote('');
+    const low = amount(below);
+    const high = amount(above);
+    setBusy(true);
+    try {
+      if (editing.kind === 'compra') {
+        const marketHashName = hashes[editing.id];
+        if (!marketHashName) {
+          setNote('Este aviso no se puede cambiar desde aquí.');
+          return;
+        }
+        if (low == null) {
+          setNote('Pon el precio por debajo del cual avisar.');
+          return;
+        }
+        const cap = optionalBound(maxFloat, 0, 1);
+        const seed = optionalBound(pattern, 0, 1000, true);
+        if (Number.isNaN(cap) || Number.isNaN(seed)) {
+          setNote('El float va de 0 a 1 y el patrón es un número entero.');
+          return;
+        }
+        await api('/api/market/watch', {
+          method: 'POST',
+          body: JSON.stringify({ label: editing.name, marketHashName, below: low, maxFloat: cap, paintSeed: seed }),
+        });
+      } else {
+        const quote = editing.quoteKey ? quoteOf(editing.quoteKey) : null;
+        if (!quote) {
+          setNote('Este aviso no se puede cambiar desde aquí.');
+          return;
+        }
+        if (high == null && low == null) {
+          setNote('Pon un precio por encima, por debajo, o los dos.');
+          return;
+        }
+        await api('/api/market/listen', {
+          method: 'POST',
+          body: JSON.stringify({ source: quote.source, externalId: quote.externalId, above: high, below: low }),
+        });
+      }
+      finish();
+    } catch (err) {
+      setNote(err instanceof Error ? err.message : 'No se ha podido guardar el aviso.');
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -636,120 +819,271 @@ function AlertDesk({ items, catalog, onChanged }: { items: MarketSignal[]; catal
     void api(path, { method: 'DELETE' }).then(onChanged);
   };
 
+  const pickKind = (kind: CreateKind) => {
+    setCreateFor(kind);
+    setPicked(null);
+    setQuery('');
+    setQuotes([]);
+    setSkins([]);
+    setAbove('');
+    setBelow('');
+    setMaxFloat('');
+    setPattern('');
+    setPriceWait(false);
+    setNote('');
+  };
+
+  const revealPrice = (row: { source: 'coingecko' | 'yahoo'; externalId: string; name: string; symbol: string; image: string | null; priceEur: number | null }) => {
+    setPicked({ kind: 'quote', ...row });
+    if (row.priceEur != null || !createFor) return;
+    const key = `${row.source}:${row.externalId}`;
+    setPriceWait(true);
+    void api<{ series: { eur: number }[] }>(`/api/market/story?kind=${encodeURIComponent(createFor)}&key=${encodeURIComponent(key)}&name=${encodeURIComponent(row.name)}&symbol=${encodeURIComponent(row.symbol)}&days=7`)
+      .then((story) => {
+        const last = story.series?.at(-1)?.eur;
+        if (last == null) return;
+        setPicked((current) => current && current.kind === 'quote' && current.externalId === row.externalId ? { ...current, priceEur: last } : current);
+      })
+      .catch(() => undefined)
+      .finally(() => setPriceWait(false));
+  };
+
+  const openPane = (next: 'list' | 'create') => {
+    setPane(next);
+    setEditing(null);
+    setHistory(null);
+    setNote('');
+  };
+
+  const resultClass = 'flex w-full items-center gap-3 rounded-2xl px-2 py-2 text-left text-sm font-semibold hover:bg-slate-50 dark:hover:bg-white/5';
+
   return (
-    <Card className="px-4 py-4">
-        {history && (
-          <div>
+    <div>
+      <div className="grid grid-cols-2 rounded-full bg-slate-200/90 p-1 dark:bg-white/10">
+        {([['list', 'Tus avisos'], ['create', 'Crear']] as const).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            aria-pressed={pane === id}
+            onClick={() => openPane(id)}
+            className={cn('rounded-full px-4 py-1.5 text-center text-[13px] font-semibold', pane === id ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950' : 'text-slate-600 dark:text-slate-300')}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {pane === 'list' && editing && (
+        <div className="mt-4 grid gap-3">
+          <button type="button" onClick={() => { setEditing(null); setNote(''); }} className="justify-self-start text-[13px] font-semibold text-slate-500">Volver</button>
+          <p className="flex items-center gap-3 text-sm font-semibold">
+            <Mark image={editing.image || null} symbol={editing.name} contain={editing.kind === 'compra'} fallback={editing.kind === 'compra' ? '/platforms/cs2.svg' : null} />
+            <span className="min-w-0">{editing.name}</span>
+          </p>
+          <p className="text-xs font-medium text-slate-400">Ahora: {ruleLine(editing)}{editing.priceEur == null ? '' : ` · precio ${formatEur(editing.priceEur)}`}</p>
+          {editing.kind === 'precio' && <Input label="Avisar si pasa por encima de (€)" type="number" min="0" step="any" value={above} onChange={(event) => setAbove(event.target.value)} placeholder="Opcional" />}
+          <Input label={editing.kind === 'compra' ? 'Avisar si alguien lo pone por debajo de (€)' : 'Avisar si baja de (€)'} type="number" min="0" step="any" value={below} onChange={(event) => setBelow(event.target.value)} placeholder={editing.kind === 'precio' ? 'Opcional' : ''} />
+          {editing.kind === 'compra' && (
+            <>
+              <Input label="Float máximo" type="number" min="0" max="1" step="0.0001" value={maxFloat} onChange={(event) => setMaxFloat(event.target.value)} placeholder="Opcional" />
+              <Input label="Patrón" type="number" min="0" max="1000" step="1" value={pattern} onChange={(event) => setPattern(event.target.value)} placeholder="Opcional" />
+            </>
+          )}
+          <Button type="button" disabled={busy} onClick={() => void saveEdit()}>{busy ? 'Guardando…' : 'Guardar'}</Button>
+          {note && <p className="text-xs font-medium text-rose-600">{note}</p>}
+        </div>
+      )}
+
+      {pane === 'list' && history && !editing && (
+        <div className="mt-4">
+          <div className="flex items-center justify-between gap-3">
             <button type="button" onClick={() => setHistory(null)} className="text-[13px] font-semibold text-slate-500">Volver</button>
-            <div className="mt-3 flex items-center gap-3">
-              <Mark image={history.image || null} symbol={history.name} contain={history.kind === 'compra'} fallback={history.kind === 'compra' ? '/platforms/cs2.svg' : null} />
-              <div className="min-w-0">
-                <p className="font-semibold">{history.name}</p>
-                <p className="text-[11px] font-bold uppercase text-slate-400">Escuchando{history.priceEur == null ? '' : ` · ahora ${formatEur(history.priceEur)}`}</p>
-              </div>
+            <button type="button" onClick={() => beginEdit(history)} className="text-[13px] font-semibold text-slate-900 dark:text-white">Editar</button>
+          </div>
+          <div className="mt-3 flex items-center gap-3">
+            <Mark image={history.image || null} symbol={history.name} contain={history.kind === 'compra'} fallback={history.kind === 'compra' ? '/platforms/cs2.svg' : null} />
+            <div className="min-w-0">
+              <p className="font-semibold">{history.name}</p>
+              <p className="text-[13px] font-semibold text-slate-600 dark:text-slate-300">{ruleLine(history)}</p>
+              <p className="text-xs font-medium text-slate-400">{history.priceEur == null ? 'Sin precio ahora' : `Ahora ${formatEur(history.priceEur)}`}</p>
             </div>
-            {notes == null && <p className="mt-4 text-sm font-medium text-slate-400">Cargando…</p>}
-            {notes && notes.length === 0 && <p className="mt-4 text-sm font-medium text-slate-500">Todavía no ha saltado ninguno.</p>}
-            {notes && notes.length > 0 && (
-              <div className="mt-2 divide-y divide-slate-100 dark:divide-slate-800">
-                {notes.map((note) => (
-                  <button
-                    key={note.id}
-                    type="button"
-                    onClick={() => { if (note.quoteKey?.startsWith('listing:')) openOffer(note); }}
-                    className="block w-full py-3 text-left"
-                  >
-                    <p className="font-black text-[#ea3943]">{note.priceEur == null ? note.title : formatEur(note.priceEur)}</p>
-                    <p className="text-xs font-medium text-slate-500">{note.body}</p>
-                    {note.floatValue != null && <p className="text-[11px] font-medium text-slate-400">Float {note.floatValue.toFixed(4)}</p>}
-                    <p className="mt-1 text-[11px] font-bold text-slate-400">{formatAgo(note.createdAt)}</p>
-                  </button>
-                ))}
-              </div>
-            )}
           </div>
-        )}
-        {!history && !adding && <p className="text-sm font-medium text-slate-500">Cada aviso se queda escuchando. Si el precio pasa por encima o por debajo del tuyo, llega en el momento. Vale para todo el mercado, no solo para CS2.</p>}
-        {!history && !adding && items.length > 0 && (
-          <div className="mt-3 divide-y divide-slate-100 dark:divide-slate-800">
-            {items.map((item) => (
-              <article key={`${item.kind}:${item.id}`} className="flex items-center gap-3 py-3">
-                <button type="button" onClick={() => setHistory(item)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
-                  <Mark image={item.image || null} symbol={item.name} contain={item.kind === 'compra'} fallback={item.kind === 'compra' ? '/platforms/cs2.svg' : null} />
-                  <span className="min-w-0 flex-1">
-                    <span className="block font-semibold">{item.name}</span>
-                    <span className="block text-[11px] font-bold uppercase text-slate-400">Escuchando{item.priceEur == null ? '' : ` · ahora ${formatEur(item.priceEur)}`}</span>
-                    <span className="mt-1 block text-xs font-medium text-slate-500">{item.note}</span>
-                  </span>
-                </button>
-                <button type="button" onClick={() => remove(item)} className="shrink-0 text-[11px] font-bold text-slate-400">Quitar</button>
-              </article>
-            ))}
-          </div>
-        )}
-        {!history && (
-        <div className={cn('grid gap-2', adding ? '' : 'mt-3')}>
-          <Input value={query} onChange={(event) => void search(event.target.value)} placeholder="Bitcoin, oro, VWCE, Pandora…" aria-label="Buscar para un aviso" />
-          {!picked && (local.length > 0 || quotes.length > 0 || skins.length > 0) && (
-            <div className="grid gap-1">
-              {local.map((item) => {
-                const quote = quoteOf(item.key);
-                return (
-                  <button
-                    key={item.key}
-                    type="button"
-                    onClick={() => {
-                      if (quote) setPicked({ kind: 'quote', ...quote, name: item.name, priceEur: item.priceEur, image: item.image });
-                      else if (item.kind === 'cs2') setPicked({ kind: 'skin', name: item.name, wear: '', wears: [], image: item.image });
-                    }}
-                    className="flex items-center gap-3 rounded-2xl px-2 py-2 text-left text-sm font-bold hover:bg-slate-50 dark:hover:bg-white/5"
-                  >
-                    <Mark image={item.image} symbol={item.symbol} contain={item.kind === 'cs2' || item.kind === 'tf2'} />
-                    <span className="min-w-0">
-                      {item.name}
-                      <span className="ml-2 text-[11px] font-bold uppercase text-slate-400">{item.priceEur == null ? item.symbol : formatEur(item.priceEur)}</span>
-                    </span>
-                  </button>
-                );
-              })}
-              {quotes.filter((item) => !local.some((row) => row.key === `${item.source}:${item.externalId}`)).map((item) => (
-                <button key={`${item.source}:${item.externalId}`} type="button" onClick={() => setPicked({ kind: 'quote', source: item.source, externalId: item.externalId, name: item.name, priceEur: null, image: item.image })} className="flex items-center gap-3 rounded-2xl px-2 py-2 text-left text-sm font-bold hover:bg-slate-50 dark:hover:bg-white/5">
-                  <Mark image={item.image} symbol={item.symbol} />
-                  <span className="min-w-0">{item.name}<span className="ml-2 text-[11px] font-bold uppercase text-slate-400">{item.symbol}</span></span>
-                </button>
-              ))}
-              {skins.map((item) => (
-                <button key={item.name} type="button" onClick={() => setPicked({ kind: 'skin', name: item.name, wear: item.wears[0] || '', wears: item.wears, image: item.image })} className="flex items-center gap-3 rounded-2xl px-2 py-2 text-left text-sm font-bold hover:bg-slate-50 dark:hover:bg-white/5">
-                  <Mark image={item.image} symbol="CS2" contain fallback="/platforms/cs2.svg" />
-                  <span className="min-w-0">{item.name}<span className="ml-2 text-[11px] font-bold uppercase text-slate-400">a la venta</span></span>
+          {notes == null && <p className="mt-4 text-sm font-medium text-slate-400">Cargando…</p>}
+          {notes && notes.length === 0 && <p className="mt-4 text-sm font-medium text-slate-500">Todavía no ha saltado ninguno.</p>}
+          {notes && notes.length > 0 && (
+            <div className="mt-2 divide-y divide-slate-100 dark:divide-white/10">
+              {notes.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => { if (item.quoteKey?.startsWith('listing:')) openOffer(item); }}
+                  className="block w-full py-3 text-left"
+                >
+                  <p className="font-black text-[#ea3943]">{item.priceEur == null ? withCeiling(item.title, history.below) : formatEur(item.priceEur)}</p>
+                  {item.priceEur != null && <p className="text-xs font-medium text-slate-500">{withCeiling(item.title, history.below)}</p>}
+                  <p className="text-xs font-medium text-slate-500">{withCeiling(item.body, history.below)}</p>
+                  {item.floatValue != null && <p className="text-[11px] font-medium text-slate-400">Float {item.floatValue.toFixed(4)}</p>}
+                  <p className="mt-1 text-[11px] font-bold text-slate-400">{formatAgo(item.createdAt)}</p>
                 </button>
               ))}
             </div>
           )}
-          {picked && (
-            <div className="grid gap-2">
-              <p className="flex items-center gap-3 text-sm font-semibold">
+        </div>
+      )}
+
+      {pane === 'list' && !history && !editing && (
+        <div className="mt-4">
+          {items.length === 0 ? (
+            <div className="rounded-2xl bg-slate-50 px-4 py-8 text-center dark:bg-white/5">
+              <p className="text-sm font-medium text-slate-500">Todavía no tienes avisos.</p>
+              <button type="button" onClick={() => openPane('create')} className="mt-3 rounded-full bg-slate-950 px-4 py-2 text-sm font-semibold text-white dark:bg-white dark:text-slate-950">Crear aviso</button>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {groupAlerts(items, catalog).map((group) => (
+                <section key={group.id} className="space-y-2">
+                  <p className="px-1 text-[13px] font-semibold text-slate-500">{group.label} · {group.items.length}</p>
+                  {group.items.map((item) => {
+                    const key = `${item.kind}:${item.id}`;
+                    return (
+                      <article key={key} className="rounded-2xl bg-slate-50 px-3 py-3 dark:bg-white/5">
+                        <button type="button" onClick={() => setHistory(item)} className="flex w-full items-center gap-3 text-left">
+                          <Mark image={item.image || null} symbol={item.name} contain={item.kind === 'compra'} fallback={item.kind === 'compra' ? '/platforms/cs2.svg' : null} />
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate font-semibold">{item.name}</span>
+                            <span className="block text-[13px] font-semibold text-slate-700 dark:text-slate-200">{ruleLine(item)}</span>
+                            <span className="block text-xs font-medium text-slate-400">{item.priceEur == null ? 'Sin precio ahora' : `Ahora ${formatEur(item.priceEur)}`}</span>
+                          </span>
+                        </button>
+                        {dropping === key ? (
+                          <div className="mt-2.5 flex items-center gap-2">
+                            <p className="text-xs font-medium text-slate-500">Se deja de escuchar.</p>
+                            <button type="button" onClick={() => { setDropping(null); remove(item); }} className="rounded-full bg-slate-950 px-3 py-1 text-xs font-semibold text-white dark:bg-white dark:text-slate-950">Quitar</button>
+                            <button type="button" onClick={() => setDropping(null)} className="px-2 py-1 text-xs font-semibold text-slate-500">Cancelar</button>
+                          </div>
+                        ) : (
+                          <div className="mt-2.5 flex items-center gap-2">
+                            <button type="button" onClick={() => beginEdit(item)} className="rounded-full bg-slate-950 px-3 py-1 text-xs font-semibold text-white dark:bg-white dark:text-slate-950">Editar</button>
+                            <button type="button" onClick={() => setHistory(item)} className="rounded-full px-3 py-1 text-xs font-semibold text-slate-600 dark:text-slate-300">Historial</button>
+                            <button type="button" onClick={() => setDropping(key)} className="ml-auto px-2 py-1 text-xs font-semibold text-slate-400">Quitar</button>
+                          </div>
+                        )}
+                      </article>
+                    );
+                  })}
+                </section>
+              ))}
+            </div>
+          )}
+          <button type="button" onClick={() => void activatePush().then(setPhone).catch((err: Error) => setPhone(err.message))} className="mt-4 text-xs font-semibold text-slate-500">Avisos en el móvil</button>
+          {phone && <p className="mt-1 text-xs font-medium text-slate-500">{phone}</p>}
+        </div>
+      )}
+
+      {pane === 'create' && (
+        <div className="mt-4 grid gap-3">
+          {!lockedKind && (
+            <div className="flex flex-wrap gap-1.5">
+              {CREATE_KINDS.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  aria-pressed={createFor === item.id}
+                  onClick={() => pickKind(item.id)}
+                  className={cn('rounded-full px-3 py-1 text-xs font-semibold', createFor === item.id ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950' : 'bg-slate-100 text-slate-600 dark:bg-white/10 dark:text-slate-300')}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          )}
+          {!createFor && <p className="text-sm font-medium text-slate-500">Elige el mercado del aviso.</p>}
+          {createFor && !picked && (
+            <>
+              {(createFor === 'cs2' || createFor === 'crypto' || createFor === 'stock' || createFor === 'etf' || createFor === 'index') && (
+                <Input value={query} onChange={(event) => void search(event.target.value)} placeholder={createPlaceholder} aria-label="Buscar para un aviso" />
+              )}
+              {shownFixed.length > 0 && (
+                <div className="grid gap-1">
+                  {shownFixed.map((item) => {
+                    const quote = quoteOf(item.key);
+                    return (
+                      <button
+                        key={item.key}
+                        type="button"
+                        onClick={() => {
+                          if (quote) revealPrice({ ...quote, name: item.name, symbol: item.symbol, priceEur: item.priceEur, image: item.image });
+                        }}
+                        className={resultClass}
+                      >
+                        <Mark image={item.image} symbol={item.symbol} />
+                        <span className="min-w-0">
+                          {item.name}
+                          <span className="ml-2 text-[11px] font-bold uppercase text-slate-400">{item.priceEur == null ? item.symbol : formatEur(item.priceEur)}</span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              {(quotes.length > 0 || skins.length > 0) && (
+                <div className="grid gap-1">
+                  {quotes.filter((item) => !local.some((row) => row.key === `${item.source}:${item.externalId}`)).map((item) => (
+                    <button key={`${item.source}:${item.externalId}`} type="button" onClick={() => revealPrice({ source: item.source, externalId: item.externalId, name: item.name, symbol: item.symbol, priceEur: null, image: item.image })} className={resultClass}>
+                      <Mark image={item.image} symbol={item.symbol} />
+                      <span className="min-w-0">{item.name}<span className="ml-2 text-[11px] font-bold uppercase text-slate-400">{item.symbol}</span></span>
+                    </button>
+                  ))}
+                  {skins.map((item) => (
+                    <button key={item.name} type="button" onClick={() => setPicked({ kind: 'skin', name: item.name, wear: item.wears[0] || '', wears: item.wears, image: item.image })} className={resultClass}>
+                      <Mark image={item.image} symbol="CS2" contain fallback="/platforms/cs2.svg" />
+                      <span className="min-w-0">{item.name}<span className="ml-2 text-[11px] font-bold uppercase text-slate-400">a la venta</span></span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {query.trim().length >= 2 && shownFixed.length === 0 && quotes.length === 0 && skins.length === 0 && (
+                <p className="text-sm font-medium text-slate-500">Nada con ese nombre en este mercado.</p>
+              )}
+              {query.trim().length < 2 && shownFixed.length === 0 && createFor !== 'cs2' && createFor !== 'crypto' && createFor !== 'stock' && createFor !== 'etf' && (
+                <p className="text-sm font-medium text-slate-500">No hay precio de este mercado ahora.</p>
+              )}
+            </>
+          )}
+          {createFor && picked && (
+            <div className="grid gap-3">
+              <div className="flex items-center gap-3">
                 <Mark image={picked.image} symbol={picked.name} contain={picked.kind === 'skin'} fallback={picked.kind === 'skin' ? '/platforms/cs2.svg' : null} />
-                <span>{picked.name}{picked.kind === 'quote' && picked.priceEur != null ? ` · ${formatEur(picked.priceEur)}` : ''}</span>
-              </p>
+                <p className="min-w-0 flex-1 text-sm font-semibold">
+                  {picked.name}
+                  {picked.kind === 'quote' ? <span className="mt-0.5 block text-xs font-medium text-slate-400">{picked.priceEur != null ? formatEur(picked.priceEur) : priceWait ? 'Buscando el precio…' : 'Sin precio ahora'}</span> : null}
+                </p>
+                {fixed.length !== 1 && (
+                  <button type="button" onClick={() => setPicked(null)} className="shrink-0 text-[13px] font-semibold text-slate-500">Cambiar</button>
+                )}
+              </div>
               {picked.kind === 'skin' && picked.wears.length > 0 && (
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap gap-1.5">
                   {picked.wears.map((wear) => (
-                    <button key={wear} type="button" onClick={() => setPicked({ ...picked, wear })} className={cn('rounded-full border px-3 py-1 text-xs font-bold', picked.wear === wear ? 'border-slate-900 text-slate-900 dark:border-white dark:text-white' : 'border-slate-200 text-slate-400')}>{wear}</button>
+                    <button key={wear} type="button" onClick={() => setPicked({ ...picked, wear })} className={cn('rounded-full px-3 py-1 text-xs font-semibold', picked.wear === wear ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950' : 'bg-slate-100 text-slate-500 dark:bg-white/10')}>{wear}</button>
                   ))}
                 </div>
               )}
               {picked.kind === 'quote' && <Input label="Avisar si pasa por encima de (€)" type="number" min="0" step="any" value={above} onChange={(event) => setAbove(event.target.value)} placeholder="Opcional" />}
               <Input label={picked.kind === 'skin' ? 'Avisar si alguien lo pone por debajo de (€)' : 'Avisar si baja de (€)'} type="number" min="0" step="any" value={below} onChange={(event) => setBelow(event.target.value)} placeholder={picked.kind === 'quote' ? 'Opcional' : ''} />
-              <Button type="button" onClick={() => void save()}>Escuchar</Button>
+              {picked.kind === 'skin' && (
+                <>
+                  <Input label="Float máximo" type="number" min="0" max="1" step="0.0001" value={maxFloat} onChange={(event) => setMaxFloat(event.target.value)} placeholder="Opcional" />
+                  <Input label="Patrón" type="number" min="0" max="1000" step="1" value={pattern} onChange={(event) => setPattern(event.target.value)} placeholder="Opcional" />
+                </>
+              )}
+              <Button type="button" disabled={busy} onClick={() => void save()}>{busy ? 'Guardando…' : 'Crear aviso'}</Button>
             </div>
           )}
-          {note && <p className="text-xs font-medium text-rose-600">{note}</p>}
+          {pane === 'create' && note && <p className="text-xs font-medium text-rose-600">{note}</p>}
         </div>
-        )}
-        {!history && !adding && <button type="button" onClick={() => void activatePush().then(setPhone).catch((err: Error) => setPhone(err.message))} className="mt-4 text-xs font-bold text-slate-500">Avisos en el móvil</button>}
-        {phone && <p className="mt-1 text-xs font-medium text-slate-500">{phone}</p>}
-      </Card>
+      )}
+    </div>
   );
 }
 
@@ -902,80 +1236,7 @@ function StoryDialog({ item, onClose }: { item: { kind: string; key: string; nam
   );
 }
 
-function Followed({ onOpenListing }: { onOpenListing: (id: string) => void }) {
-  const [skins, setSkins] = useState<{ name: string; wear: string; label: string; image: string | null; lastBestEur: number | null }[]>([]);
-  const [ads, setAds] = useState<{ id: string; label: string; image: string | null; priceEur: number | null }[]>([]);
-
-  useEffect(() => {
-    let cancel = false;
-    Promise.all([
-      api<{ skins: { name: string; wear: string; label: string; image: string | null; lastBestEur: number | null }[] }>('/api/market/skin-stars').catch(() => ({ skins: [] })),
-      api<{ tracked: { id: string; label: string; image: string | null; priceEur: number | null }[] }>('/api/market/tracked').catch(() => ({ tracked: [] })),
-    ]).then(([stars, tracked]) => {
-      if (cancel) return;
-      setSkins(stars.skins || []);
-      setAds(tracked.tracked || []);
-    });
-    return () => { cancel = true; };
-  }, []);
-
-  const dropSkin = (row: { name: string; wear: string }) => {
-    const params = new URLSearchParams({ name: row.name, wear: row.wear });
-    void api(`/api/market/skin-stars?${params}`, { method: 'DELETE' }).then(() => {
-      setSkins((rows) => rows.filter((item) => !(item.name === row.name && item.wear === row.wear)));
-    });
-  };
-
-  const dropAd = (id: string) => {
-    void api(`/api/market/tracked/${id}`, { method: 'DELETE' }).then(() => {
-      setAds((rows) => rows.filter((item) => item.id !== id));
-    });
-  };
-
-  if (skins.length === 0 && ads.length === 0) return null;
-  return (
-    <div className="mb-4 space-y-4">
-      {skins.length > 0 && (
-        <div>
-          <p className="px-1 pb-1 text-[11px] font-semibold text-slate-400">Skins destacadas</p>
-          <div className="divide-y divide-slate-100 dark:divide-white/10">
-            {skins.map((row) => (
-              <div key={`${row.name}:${row.wear}`} className="flex items-center gap-3 py-2.5">
-                {row.image && <img src={row.image} alt="" referrerPolicy="no-referrer" className="h-10 w-14 shrink-0 object-contain" />}
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-semibold">{row.label}</span>
-                  <span className="block text-xs font-medium text-slate-500">{row.wear || 'Cualquier desgaste'}{row.lastBestEur == null ? '' : ` · más barata ${formatEur(row.lastBestEur)}`}</span>
-                </span>
-                <button type="button" onClick={() => dropSkin(row)} className="shrink-0 text-[11px] font-semibold text-slate-400">Quitar</button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-      {ads.length > 0 && (
-        <div>
-          <p className="px-1 pb-1 text-[11px] font-semibold text-slate-400">Anuncios</p>
-          <div className="divide-y divide-slate-100 dark:divide-white/10">
-            {ads.map((row) => (
-              <div key={row.id} className="flex items-center gap-3 py-2.5">
-                <button type="button" onClick={() => onOpenListing(row.id)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
-                  {row.image && <img src={row.image} alt="" referrerPolicy="no-referrer" className="h-10 w-14 shrink-0 object-contain" />}
-                  <span className="min-w-0">
-                    <span className="block truncate text-sm font-semibold">{row.label}</span>
-                    <span className="block text-xs font-medium text-slate-500">{row.priceEur == null ? 'Anuncio seguido' : formatEur(row.priceEur)}</span>
-                  </span>
-                </button>
-                <button type="button" onClick={() => dropAd(row.id)} className="shrink-0 text-[11px] font-semibold text-slate-400">Quitar</button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-export function Market({ focusListing, focusTick = 0 }: { focusListing?: string | null; focusTick?: number }) {
+export function Market({ focusListing, focusTick = 0, focusSkin = null }: { focusListing?: string | null; focusTick?: number; focusSkin?: { name: string; wear: string; label: string; image: string | null } | null }) {
   const [data, setData] = useState<MarketBoard | null>(null);
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
@@ -993,7 +1254,22 @@ export function Market({ focusListing, focusTick = 0 }: { focusListing?: string 
     if (!focusListing) return;
     setListingFocus(focusListing);
     setDesk('csfloat');
+    setSkinDesk(null);
   }, [focusListing, focusTick]);
+  useEffect(() => {
+    if (!focusSkin?.name) return;
+    setDesk(null);
+    setMarket('cs2');
+    setSkinDesk({
+      name: focusSkin.name,
+      label: focusSkin.label || focusSkin.name,
+      kind: 'skin',
+      paintIndex: null,
+      image: focusSkin.image,
+      wears: focusSkin.wear ? [{ wear: focusSkin.wear, refEur: null }] : [],
+    });
+    setWearPick(focusSkin.wear || 'all');
+  }, [focusSkin, focusTick]);
   useEffect(() => {
     sessionStorage.setItem('pat_market', market);
     const root = document.documentElement;
@@ -1178,9 +1454,14 @@ export function Market({ focusListing, focusTick = 0 }: { focusListing?: string 
         document.body,
       )}
       {desk === 'alerts' && (
-        <Modal title="Aviso" onClose={() => setDesk(null)}>
-          <Followed onOpenListing={(id) => { setListingFocus(id); setDesk('csfloat'); }} />
-          <AlertDesk items={data.signals || []} catalog={sections.flatMap((section) => section.items)} onChanged={load} />
+        <Modal title="Avisos" onClose={() => setDesk(null)}>
+          <AlertDesk
+            items={data.signals || []}
+            catalog={sections.flatMap((section) => section.items)}
+            hashes={Object.fromEntries((data.purchases || []).flatMap((row) => (row.hash ? [[row.id, row.hash] as const] : [])))}
+            market={market}
+            onChanged={load}
+          />
         </Modal>
       )}
       <AnimatePresence mode="wait" initial={false} custom={dir.current}>
@@ -1265,7 +1546,7 @@ export function Market({ focusListing, focusTick = 0 }: { focusListing?: string 
           ) : hero ? (
             <HeroBoard item={active?.raw[0]} accent={tone?.accent || '#94a3b8'} onOpen={openTape} />
           ) : market === 'cs2' ? (
-            <GameBoard items={shown} filtered={filtered} quiet={skinMatch && shown.length === 0} onOpen={openTape} />
+            needle.length >= 2 ? null : <CsfloatFeed />
           ) : (
             <GameBoard items={shown} filtered={filtered} quiet={false} warm onOpen={openTape} />
           )}

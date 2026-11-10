@@ -1,44 +1,73 @@
 import http from 'node:http';
 import https from 'node:https';
-import net from 'node:net';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
-import { defineConfig, loadEnv } from 'vite';
+import { defineConfig, loadEnv, type Plugin } from 'vite';
 
-// Desde esta red solo algunas direcciones del sitio publicado responden, y no a la vez.
-// Si se abren varias conexiones juntas, el resto se cae. Se usa una y, si falla, la otra.
-const POOL = ['216.198.79.3', '216.198.79.67'];
-let poolIndex = 0;
+// Desde esta red el nombre del sitio publicado no siempre resuelve a una dirección que conteste.
+const EDGE = '64.29.17.195';
+
+function forward(edge: string, name: string): Plugin {
+  let chain = Promise.resolve();
+  const send = (req: IncomingMessage, res: ServerResponse) => new Promise<void>((resolve) => {
+    let settled = false;
+    const done = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+    const upstream = https.request({
+      host: edge,
+      servername: name,
+      method: req.method,
+      path: req.url,
+      headers: { ...req.headers, host: name },
+      timeout: 60000,
+    }, (up) => {
+      const headers = { ...up.headers };
+      delete headers['transfer-encoding'];
+      delete headers.connection;
+      try {
+        res.writeHead(up.statusCode || 502, headers);
+        up.pipe(res);
+      } catch {
+        if (!res.headersSent) res.writeHead(502);
+        res.end();
+      }
+      up.on('end', done);
+      res.on('close', done);
+    });
+    upstream.on('timeout', () => upstream.destroy());
+    upstream.on('error', () => {
+      if (!res.headersSent) res.writeHead(502);
+      res.end();
+      done();
+    });
+    req.pipe(upstream);
+  });
+  return {
+    name: 'api-edge',
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const url = req.url || '';
+        if (!url.startsWith('/api') && !url.startsWith('/health')) return next();
+        chain = chain.then(() => send(req, res)).catch(() => undefined);
+      });
+    },
+  };
+}
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, __dirname, '');
   const target = env.PATRIMONIO_API_PROXY || process.env.PATRIMONIO_API_PROXY || 'http://127.0.0.1:3010';
   const host = new URL(target).hostname;
   const pin = host.endsWith('vercel.app');
-  const lookup: net.LookupFunction = (hostname, options, callback) => {
-    const address = pin && !net.isIP(hostname) ? POOL[poolIndex % POOL.length] : hostname;
-    if (typeof options === 'object' && options.all) callback(null, [{ address, family: 4 }]);
-    else callback(null, address, 4);
-  };
-  const agent = target.startsWith('https:')
-    ? new https.Agent({ keepAlive: false, maxSockets: 1, lookup })
-    : new http.Agent({ keepAlive: false, maxSockets: 1, lookup });
-  const shared = {
-    target,
-    changeOrigin: true,
-    agent,
-    timeout: 6000,
-    proxyTimeout: 6000,
-    configure(proxy: { on: (event: 'error', listener: () => void) => void }) {
-      proxy.on('error', () => {
-        poolIndex = (poolIndex + 1) % POOL.length;
-      });
-    },
-  };
+  const agent = new http.Agent({ keepAlive: false, maxSockets: 1 });
   return {
     base: '/',
-    plugins: [react(), tailwindcss()],
+    plugins: [react(), tailwindcss(), ...(pin ? [forward(EDGE, host)] : [])],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, 'src'),
@@ -48,9 +77,9 @@ export default defineConfig(({ mode }) => {
       host: true,
       port: 5181,
       strictPort: true,
-      proxy: {
-        '/api': { ...shared },
-        '/health': { ...shared },
+      proxy: pin ? undefined : {
+        '/api': { target, changeOrigin: true, agent, timeout: 12000, proxyTimeout: 12000 },
+        '/health': { target, changeOrigin: true, agent, timeout: 12000, proxyTimeout: 12000 },
       },
     },
   };

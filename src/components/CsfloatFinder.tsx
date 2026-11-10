@@ -5,7 +5,7 @@ import { DragRow } from '@/components/DragRow';
 import { Modal } from '@/components/Modal';
 import { Input } from '@/components/ui/Input';
 import { CashChart, type LinePoint } from '@/views/Wallets';
-import { api } from '@/lib/api';
+import { api, ApiError } from '@/lib/api';
 import { formatAgo, formatDay, formatEur } from '@/lib/format';
 import { quickOut, softSpring } from '@/lib/motion';
 import { cn } from '@/lib/utils';
@@ -272,7 +272,7 @@ function SkinThumb({ image }: { image: string | null }) {
   );
 }
 
-function ListingCard({ listing, onOpen, index, showWear }: { listing: Listing; onOpen: () => void; index: number; showWear?: boolean }) {
+function ListingCard({ listing, onOpen, index, showWear, showName }: { listing: Listing; onOpen: () => void; index: number; showWear?: boolean; showName?: boolean }) {
   const still = stillMotion();
   const art = listing.image || listing.photos[0] || null;
   const gap = deal(listing);
@@ -297,16 +297,75 @@ function ListingCard({ listing, onOpen, index, showWear }: { listing: Listing; o
           {gap != null && <span className={cn('text-[11px] font-black tabular-nums', gap <= 0 ? 'text-[#16c784]' : 'text-[#ea3943]')}>{gap > 0 ? '+' : ''}{gap.toLocaleString('es-ES')} %</span>}
         </span>
         <FloatBar value={listing.floatValue} />
-        <span className="mt-1.5 block truncate text-[10px] font-semibold text-slate-500">{floatFull(listing.floatValue)}{listing.paintSeed == null ? '' : ` (${listing.paintSeed})`}</span>
+        {showName && <span className="mt-1.5 block truncate text-[11px] font-semibold">{listing.label}</span>}
+        <span className="mt-1 block truncate text-[10px] font-semibold text-slate-500">{floatFull(listing.floatValue)}{listing.paintSeed == null ? '' : ` (${listing.paintSeed})`}</span>
       </span>
     </motion.button>
   );
 }
 
-function ListingGrid({ listings, onOpen, showWear }: { listings: Listing[]; onOpen: (id: string) => void; showWear?: boolean }) {
+function ListingGrid({ listings, onOpen, showWear, showName }: { listings: Listing[]; onOpen: (id: string) => void; showWear?: boolean; showName?: boolean }) {
   return (
     <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
-      {listings.map((listing, index) => <ListingCard key={listing.id} listing={listing} index={index} showWear={showWear} onOpen={() => onOpen(listing.id)} />)}
+      {listings.map((listing, index) => <ListingCard key={listing.id} listing={listing} index={index} showWear={showWear} showName={showName} onOpen={() => onOpen(listing.id)} />)}
+    </div>
+  );
+}
+
+const FEED = [
+  'AK-47 | Redline (Field-Tested)',
+  'AWP | Asiimov (Field-Tested)',
+  'M4A1-S | Printstream (Field-Tested)',
+  'Glock-18 | Water Elemental (Minimal Wear)',
+];
+
+function mix<T>(items: T[]): T[] {
+  const next = [...items];
+  for (let index = next.length - 1; index > 0; index -= 1) {
+    const swap = Math.floor(Math.random() * (index + 1));
+    [next[index], next[swap]] = [next[swap], next[index]];
+  }
+  return next;
+}
+
+export function CsfloatFeed() {
+  const [listings, setListings] = useState<Listing[]>([]);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancel = false;
+    const live = (rows: Listing[]) => rows.filter((row) => !row.state || row.state === 'listed');
+    (async () => {
+      const gathered: Listing[] = [];
+      for (const name of mix(FEED)) {
+        if (cancel) return;
+        try {
+          const params = new URLSearchParams({ name, sort: 'most_recent' });
+          const data = await api<{ listings: Listing[] }>(`/api/market/csfloat/listings?${params}`);
+          gathered.push(...live(data.listings || []).slice(0, 6));
+          if (!cancel) setListings(mix(gathered));
+        } catch (err) {
+          if (!gathered.length && !cancel) setError(err instanceof ApiError ? err.message : 'CSFloat no ha respondido.');
+        }
+      }
+      if (!cancel) setLoading(false);
+    })();
+    return () => { cancel = true; };
+  }, []);
+
+  return (
+    <div className="space-y-3">
+      <p className="text-sm font-medium text-slate-500">Anuncios de CSFloat.</p>
+      {loading && listings.length === 0 && <p className="text-sm font-medium text-slate-400">Buscando anuncios…</p>}
+      {error && listings.length === 0 && <p className="text-sm font-medium text-rose-600">{error}</p>}
+      {listings.length > 0 && <ListingGrid listings={listings} showWear showName onOpen={setOpenId} />}
+      {openId && (
+        <Modal title="Anuncio" onClose={() => setOpenId(null)}>
+          <ListingSheet id={openId} onBack={() => setOpenId(null)} onChanged={() => undefined} />
+        </Modal>
+      )}
     </div>
   );
 }

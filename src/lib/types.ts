@@ -176,6 +176,8 @@ export interface MarketSignal {
   note: string;
   image?: string | null;
   quoteKey?: string | null;
+  maxFloat?: number | null;
+  paintSeed?: number | null;
 }
 
 export interface PurchaseWatch {
@@ -186,6 +188,9 @@ export interface PurchaseWatch {
   belowEur: number;
   soldAt: string | null;
   note: string;
+  hash?: string;
+  maxFloat?: number | null;
+  paintSeed?: number | null;
 }
 
 export interface QuoteCandidate {

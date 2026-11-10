@@ -1,8 +1,8 @@
-import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { AnimatePresence, animate, motion, useMotionValue, useTransform } from 'motion/react';
+import { AnimatePresence, animate, motion, useMotionValue, type AnimationPlaybackControls } from 'motion/react';
 import { ModalClose, modalOverlayClass, modalPanelClass } from '@/components/Modal';
-import { api } from '@/lib/api';
+import { api, ApiError } from '@/lib/api';
 import { formatDay, formatEur } from '@/lib/format';
 import { quickOut, softSpring } from '@/lib/motion';
 import { cn } from '@/lib/utils';
@@ -67,7 +67,7 @@ export function rankedOffers(items: AppNotification[]): AppNotification[] {
   const skip = skippedIds();
   const passed = readPassed();
   return items
-    .filter((item) => item.quoteKey?.startsWith('listing:') && !dismissed(item, skip, passed))
+    .filter((item) => item.quoteKey?.startsWith('listing:') && !dismissed(item, skip, passed) && listingStillUp(item.url))
     .sort((a, b) => (a.priceEur ?? Number.POSITIVE_INFINITY) - (b.priceEur ?? Number.POSITIVE_INFINITY) || a.createdAt.localeCompare(b.createdAt));
 }
 
@@ -75,19 +75,37 @@ export function nextOffer(items: AppNotification[]): AppNotification | null {
   return rankedOffers(items)[0] || null;
 }
 
-function askedPrice(title: string): number | null {
-  const raw = title.split(' por debajo de ')[1] || '';
-  const match = raw.match(/(\d{1,3}(?:\.\d{3})*|\d+)(?:,(\d{1,2}))?/);
-  if (!match) return null;
-  const value = Number(`${match[1].replace(/\./g, '')}.${match[2] || '0'}`);
-  return Number.isFinite(value) && value > 0 ? value : null;
+function listingId(url: string | null | undefined): string | null {
+  return url?.match(/csfloat\.com\/item\/(\d+)/)?.[1] ?? null;
 }
 
-function overPrice(item: AppNotification): number | null {
-  const price = item.priceEur;
-  const base = item.referenceEur && item.referenceEur > 0 ? item.referenceEur : askedPrice(item.title);
-  if (price == null || base == null || !(base > 0)) return item.changePct;
-  return Math.round(((price - base) / base) * 1000) / 10;
+type LiveQuote = { referenceEur: number | null; paintSeed: number | null; state: string };
+
+const liveQuotes = new Map<string, LiveQuote>();
+const liveWatchers = new Set<() => void>();
+
+function publishLive(id: string, row: LiveQuote) {
+  const prev = liveQuotes.get(id);
+  liveQuotes.set(id, row);
+  if (prev?.state === row.state) return;
+  liveWatchers.forEach((notify) => notify());
+}
+
+export function watchListings(onChange: () => void): () => void {
+  liveWatchers.add(onChange);
+  return () => { liveWatchers.delete(onChange); };
+}
+
+function listingStillUp(url: string | null | undefined): boolean {
+  const id = listingId(url);
+  if (!id) return true;
+  const row = liveQuotes.get(id);
+  return !row || row.state === 'listed';
+}
+
+function dealPct(price: number | null | undefined, reference: number | null | undefined): number | null {
+  if (price == null || reference == null || !(reference > 0)) return null;
+  return Math.round(((price - reference) / reference) * 1000) / 10;
 }
 
 function saleMoment(item: AppNotification): string {
@@ -110,6 +128,7 @@ function wearOf(floatValue: number): string {
 
 export function OfferNotice({ focused = null, onFocusedClose }: { focused?: AppNotification | null; onFocusedClose?: () => void }) {
   const [items, setItems] = useState<AppNotification[]>([]);
+  const [ceilings, setCeilings] = useState<Record<string, number>>({});
   const [skip, setSkip] = useState<Set<string>>(() => skippedIds());
   const [passed, setPassed] = useState<PassedOffer[]>(() => readPassed());
   const [aside, setAside] = useState(false);
@@ -118,11 +137,14 @@ export function OfferNotice({ focused = null, onFocusedClose }: { focused?: AppN
   const [nudge, setNudge] = useState(0);
   const dragX = useMotionValue(0);
   const dragY = useMotionValue(0);
-  const dragRotate = useTransform(dragX, [-220, 220], [-4, 4]);
   const dragOrigin = useRef<{ x: number; y: number } | null>(null);
-  const resetDrag = useRef(false);
   const dragAxis = useRef<'x' | 'y' | null>(null);
+  const flying = useRef<AnimationPlaybackControls | null>(null);
   const deckReady = useRef('');
+  const [quotes, setQuotes] = useState<Record<string, LiveQuote>>({});
+  const quotesRef = useRef(quotes);
+  quotesRef.current = quotes;
+  const [dragId, setDragId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -131,7 +153,24 @@ export function OfferNotice({ focused = null, onFocusedClose }: { focused?: AppN
         if (!cancelled) setItems(data.notifications || []);
       })
       .catch(() => undefined);
-    return () => { cancelled = true; };
+    const refreshCeilings = () => {
+      api<{ purchases?: { id: string; belowEur: number }[] }>('/api/market')
+        .then((data) => {
+          if (cancelled) return;
+          const next: Record<string, number> = {};
+          for (const row of data.purchases || []) {
+            if (row.id && row.belowEur > 0) next[row.id] = row.belowEur;
+          }
+          setCeilings(next);
+        })
+        .catch(() => undefined);
+    };
+    refreshCeilings();
+    window.addEventListener('pat-alerts', refreshCeilings);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('pat-alerts', refreshCeilings);
+    };
   }, [visit]);
 
   useEffect(() => {
@@ -156,11 +195,12 @@ export function OfferNotice({ focused = null, onFocusedClose }: { focused?: AppN
     const token = listing && item.priceEur != null ? `${listing}:${Math.round(item.priceEur)}` : item.id;
     if (buckets.has(token)) continue;
     buckets.add(token);
+    if (!listingStillUp(item.url)) continue;
     unique.push(item);
   }
   unique.sort((a, b) => (a.priceEur ?? Number.POSITIVE_INFINITY) - (b.priceEur ?? Number.POSITIVE_INFINITY) || a.createdAt.localeCompare(b.createdAt));
   const picked = focused?.quoteKey?.startsWith('listing:') ? focused : null;
-  if (picked && !unique.some((item) => item.id === picked.id)) unique.unshift(picked);
+  if (picked && listingStillUp(picked.url) && !unique.some((item) => item.id === picked.id)) unique.unshift(picked);
   const deckKey = unique.map((item) => item.id).join('|');
   const focusId = picked?.id || '';
   const place = unique.length === 0 ? 0 : Math.min(index, unique.length - 1);
@@ -186,9 +226,16 @@ export function OfferNotice({ focused = null, onFocusedClose }: { focused?: AppN
     if (picked) onFocusedClose?.();
     setAside(true);
   };
-  const settle = { type: 'spring' as const, stiffness: 170, damping: 26, mass: 0.9 };
+  const settle = { type: 'spring' as const, stiffness: 420, damping: 38, mass: 0.7 };
+  const stopFlight = () => {
+    const run = flying.current;
+    flying.current = null;
+    run?.stop();
+  };
   const grab = (event: ReactPointerEvent<HTMLDivElement>) => {
     if ((event.target as HTMLElement).closest('button')) return;
+    stopFlight();
+    setDragId(shown?.id || null);
     dragOrigin.current = { x: event.clientX, y: event.clientY };
     dragAxis.current = null;
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -214,27 +261,30 @@ export function OfferNotice({ focused = null, onFocusedClose }: { focused?: AppN
       else void animate(dragY, 0, settle);
       return;
     }
-    const travel = Math.min(420, Math.max(280, window.innerWidth * 0.72));
-    if (dx <= -72) void animate(dragX, -travel, { duration: 0.22, ease: [0.2, 0.8, 0.2, 1] }).then(() => turn(1));
-    else if (dx >= 72) void animate(dragX, travel, { duration: 0.22, ease: [0.2, 0.8, 0.2, 1] }).then(() => turn(-1));
-    else void animate(dragX, 0, settle);
+    const travel = Math.min(window.innerWidth, 560);
+    const glideOff = { duration: 0.18, ease: [0.2, 0.8, 0.2, 1] as [number, number, number, number] };
+    if (dx <= -72) {
+      const run = animate(dragX, -travel, glideOff);
+      flying.current = run;
+      void run.finished.then(() => { if (flying.current === run) turn(1); }).catch(() => undefined);
+    } else if (dx >= 72) {
+      const run = animate(dragX, travel, glideOff);
+      flying.current = run;
+      void run.finished.then(() => { if (flying.current === run) turn(-1); }).catch(() => undefined);
+    } else {
+      flying.current = animate(dragX, 0, settle);
+    }
   };
   const turn = (step: number) => {
-    if (unique.length < 2) {
-      void animate(dragX, 0, settle);
-      return;
-    }
+    flying.current = null;
+    dragX.set(0);
+    dragY.set(0);
+    setDragId(null);
+    if (unique.length < 2) return;
     const next = (place + step + unique.length) % unique.length;
-    resetDrag.current = true;
     setNudge(step);
     setIndex(next);
   };
-  useLayoutEffect(() => {
-    if (!resetDrag.current) return;
-    resetDrag.current = false;
-    dragX.set(0);
-    dragY.set(0);
-  }, [index, dragX, dragY]);
   const pass = () => {
     if (!shown) return;
     const id = shown.id;
@@ -262,12 +312,62 @@ export function OfferNotice({ focused = null, onFocusedClose }: { focused?: AppN
     setAside(true);
   };
 
+  const candidateKey = items.filter((item) => item.quoteKey?.startsWith('listing:')).map((item) => item.id).join('|');
+  const checked = useRef(new Set<string>());
+  const checkedVisit = useRef(visit);
+  useEffect(() => {
+    if (checkedVisit.current !== visit) {
+      checkedVisit.current = visit;
+      checked.current = new Set();
+    }
+    const ids = [...new Set(items.flatMap((item) => {
+      const id = item.quoteKey?.startsWith('listing:') ? listingId(item.url) : null;
+      return id ? [id] : [];
+    }))];
+    const first = listingId(shown?.url);
+    const queue = first ? [first, ...ids.filter((id) => id !== first)] : ids;
+    let cancel = false;
+    const pending = queue.filter((id) => !checked.current.has(id));
+    if (pending.length === 0) return;
+    const save = (id: string, row: LiveQuote) => {
+      quotesRef.current = { ...quotesRef.current, [id]: row };
+      publishLive(id, row);
+      setQuotes(quotesRef.current);
+    };
+    (async () => {
+      for (const id of pending) {
+        if (cancel) return;
+        checked.current.add(id);
+        try {
+          const data = await api<{ listing: { referenceEur: number | null; paintSeed: number | null; state?: string } }>(`/api/market/csfloat/listings/${id}`);
+          save(id, {
+            referenceEur: data.listing.referenceEur,
+            paintSeed: data.listing.paintSeed,
+            state: data.listing.state || 'listed',
+          });
+        } catch (error) {
+          if (error instanceof ApiError && error.status === 404) save(id, { referenceEur: null, paintSeed: null, state: 'gone' });
+          else checked.current.delete(id);
+        }
+        if (cancel) return;
+      }
+    })();
+    return () => { cancel = true; };
+  }, [candidateKey, shown?.url, visit]);
+
   if (!shown) return null;
   const { name, below } = offerName(shown.title);
+  const watchId = shown.quoteKey?.match(/^listing:([a-f0-9]{24}):/)?.[1] || '';
+  const ceiling = ceilings[watchId];
+  const limit = ceiling != null ? ceiling.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' }) : below;
   const when = saleMoment(shown);
   const price = shown.priceEur;
   const floatValue = shown.floatValue;
-  const premium = overPrice(shown);
+  const listing = listingId(shown.url);
+  const known = quotes[listing || ''];
+  const reference = shown.referenceEur && shown.referenceEur > 0 ? shown.referenceEur : known?.referenceEur ?? null;
+  const premium = dealPct(price, reference);
+  const pattern = shown.paintSeed ?? known?.paintSeed ?? null;
 
   return createPortal(
     <AnimatePresence>
@@ -284,7 +384,7 @@ export function OfferNotice({ focused = null, onFocusedClose }: { focused?: AppN
             role="dialog"
             aria-labelledby="offer-notice-title"
             aria-roledescription="Mazo de ofertas"
-            style={{ x: dragX, y: dragY, rotate: still ? 0 : dragRotate }}
+            style={{ x: dragId === shown.id ? dragX : 0, y: dragId === shown.id ? dragY : 0 }}
             onPointerDown={grab}
             onPointerMove={pull}
             onPointerUp={drop}
@@ -306,8 +406,8 @@ export function OfferNotice({ focused = null, onFocusedClose }: { focused?: AppN
                 <img src={shown.image} alt="" draggable={false} referrerPolicy="no-referrer" className="h-36 w-52 object-contain" />
                 {premium != null && (
                   <span className={cn('absolute right-2 top-2 inline-flex items-center gap-1 rounded-full bg-slate-950/90 px-2 py-1 text-[12px] font-black tabular-nums text-white')}>
-                    <span className={premium > 0 ? 'text-[#ff5a6a]' : premium < 0 ? 'text-[#3ddc97]' : 'text-white'}>{premium > 0 ? '+' : ''}</span>
-                    {Math.abs(premium).toLocaleString('es-ES', { maximumFractionDigits: 1 })} %
+                    <span className={premium > 0 ? 'text-[#ff5a6a]' : premium < 0 ? 'text-[#3ddc97]' : 'text-white'}>{premium > 0 ? '+' : premium < 0 ? '−' : ''}</span>
+                    {Math.abs(premium).toLocaleString('es-ES', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} %
                   </span>
                 )}
               </div>
@@ -317,19 +417,19 @@ export function OfferNotice({ focused = null, onFocusedClose }: { focused?: AppN
               {!shown.image && premium != null && (
                 <span className="inline-flex items-center gap-1 rounded-full bg-slate-950 px-2 py-1 text-[12px] font-black tabular-nums text-white">
                   <span className={premium > 0 ? 'text-[#ff5a6a]' : 'text-[#3ddc97]'}>{premium > 0 ? '+' : '−'}</span>
-                  {Math.abs(premium).toLocaleString('es-ES', { maximumFractionDigits: 1 })} %
+                  {Math.abs(premium).toLocaleString('es-ES', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} %
                 </span>
               )}
               <p className="text-sm font-medium text-slate-400">{formatDay(when)}</p>
             </div>
             <p className="mt-3 text-sm font-medium text-slate-500">
-              Alguien lo ha puesto a la venta{below ? ` por debajo de ${below}` : ''}.
+              Alguien lo ha puesto a la venta{limit ? ` por debajo de ${limit}` : ''}.
             </p>
             {floatValue != null && (
               <div className="mt-3">
                 <div className="flex items-baseline justify-between gap-3">
                   <p className="text-[15px] font-black tabular-nums">{floatValue.toFixed(5)}</p>
-                  <p className="text-xs font-semibold text-slate-400">{wearOf(floatValue)}{shown.paintSeed == null ? '' : ` · patrón ${shown.paintSeed}`}</p>
+                  <p className="text-xs font-semibold text-slate-400">{wearOf(floatValue)}{pattern == null ? '' : ` · patrón ${pattern}`}</p>
                 </div>
                 <div className="relative mt-2 h-1.5 rounded-full bg-gradient-to-r from-emerald-400 via-amber-300 to-rose-500">
                   <span className="absolute -top-1 h-3.5 w-1 -translate-x-1/2 rounded-full bg-slate-900 ring-2 ring-white dark:bg-white dark:ring-slate-900" style={{ left: `${Math.min(100, Math.max(0, floatValue * 100))}%` }} />

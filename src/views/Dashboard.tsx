@@ -1,7 +1,7 @@
 import { forwardRef, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type PointerEvent as ReactPointerEvent, type ReactNode, type SetStateAction } from 'react';
 import { bindHold, HoldMenu, holdItemClass, placeMenu } from '@/components/HoldMenu';
 import { AnimatePresence, motion } from 'motion/react';
-import { ArrowUpDown, ChevronLeft, ChevronRight, Eye, EyeOff, Pencil, Plus, Search, Trash2 } from 'lucide-react';
+import { ArrowUpDown, ChevronLeft, ChevronRight, Eye, EyeOff, Pencil, Plus, Search, Star, Tag, Trash2 } from 'lucide-react';
 import { PlatformLogo } from '@/components/PlatformLogo';
 import { QuietLoad } from '@/components/QuietLoad';
 import { QuickSplit } from '@/components/QuickSplit';
@@ -14,7 +14,7 @@ import { PLATFORM_COLORS } from '@/lib/platform-colors';
 import { findPlatform } from '@/lib/platforms';
 import { accountProducts, KIND_LABEL, kindClass, kindFromClass, partSection, type ProductKind, type ProductSection } from '@/lib/products';
 import { cn } from '@/lib/utils';
-import { rankedOffers } from '@/components/OfferNotice';
+import { rankedOffers, watchListings } from '@/components/OfferNotice';
 import { useOpenOffer } from '@/components/offer-focus';
 import type { AppNotification, DashboardData } from '@/lib/types';
 import { useHideChrome } from '@/components/Shell';
@@ -915,25 +915,6 @@ function todayMark(packs: PlanPack[], today: string): { planId: string; label: s
   return null;
 }
 
-function liquidityMonth(packs: PlanPack[]): { confirmed: number; estimated: number } | null {
-  let confirmed = 0;
-  let estimated = 0;
-  let count = 0;
-  for (const row of packs) {
-    if (row.plan.kind !== 'liquidez' || !row.forecast) continue;
-    confirmed += row.forecast.plannedToday;
-    estimated += row.forecast.plannedWithExpectedToday;
-    count += 1;
-  }
-  return count > 0 ? { confirmed, estimated } : null;
-}
-
-function monthText(row: { confirmed: number; estimated: number }): string {
-  const gap = row.estimated - row.confirmed;
-  if (Math.abs(gap) < 0.5) return `Disponible previsto ${formatEur(row.confirmed)}. Todo confirmado.`;
-  return `Disponible previsto ${formatEur(row.estimated)}. Confirmado ${formatEur(row.confirmed)} · estimado ${formatSignedEur(gap)}.`;
-}
-
 function pendingMonth(data: DashboardData | null): number {
   if (!data) return 0;
   return data.accounts.reduce((sum, account) => sum + (account.flows || []).filter((flow) => flow.open).reduce((inner, flow) => inner + Math.abs(flow.amount), 0), 0);
@@ -954,9 +935,17 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
   const [lineMove, setLineMove] = useState<{ amount: number; pct: number | null } | null>(null);
   const [dueLine, setDueLine] = useState<{ label: string; amount: number; direction: 'in' | 'out' } | null>(null);
   const [markLine, setMarkLine] = useState<{ planId: string; label: string; amount: number } | null>(null);
-  const [offerLine, setOfferLine] = useState<AppNotification | null>(null);
-  const [offerCount, setOfferCount] = useState(0);
-  const [monthLine, setMonthLine] = useState<{ confirmed: number; estimated: number } | null>(null);
+  const [offerNotes, setOfferNotes] = useState<AppNotification[]>([]);
+  const [followedSkins, setFollowedSkins] = useState<{ name: string; wear: string; label: string; image: string | null; lastBestEur: number | null }[]>([]);
+  const [followedAds, setFollowedAds] = useState<{ id: string; label: string; image: string | null; priceEur: number | null }[]>([]);
+  const [followOpen, setFollowOpen] = useState(false);
+  const [followDrop, setFollowDrop] = useState<string | null>(null);
+  const [liveTick, setLiveTick] = useState(0);
+  useEffect(() => watchListings(() => setLiveTick((value) => value + 1)), []);
+  const offers = useMemo(() => rankedOffers(offerNotes), [offerNotes, liveTick]);
+  const offerLine = offers[0] || null;
+  const offerCount = offers.length;
+  const followCount = followedSkins.length + followedAds.length;
   const openOffer = useOpenOffer();
   const [adding, setAdding] = useState(false);
   const [openKey, setOpenKey] = useState<string | null>(null);
@@ -1034,21 +1023,30 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
         if (cancelled) return;
         const packs = payload.plans || [];
         setMarkLine(todayMark(packs, madridToday()));
-        setMonthLine(liquidityMonth(packs));
       })
       .catch(() => {
         if (cancelled) return;
         setMarkLine(null);
-        setMonthLine(null);
       });
     api<{ notifications: AppNotification[] }>('/api/market/notifications')
       .then((payload) => {
         if (cancelled) return;
-        const offers = rankedOffers(payload.notifications || []);
-        setOfferLine(offers[0] || null);
-        setOfferCount(offers.length);
+        setOfferNotes(payload.notifications || []);
       })
-      .catch(() => { if (!cancelled) { setOfferLine(null); setOfferCount(0); } });
+      .catch(() => { if (!cancelled) setOfferNotes([]); });
+    return () => { cancelled = true; };
+  }, [books, home]);
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([
+      api<{ skins: { name: string; wear: string; label: string; image: string | null; lastBestEur: number | null }[] }>('/api/market/skin-stars').catch(() => ({ skins: [] })),
+      api<{ tracked: { id: string; label: string; image: string | null; priceEur: number | null }[] }>('/api/market/tracked').catch(() => ({ tracked: [] })),
+    ]).then(([stars, tracked]) => {
+      if (cancelled) return;
+      setFollowedSkins(stars.skins || []);
+      setFollowedAds(tracked.tracked || []);
+    });
     return () => { cancelled = true; };
   }, [books, home]);
 
@@ -1475,18 +1473,6 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
             >
               {hidden ? <EyeOff size={16} /> : <Eye size={16} />}
             </button>
-            {!inAccount && chart === 'line' && lineMove && (
-              <p className={cn('text-[13px] font-semibold tabular-nums', hidden || lineMove.amount === 0 ? 'text-slate-400' : lineMove.amount > 0 ? 'text-[#16c784]' : 'text-[#ea3943]')}>
-                {hidden ? '*****' : formatSignedEur(lineMove.amount)}
-                {lineMove.pct != null && !hidden && <span className="ml-1.5">{formatPct(lineMove.pct)}</span>}
-              </p>
-            )}
-            {!inAccount && !(chart === 'line' && lineMove) && data?.variation.available && data.variation.amount != null && (
-              <p className={cn('text-[13px] font-semibold tabular-nums', hidden ? 'text-slate-400' : totalClass)}>
-                <RisingAmount value={data.variation.amount} hidden={hidden} signed delay={120} />
-                {data.variation.percent != null && <span className="ml-1.5">{hidden ? '*****' : formatPct(data.variation.percent)}</span>}
-              </p>
-            )}
             {inAccount && liveMove && (
               <p className={cn('text-[13px] font-semibold tabular-nums', hidden || liveMove.amount === 0 ? 'text-slate-400' : liveMove.amount > 0 ? 'text-[#16c784]' : 'text-[#ea3943]')}>
                 {hidden ? '*****' : formatSignedEur(liveMove.amount)}
@@ -1497,25 +1483,24 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
           {!inAccount && <div className="ml-auto"><ViewSwitch value={view} onChange={chooseView} /></div>}
           {inAccount && <div ref={setPaneSlot} className="ml-auto shrink-0" />}
         </div>
-        {!inAccount && chart === 'line' && lineDay && (
-          <p className="mt-1.5 text-[13px] font-semibold text-slate-400">{formatDay(lineDay)}</p>
-        )}
         {!inAccount && view === 'general' && (
-          <div className="inline-flex rounded-full bg-white p-1 ring-1 ring-slate-200/80 dark:bg-white/10 dark:ring-white/10">
-            {([['line', 'Línea'], ['ring', 'Reparto']] as const).map(([id, label]) => (
-              <button
-                key={id}
-                type="button"
-                aria-pressed={chart === id}
-                onClick={() => {
-                  setChart(id);
-                  localStorage.setItem('pat_chart', id);
-                }}
-                className={cn('rounded-full px-3 py-1 text-[13px] font-semibold', chart === id ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950' : 'text-slate-500')}
-              >
-                {label}
-              </button>
-            ))}
+          <div className="mt-2.5">
+            <div className="inline-grid grid-cols-2 rounded-full bg-slate-200/90 p-1 dark:bg-white/10">
+              {([['line', 'Línea'], ['ring', 'Reparto']] as const).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  aria-pressed={chart === id}
+                  onClick={() => {
+                    setChart(id);
+                    localStorage.setItem('pat_chart', id);
+                  }}
+                  className={cn('rounded-full px-4 py-1 text-center text-[13px] font-semibold', chart === id ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950' : 'text-slate-600 dark:text-slate-300')}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
         )}
         {inAccount && liveDay && (
@@ -1528,35 +1513,133 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
             {formatDay(liveDay)}
           </motion.p>
         )}
-        {!inAccount && dueLine && (
-          <button type="button" onClick={() => window.dispatchEvent(new Event('pat-due'))} className="text-left text-[13px] font-semibold text-slate-500">
-            {dueLine.direction === 'in' ? 'Ha entrado' : 'Toca confirmar'} {dueLine.label}, {hidden ? '*****' : formatEur(dueLine.amount)}
-          </button>
+        {!inAccount && (
+          <div className="mt-2 flex gap-1.5 overflow-x-auto empty:hidden [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {offerLine && (
+              <button type="button" onClick={() => openOffer(offerLine)} className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-white py-1 pl-1 pr-3 text-[13px] font-semibold text-slate-700 ring-1 ring-slate-200/80 dark:bg-slate-900 dark:text-slate-200 dark:ring-white/10">
+                <span className="inline-flex items-center gap-1 rounded-full bg-slate-950 px-2 py-0.5 text-[12px] font-bold tabular-nums text-white dark:bg-white dark:text-slate-950">
+                  <Tag size={12} strokeWidth={2.4} />
+                  {hidden ? null : offerCount}
+                </span>
+                {hidden ? 'Ofertas' : offerLine.priceEur == null ? 'Ofertas' : offerCount > 1 ? `desde ${formatEur(offerLine.priceEur)}` : formatEur(offerLine.priceEur)}
+              </button>
+            )}
+            {followCount > 0 && (
+              <button type="button" onClick={() => { setFollowDrop(null); setFollowOpen(true); }} className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-white py-1 pl-1 pr-3 text-[13px] font-semibold text-slate-700 ring-1 ring-slate-200/80 dark:bg-slate-900 dark:text-slate-200 dark:ring-white/10">
+                <span className="inline-flex items-center gap-1 rounded-full bg-slate-950 px-2 py-0.5 text-[12px] font-bold tabular-nums text-white dark:bg-white dark:text-slate-950">
+                  <Star size={12} strokeWidth={2.4} />
+                  {hidden ? null : followCount}
+                </span>
+                Sigues
+              </button>
+            )}
+            {dueLine && (
+              <button type="button" onClick={() => window.dispatchEvent(new Event('pat-due'))} className="inline-flex max-w-[220px] shrink-0 items-center rounded-full bg-white px-3 py-1 text-[13px] font-semibold text-slate-600 ring-1 ring-slate-200/80 dark:bg-slate-900 dark:text-slate-300 dark:ring-white/10">
+                <span className="truncate">{dueLine.direction === 'in' ? 'Ha entrado' : 'Confirmar'} {dueLine.label}{hidden ? '' : ` ${formatEur(dueLine.amount)}`}</span>
+              </button>
+            )}
+            {markLine && markLine.label !== dueLine?.label && (
+              <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('pat-plan', { detail: markLine.planId }))} className="inline-flex max-w-[220px] shrink-0 items-center rounded-full bg-white px-3 py-1 text-[13px] font-semibold text-slate-600 ring-1 ring-slate-200/80 dark:bg-slate-900 dark:text-slate-300 dark:ring-white/10">
+                <span className="truncate">Hoy {markLine.label}{hidden ? '' : ` ${formatEur(markLine.amount)}`}</span>
+              </button>
+            )}
+            {pendingMonth(data) > 0 && (
+              <p className="inline-flex shrink-0 items-center rounded-full bg-white px-3 py-1 text-[13px] font-semibold text-slate-600 ring-1 ring-slate-200/80 dark:bg-slate-900 dark:text-slate-300 dark:ring-white/10">
+                {hidden ? 'Por confirmar' : `Por confirmar ${formatEur(pendingMonth(data))}`}
+              </p>
+            )}
+            {data?.variation.available && data.variation.amount != null && data.contributions.complete && (
+              <p className="inline-flex shrink-0 items-center rounded-full bg-white px-3 py-1 text-[13px] font-semibold text-slate-500 ring-1 ring-slate-200/80 dark:bg-slate-900 dark:text-slate-400 dark:ring-white/10">
+                {hidden ? 'Aportado' : `Aportado ${formatSignedEur(data.contributions.eur)}`}
+              </p>
+            )}
+          </div>
         )}
-        {!inAccount && markLine && markLine.label !== dueLine?.label && (
-          <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('pat-plan', { detail: markLine.planId }))} className="text-left text-[13px] font-semibold text-slate-500">
-            Hoy, {markLine.label}{hidden ? '' : `, ${formatEur(markLine.amount)}`}
-          </button>
-        )}
-        {!inAccount && offerLine && (
-          <button type="button" onClick={() => openOffer(offerLine)} className="truncate text-left text-[13px] font-semibold text-slate-500">
-            {hidden ? (offerCount > 1 ? `${offerCount} ofertas` : 'Hay una oferta') : offerCount > 1 ? `${offerCount} ofertas, desde ${offerLine.priceEur == null ? '—' : formatEur(offerLine.priceEur)}` : `Oferta, ${(offerLine.title.split(' por debajo de ')[0] || offerLine.title).replace(/^Oferta:\s*/, '')}${offerLine.priceEur == null ? '' : `, ${formatEur(offerLine.priceEur)}`}`}
-          </button>
-        )}
-        {!inAccount && data?.variation.available && data.variation.amount != null && data.contributions.complete && (
-          <p className="text-[13px] font-medium text-slate-400">
-            {hidden ? 'Aportado y mercado, aparte.' : `Aportado ${formatSignedEur(data.contributions.eur)} · mercado ${formatSignedEur(data.variation.amount - data.contributions.eur)}`}
-          </p>
-        )}
-        {!inAccount && monthLine && (
-          <p className="text-[13px] font-medium text-slate-400">
-            {hidden ? 'Hay un disponible previsto.' : monthText(monthLine)}
-          </p>
-        )}
-        {!inAccount && !monthLine && pendingMonth(data) > 0 && (
-          <p className="text-[13px] font-medium text-slate-400">
-            {hidden ? 'Hay fijos por confirmar.' : `Por confirmar ${formatEur(pendingMonth(data))}. Lo ya anotado está en el saldo.`}
-          </p>
+        {followOpen && (
+          <Modal title="Sigues" onClose={() => setFollowOpen(false)}>
+            <div className="space-y-4">
+              {followedSkins.length > 0 && (
+                <div className="space-y-2">
+                  <p className="px-1 text-[13px] font-semibold text-slate-500">Skins · {followedSkins.length}</p>
+                  {followedSkins.map((row) => {
+                    const key = `skin:${row.name}:${row.wear}`;
+                    return (
+                      <article key={key} className="rounded-2xl bg-slate-50 px-3 py-3 dark:bg-white/5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setFollowOpen(false);
+                            window.dispatchEvent(new CustomEvent('pat-skin', { detail: { name: row.name, wear: row.wear, label: row.label, image: row.image } }));
+                          }}
+                          className="flex w-full items-center gap-3 text-left"
+                        >
+                          {row.image && <img src={row.image} alt="" referrerPolicy="no-referrer" className="h-10 w-14 shrink-0 object-contain" />}
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-sm font-semibold">{row.label}</span>
+                            <span className="block text-xs font-medium text-slate-500">{row.wear || 'Cualquier desgaste'}{row.lastBestEur == null || hidden ? '' : ` · ${formatEur(row.lastBestEur)}`}</span>
+                          </span>
+                        </button>
+                        {followDrop === key ? (
+                          <div className="mt-2 flex items-center gap-2">
+                            <button type="button" onClick={() => {
+                              const params = new URLSearchParams({ name: row.name, wear: row.wear });
+                              void api(`/api/market/skin-stars?${params}`, { method: 'DELETE' }).then(() => {
+                                setFollowedSkins((rows) => rows.filter((item) => !(item.name === row.name && item.wear === row.wear)));
+                                setFollowDrop(null);
+                              });
+                            }} className="rounded-full bg-slate-950 px-3 py-1 text-xs font-semibold text-white dark:bg-white dark:text-slate-950">Quitar</button>
+                            <button type="button" onClick={() => setFollowDrop(null)} className="px-2 py-1 text-xs font-semibold text-slate-500">Cancelar</button>
+                          </div>
+                        ) : (
+                          <button type="button" onClick={() => setFollowDrop(key)} className="mt-2 text-xs font-semibold text-slate-400">Quitar</button>
+                        )}
+                      </article>
+                    );
+                  })}
+                </div>
+              )}
+              {followedAds.length > 0 && (
+                <div className="space-y-2">
+                  <p className="px-1 text-[13px] font-semibold text-slate-500">Anuncios · {followedAds.length}</p>
+                  {followedAds.map((row) => {
+                    const key = `ad:${row.id}`;
+                    return (
+                      <article key={key} className="rounded-2xl bg-slate-50 px-3 py-3 dark:bg-white/5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setFollowOpen(false);
+                            window.dispatchEvent(new CustomEvent('pat-listing', { detail: row.id }));
+                          }}
+                          className="flex w-full items-center gap-3 text-left"
+                        >
+                          {row.image && <img src={row.image} alt="" referrerPolicy="no-referrer" className="h-10 w-14 shrink-0 object-contain" />}
+                          <span className="min-w-0">
+                            <span className="block truncate text-sm font-semibold">{row.label}</span>
+                            <span className="block text-xs font-medium text-slate-500">{row.priceEur == null || hidden ? 'Anuncio seguido' : formatEur(row.priceEur)}</span>
+                          </span>
+                        </button>
+                        {followDrop === key ? (
+                          <div className="mt-2 flex items-center gap-2">
+                            <button type="button" onClick={() => {
+                              void api(`/api/market/tracked/${row.id}`, { method: 'DELETE' }).then(() => {
+                                setFollowedAds((rows) => rows.filter((item) => item.id !== row.id));
+                                setFollowDrop(null);
+                              });
+                            }} className="rounded-full bg-slate-950 px-3 py-1 text-xs font-semibold text-white dark:bg-white dark:text-slate-950">Quitar</button>
+                            <button type="button" onClick={() => setFollowDrop(null)} className="px-2 py-1 text-xs font-semibold text-slate-500">Cancelar</button>
+                          </div>
+                        ) : (
+                          <button type="button" onClick={() => setFollowDrop(key)} className="mt-2 text-xs font-semibold text-slate-400">Quitar</button>
+                        )}
+                      </article>
+                    );
+                  })}
+                </div>
+              )}
+              {followCount === 0 && <p className="text-sm font-medium text-slate-500">Ya no sigues ninguna skin ni anuncio.</p>}
+            </div>
+          </Modal>
         )}
       </div>
       {inAccount && openAccount && (
@@ -1715,7 +1798,20 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
       <AnimatePresence mode="wait" initial={false}>
         <ScreenSwap key="general" className="space-y-6">
       <motion.section initial={prefersStill() ? false : { opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={prefersStill() ? { duration: 0 } : rise}>
-        <p className="text-[11px] font-semibold text-slate-400">{formatDay(data.today)}</p>
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-[13px] font-semibold leading-none text-slate-400">{formatDay(chart === 'line' && lineDay ? lineDay : data.today)}</p>
+          {chart === 'line' && lineMove ? (
+            <p className={cn('shrink-0 text-[13px] font-semibold leading-none tabular-nums', hidden || lineMove.amount === 0 ? 'text-slate-400' : lineMove.amount > 0 ? 'text-[#16c784]' : 'text-[#ea3943]')}>
+              {hidden ? '*****' : formatSignedEur(lineMove.amount)}
+              {lineMove.pct != null && !hidden && <span className="ml-1.5">{formatPct(lineMove.pct)}</span>}
+            </p>
+          ) : data.variation.available && data.variation.amount != null ? (
+            <p className={cn('shrink-0 text-[13px] font-semibold leading-none tabular-nums', hidden ? 'text-slate-400' : totalClass)}>
+              <RisingAmount value={data.variation.amount} hidden={hidden} signed delay={120} />
+              {data.variation.percent != null && <span className="ml-1.5">{hidden ? '*****' : formatPct(data.variation.percent)}</span>}
+            </p>
+          ) : null}
+        </div>
         <button
           type="button"
           aria-pressed={countExtras}
