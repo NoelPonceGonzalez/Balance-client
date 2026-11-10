@@ -988,7 +988,9 @@ export function Market({ focusListing, focusTick = 0 }: { focusListing?: string 
     const root = document.documentElement;
     const wash = market === 'all' ? 'rgba(142, 142, 147, 0.28)' : MARKET_TONE[market]?.wash;
     if (wash) root.style.setProperty('--market-wash', wash);
-    return () => root.style.removeProperty('--market-wash');
+    return () => {
+      root.style.removeProperty('--market-wash');
+    };
   }, [market]);
   const [, setTick] = useState(0);
 
