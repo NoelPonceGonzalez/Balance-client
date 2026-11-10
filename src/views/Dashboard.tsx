@@ -159,6 +159,12 @@ function motionOff(): boolean {
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
 
+function Turn({ amount, pct, beat, hidden, className }: { amount: number; pct: number | null; beat: number; hidden: boolean; className?: string }) {
+  const frames = pct != null ? [formatPct(pct), formatSignedEur(amount)] : [formatSignedEur(amount)];
+  const text = hidden ? '*****' : frames[Math.abs(beat) % frames.length];
+  return <Flip id={hidden ? 'hidden' : text} className={className}>{text}</Flip>;
+}
+
 function Flip({ id, className, children }: { id: string; className?: string; children: ReactNode }) {
   if (motionOff()) return <span className={className}>{children}</span>;
   return (
@@ -416,10 +422,10 @@ function sideTitle(group: PartGroup, skins: boolean): string {
 
 function makeSide(group: string, title: string, items: AccountPart[], section?: ProductSection | null): Side {
   const total = items.reduce((sum, item) => sum + item.eur, 0);
-  const costs = items.map((item) => item.costEur);
-  const complete = group !== 'cash' && costs.every((cost) => cost != null);
-  const invested = complete ? costs.reduce((sum: number, cost) => sum + (cost ?? 0), 0) : null;
-  return { group, title, items, total, invested, gain: invested == null ? null : total - invested, icon: section?.icon, hint: section?.hint };
+  const known = items.filter((item) => item.costEur != null && item.costEur > 0);
+  const invested = group !== 'cash' && known.length ? known.reduce((sum, item) => sum + (item.costEur || 0), 0) : null;
+  const gain = invested == null ? null : known.reduce((sum, item) => sum + item.eur - (item.costEur || 0), 0);
+  return { group, title, items, total, invested, gain, icon: section?.icon, hint: section?.hint };
 }
 
 function accountSides(parts: AccountPart[], name: string): Side[] {
@@ -452,13 +458,11 @@ function accountSides(parts: AccountPart[], name: string): Side[] {
 }
 
 function accountGain(account: DashboardData['accounts'][number], pnl: DashboardData['pnl']): { eur: number; percent: number | null } | null {
-  const rows = pnl.filter((item) => !item.place && item.accountName === account.name && item.platform === account.platform);
-  if (rows.length === 0 || rows.some((item) => item.eur == null)) return null;
+  const rows = pnl.filter((item) => !item.place && item.accountName === account.name && item.platform === account.platform && item.eur != null);
+  if (rows.length === 0) return null;
   const eur = rows.reduce((sum, item) => sum + (item.eur ?? 0), 0);
-  const liquid = (account.parts || []).filter((part) => part.label === 'Líquido').reduce((sum, part) => sum + part.eur, 0);
-  const holdings = account.valueEur == null ? null : account.valueEur - liquid;
-  const cost = holdings == null ? null : holdings - eur;
-  return { eur, percent: cost != null && cost > 0 ? (eur / cost) * 100 : null };
+  const invested = (account.parts || []).reduce((sum, part) => sum + (part.costEur != null && part.costEur > 0 ? part.costEur : 0), 0);
+  return { eur, percent: invested > 0 ? (eur / invested) * 100 : null };
 }
 
 interface QuoteHit {
@@ -1012,6 +1016,7 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
           if (cancelled) return;
           setData(next);
           setError('');
+          timer = window.setTimeout(() => pull(0), 30000);
         })
         .catch((err: unknown) => {
           if (cancelled) return;
@@ -1037,19 +1042,20 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
   }, [books, home]);
 
   useEffect(() => {
-    if (!data || data.series.length >= 2) {
-      setLived(null);
-      return;
-    }
+    if (!data) return undefined;
     let cancelled = false;
-    const cash = data.accounts.reduce((sum, account) => sum + (account.currency === 'EUR' ? account.balance : 0), 0);
     const total = data.netWorth.eur;
     const today = data.today;
-    api<{ holdings?: { quantity: number; quoteSource?: string | null; quoteId?: string | null; unitMarketValue?: number | null }[] }>('/api/holdings')
-      .then((book) => shapeLine((book.holdings || []).map((item) => ({ quantity: item.quantity, source: item.quoteSource || '', quoteId: item.quoteId || '', unit: item.unitMarketValue || 0 }))))
-      .then((line) => {
+    api<{ holdings?: { quantity: number; costBasis?: number | null; quoteSource?: string | null; quoteId?: string | null; unitMarketValue?: number | null }[] }>('/api/holdings')
+      .then((book) => {
+        const rows = (book.holdings || []).filter((item) => item.costBasis != null && item.costBasis > 0 && (item.quoteSource === 'coingecko' || item.quoteSource === 'yahoo') && item.quoteId && (item.unitMarketValue || 0) > 0);
+        const pricedToday = rows.reduce((sum, item) => sum + (item.unitMarketValue || 0) * item.quantity, 0);
+        return shapeLine(rows.map((item) => ({ quantity: item.quantity, source: item.quoteSource || '', quoteId: item.quoteId || '', unit: item.unitMarketValue || 0 }))).then((line) => ({ line, pricedToday }));
+      })
+      .then(({ line, pricedToday }) => {
         if (cancelled || line.length < 2) return;
-        const next = line.map((point) => ({ day: point.day, eur: Math.round((point.eur + cash) * 100) / 100 }));
+        const flat = total - pricedToday;
+        const next = line.map((point) => ({ day: point.day, eur: Math.round((flat + point.eur) * 100) / 100 }));
         next[next.length - 1] = { day: today, eur: total };
         setLived(next);
       })
@@ -1475,6 +1481,8 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
   const totalClass = direction == null || direction === 0 ? 'text-slate-900 dark:text-white' : direction > 0 ? 'text-[#16c784]' : 'text-[#ea3943]';
   const extraWealth = (data?.extras || []).filter((item) => item.counts !== false).reduce((sum, item) => sum + item.valueEur, 0);
   const shownWorth = data ? data.netWorth.eur + (countExtras ? extraWealth : 0) : null;
+  const paid = data ? data.accounts.reduce((sum, account) => sum + (account.parts || []).reduce((partSum, part) => partSum + (part.costEur != null && part.costEur > 0 ? part.costEur : 0), 0), 0) : 0;
+  const paidBase = data && shownWorth != null && paid > 0 ? shownWorth - data.unrealized.eur : null;
   const openAccount = openWallet === 'extras'
     ? (data ? { name: 'Extras', value: extraWallet(data.extras).value, logoName: 'Extras' } : null)
     : ordered.find((row) => row.key === openWallet) || null;
@@ -1518,10 +1526,7 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
               {hidden ? <EyeOff size={16} /> : <Eye size={16} />}
             </button>
             {inAccount && liveMove && (
-              <p className={cn('text-[13px] font-semibold tabular-nums', hidden || liveMove.amount === 0 ? 'text-slate-400' : liveMove.amount > 0 ? 'text-[#16c784]' : 'text-[#ea3943]')}>
-                {hidden ? '*****' : formatSignedEur(liveMove.amount)}
-                {liveMove.pct != null && !hidden && <span className="ml-1.5">{formatPct(liveMove.pct)}</span>}
-              </p>
+              <Turn amount={liveMove.amount} pct={liveMove.pct} beat={beat} hidden={hidden} className={cn('text-[13px] font-semibold tabular-nums', hidden || liveMove.amount === 0 ? 'text-slate-400' : liveMove.amount > 0 ? 'text-[#16c784]' : 'text-[#ea3943]')} />
             )}
           </div>
           {!inAccount && <div className="ml-auto"><ViewSwitch value={view} onChange={chooseView} /></div>}
@@ -1845,10 +1850,7 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
         <div className="flex items-center justify-between gap-3">
           <p className="text-[13px] font-semibold leading-none text-slate-400">{formatDay(chart === 'line' && lineDay ? lineDay : data.today)}</p>
           {chart === 'line' && lineMove ? (
-            <p className={cn('shrink-0 text-[13px] font-semibold leading-none tabular-nums', hidden || lineMove.amount === 0 ? 'text-slate-400' : lineMove.amount > 0 ? 'text-[#16c784]' : 'text-[#ea3943]')}>
-              {hidden ? '*****' : formatSignedEur(lineMove.amount)}
-              {lineMove.pct != null && !hidden && <span className="ml-1.5">{formatPct(lineMove.pct)}</span>}
-            </p>
+            <Turn amount={lineMove.amount} pct={lineMove.pct} beat={beat} hidden={hidden} className={cn('shrink-0 text-[13px] font-semibold leading-none tabular-nums', hidden || lineMove.amount === 0 ? 'text-slate-400' : lineMove.amount > 0 ? 'text-[#16c784]' : 'text-[#ea3943]')} />
           ) : data.variation.available && data.variation.amount != null ? (
             <p className={cn('shrink-0 text-[13px] font-semibold leading-none tabular-nums', hidden ? 'text-slate-400' : totalClass)}>
               <RisingAmount value={data.variation.amount} hidden={hidden} signed delay={120} />
@@ -1877,6 +1879,8 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
           hidden={hidden}
           points={(lived && lived.length >= 2 ? lived : data.series).map((point) => ({ day: point.day, eur: point.eur }))}
           now={shownWorth ?? data.series[data.series.length - 1]?.eur ?? 0}
+          base={paidBase}
+          spent={paid > 0 ? paid : null}
           onValue={setLineNow}
           onDay={setLineDay}
           onMove={setLineMove}

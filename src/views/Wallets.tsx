@@ -310,7 +310,7 @@ function accentFor(label: string): string {
   return ACCENT_PALETTE[hash % ACCENT_PALETTE.length];
 }
 
-export function CashChart({ points, now, hidden, base = null, label, showPct = false, beside = false, tall = false, plain = false, quiet = false, tone, beforePlot, onValue, onDay, onMove, emptyText = 'La gráfica aparece con el primer movimiento.' }: { points: LinePoint[]; now: number; hidden: boolean; base?: number | null; label?: string; showPct?: boolean; beside?: boolean; tall?: boolean; plain?: boolean; quiet?: boolean; tone?: 'ink' | string; beforePlot?: ReactNode; onValue?: (eur: number) => void; onDay?: (day: string | null) => void; onMove?: (move: { amount: number; pct: number | null } | null) => void; emptyText?: string }) {
+export function CashChart({ points, now, hidden, base = null, spent = null, label, showPct = false, beside = false, tall = false, plain = false, quiet = false, tone, beforePlot, onValue, onDay, onMove, emptyText = 'La gráfica aparece con el primer movimiento.' }: { points: LinePoint[]; now: number; hidden: boolean; base?: number | null; spent?: number | null; label?: string; showPct?: boolean; beside?: boolean; tall?: boolean; plain?: boolean; quiet?: boolean; tone?: 'ink' | string; beforePlot?: ReactNode; onValue?: (eur: number) => void; onDay?: (day: string | null) => void; onMove?: (move: { amount: number; pct: number | null } | null) => void; emptyText?: string }) {
   const fillId = `fill-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
   const pastId = `${fillId}-past`;
   const strokeRef = useRef<SVGPathElement>(null);
@@ -358,7 +358,7 @@ export function CashChart({ points, now, hidden, base = null, label, showPct = f
   const focus = scrub;
   const value = focus ? focus.eur : now;
   const change = value - first;
-  const pct = first > 0 ? (change / first) * 100 : null;
+  const pct = spent != null && spent > 0 ? (change / spent) * 100 : first > 0 ? (change / first) * 100 : null;
   const baseY = enough ? height - ((first - bottom) / (top - bottom)) * height : 0;
   const ticks = enough && !fresh ? monthTicks(t0, t0 + tSpan) : [];
   const lined = Boolean(tone);
@@ -595,34 +595,43 @@ export function CashChart({ points, now, hidden, base = null, label, showPct = f
 
 function useSeries(accountKey: string | null, group: string, holdingId: string | null = null): LinePoint[] | null {
   const [points, setPoints] = useState<LinePoint[] | null>(null);
+  const [clock, setClock] = useState(0);
   useEffect(() => {
-    setPoints(null);
-    if (!accountKey) return;
+    const timer = window.setInterval(() => setClock((value) => value + 1), 30000);
+    return () => window.clearInterval(timer);
+  }, []);
+  useEffect(() => { setPoints(null); }, [accountKey, group, holdingId]);
+  useEffect(() => {
+    if (!accountKey) return undefined;
     let cancelled = false;
     const holding = holdingId ? `&holdingId=${encodeURIComponent(holdingId)}` : '';
     api<{ points: LinePoint[] }>(`/api/wallets/series?accountId=${encodeURIComponent(accountKey)}&group=${encodeURIComponent(group)}${holding}`)
       .then(async (data) => {
         if (cancelled) return;
         const points = data.points || [];
-        const days = [...new Set(points.map((point) => point.day))].sort();
-        const span = days.length >= 2 ? Math.round((Date.parse(`${days[days.length - 1]}T00:00:00Z`) - Date.parse(`${days[0]}T00:00:00Z`)) / 86_400_000) : 0;
-        if (span >= 14) {
-          setPoints(points);
-          return;
-        }
         try {
-          const book = await api<{ holdings?: { _id?: string; id?: string; accountId: string; assetClass: string; quantity: number; quoteSource?: string | null; quoteId?: string | null; unitMarketValue?: number | null }[] }>('/api/holdings');
+          const book = await api<{ holdings?: { _id?: string; id?: string; accountId: string; assetClass: string; quantity: number; costBasis?: number | null; quoteSource?: string | null; quoteId?: string | null; unitMarketValue?: number | null }[] }>('/api/holdings');
           const list = book.holdings || [];
           const rows = list.filter((item) => String(item.accountId) === accountKey && (group === 'all' || item.assetClass === group || (group === 'valores' && (item.assetClass === 'etf' || item.assetClass === 'stock'))) && (!holdingId || String(item._id || item.id) === holdingId));
-          const shaped = await shapeLine(rows.map((item) => ({ quantity: item.quantity, source: item.quoteSource || '', quoteId: item.quoteId || '', unit: item.unitMarketValue || 0 })));
-          if (!cancelled) setPoints(shaped.length >= 2 ? shaped : points);
+          const moving = rows.filter((item) => item.costBasis != null && item.costBasis > 0 && (item.quoteSource === 'coingecko' || item.quoteSource === 'yahoo') && item.quoteId && (item.unitMarketValue || 0) > 0);
+          const shaped = await shapeLine(moving.map((item) => ({ quantity: item.quantity, source: item.quoteSource || '', quoteId: item.quoteId || '', unit: item.unitMarketValue || 0 })));
+          if (cancelled) return;
+          if (shaped.length < 2) {
+            setPoints(points);
+            return;
+          }
+          const worth = (item: { quantity: number; unitMarketValue?: number | null }) => (item.unitMarketValue || 0) * item.quantity;
+          const flat = rows.reduce((sum, item) => sum + worth(item), 0) - moving.reduce((sum, item) => sum + worth(item), 0);
+          const lifted = shaped.map((point) => ({ day: point.day, eur: round2(flat + point.eur) }));
+          lifted[lifted.length - 1] = { day: lifted[lifted.length - 1].day, eur: round2(flat + moving.reduce((sum, item) => sum + worth(item), 0)) };
+          setPoints(lifted);
         } catch {
           if (!cancelled) setPoints(points);
         }
       })
       .catch(() => { if (!cancelled) setPoints([]); });
     return () => { cancelled = true; };
-  }, [accountKey, group, holdingId]);
+  }, [accountKey, group, holdingId, clock]);
   return points;
 }
 
@@ -1037,6 +1046,7 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
   const showPortfolio = Boolean(current) && (current?.extras || (hasPortfolio && (!hasCash || pane === 1)));
   const portfolioTotal = investmentSides.reduce((sum, side) => sum + side.total, 0);
   const portfolioInvested = investmentSides.reduce((sum, side) => sum + (side.invested || 0), 0);
+  const portfolioGain = investmentSides.reduce((sum, side) => sum + (side.gain || 0), 0);
   const extraItems = current?.extras ? current.sides.flatMap((side) => side.items) : [];
   const extraCost = extraItems.length > 0 && extraItems.every((item) => item.costEur != null) ? extraItems.reduce((sum, item) => sum + (item.costEur || 0), 0) : null;
   const groups: PageGroup[] = current?.extras
@@ -1575,7 +1585,8 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
                             onMove={onMove}
                             hidden={hidden}
                             now={page.total}
-                            base={range === 'MAX' ? page.invested : null}
+                            base={range === 'MAX' && page.gain != null && page.invested != null ? page.total - page.gain : null}
+                            spent={range === 'MAX' ? page.invested : null}
                             beforePlot={!page.empty && (pagePoints?.length || 0) >= 2 ? <RangeTabs value={range} onChange={setRange} /> : undefined}
                             points={rangedPoints || []}
                             emptyText={page.empty ? 'Todavía no hay nada aquí.' : rangedPoints ? 'La gráfica aparece cuando haya más de un día.' : 'Cargando…'}
@@ -1660,7 +1671,8 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
                       onMove={onMove}
                       hidden={hidden}
                       now={portfolioTotal}
-                      base={range === 'MAX' && portfolioInvested > 0 ? portfolioInvested : null}
+                      base={range === 'MAX' && portfolioInvested > 0 ? portfolioTotal - portfolioGain : null}
+                      spent={range === 'MAX' && portfolioInvested > 0 ? portfolioInvested : null}
                       beforePlot={totalRanged ? <RangeTabs value={range} onChange={setRange} /> : undefined}
                       points={totalRanged || []}
                       emptyText={totalSeries ? 'La gráfica aparece cuando haya más de un día.' : 'Cargando…'}
