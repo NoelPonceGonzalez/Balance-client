@@ -20,11 +20,18 @@ function applyTheme(theme: User['theme']) {
   document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
 }
 
+const SECTIONS: Section[] = ['dashboard', 'market', 'plans', 'movements', 'settings'];
+
+function savedSection(): Section {
+  const saved = sessionStorage.getItem('pat_section');
+  return SECTIONS.includes(saved as Section) ? (saved as Section) : 'dashboard';
+}
+
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [ready, setReady] = useState(false);
   const [offline, setOffline] = useState(false);
-  const [section, setSection] = useState<Section>('dashboard');
+  const [section, setSection] = useState<Section>(savedSection);
   const [home, setHome] = useState(0);
   const [books, setBooks] = useState(0);
   const [heroMs, setHeroMs] = useState(() => Number(localStorage.getItem('pat_hero_ms')) || 5000);
@@ -89,18 +96,8 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const enterHome = () => {
-      if (document.visibilityState !== 'visible') return;
-      setSection('dashboard');
-      setHome((value) => value + 1);
-    };
-    document.addEventListener('visibilitychange', enterHome);
-    window.addEventListener('pageshow', enterHome);
-    return () => {
-      document.removeEventListener('visibilitychange', enterHome);
-      window.removeEventListener('pageshow', enterHome);
-    };
-  }, []);
+    sessionStorage.setItem('pat_section', section);
+  }, [section]);
 
   useEffect(() => {
     if (!user) {

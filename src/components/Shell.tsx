@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { LayoutDashboard, Target, Settings, ArrowLeftRight, LineChart, Camera } from 'lucide-react';
 import { FixedCheck } from '@/components/FixedCheck';
 import { OfferNotice } from '@/components/OfferNotice';
@@ -82,8 +82,8 @@ export function Shell({
       if (!((atTop() && delta > 0) || (atBottom() && delta < 0))) return;
       pulling = true;
       pull = delta * 0.38 / (1 + Math.abs(delta) / 240);
-      const squash = Math.min(0.028, Math.abs(pull) / 1100);
-      band.style.transform = `translate3d(0, ${pull}px, 0) scale(${1 + squash * 0.35}, ${1 - squash})`;
+      band.style.willChange = 'transform';
+      band.style.transform = `translate3d(0, ${pull}px, 0)`;
       if (event.cancelable) event.preventDefault();
     };
     const release = () => {
@@ -92,7 +92,7 @@ export function Shell({
       pulling = false;
       pull = 0;
       band.style.transform = '';
-      band.animate(
+      const anim = band.animate(
         [
           { transform: `translate3d(0, ${from}px, 0)`, easing: 'cubic-bezier(0.3, 0.7, 0.4, 1)' },
           { transform: `translate3d(0, ${-from * 0.14}px, 0)`, offset: 0.4, easing: 'ease-in-out' },
@@ -102,6 +102,9 @@ export function Shell({
         ],
         { duration: 900 },
       );
+      anim.onfinish = () => {
+        band.style.willChange = '';
+      };
     };
     const onPills = (event: Event) => event.target instanceof Element && Boolean(event.target.closest('.market-pills'));
     const onTouchStart = (event: TouchEvent) => {
@@ -124,6 +127,25 @@ export function Shell({
     };
   }, []);
 
+  useLayoutEffect(() => {
+    const scroller = scrollRef.current;
+    if (!scroller) return;
+    const key = `pat_scroll_${section}`;
+    const saved = Number(sessionStorage.getItem(key) || '0');
+    if (saved > 0) scroller.scrollTop = saved;
+    let frame = 0;
+    const onScroll = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => sessionStorage.setItem(key, String(scroller.scrollTop)));
+    };
+    scroller.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      window.cancelAnimationFrame(frame);
+      sessionStorage.setItem(key, String(scroller.scrollTop));
+      scroller.removeEventListener('scroll', onScroll);
+    };
+  }, [section]);
+
   return (
     <ChromeHidden.Provider value={hideChrome}>
     <OfferFocusContext.Provider value={setFocusedOffer}>
@@ -131,7 +153,7 @@ export function Shell({
       <div
         aria-hidden
         className="pointer-events-none absolute inset-x-0 -top-32 z-0 h-[78vh]"
-        style={{ background: 'radial-gradient(140% 90% at 50% 0%, var(--market-wash, transparent), transparent 70%)' }}
+        style={{ background: 'radial-gradient(160% 100% at 50% -8%, var(--market-wash, transparent), transparent 76%)' }}
       />
       <header aria-hidden={bare} className={cn('relative z-10 grid shrink-0 transition-[grid-template-rows,opacity] duration-300 ease-out', bare ? 'pointer-events-none grid-rows-[0fr] opacity-0' : 'grid-rows-[1fr] opacity-100')}>
         <div className="min-h-0 overflow-hidden">
@@ -153,8 +175,8 @@ export function Shell({
       </header>
       <FixedCheck nonce={dueNonce} focusKey={dueKey} onSettled={onSettled} />
       <OfferNotice focused={focusedOffer} onFocusedClose={() => setFocusedOffer(null)} />
-      <main ref={scrollRef} className={cn('app-scroll relative z-10 min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-4 py-2 md:px-8', bare && 'pt-[max(0.75rem,env(safe-area-inset-top))]')}>
-        <div ref={bandRef} className="min-w-0 origin-center will-change-transform">
+      <main ref={scrollRef} className={cn('app-scroll relative z-10 min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-3 py-2 sm:px-4 md:px-8', bare && 'pt-[max(0.75rem,env(safe-area-inset-top))]')}>
+        <div ref={bandRef} className="min-w-0 origin-top">
           {children}
         </div>
       </main>
@@ -188,7 +210,7 @@ export function Shell({
               return (
                 <span key={item.id} className="contents">
                   {button}
-                  <span className="w-16 shrink-0" aria-hidden />
+                  <span className="w-11 shrink-0 sm:w-16" aria-hidden />
                 </span>
               );
             })}

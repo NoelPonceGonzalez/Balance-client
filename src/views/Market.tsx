@@ -163,6 +163,16 @@ const MARKET_TONE: Record<string, { accent: string; search: string; wash: string
 
 const HERO_MARKETS = new Set(['gold', 'silver', 'oil', 'copper']);
 
+function initialMarket() {
+  const saved = sessionStorage.getItem('pat_market') || 'all';
+  return saved === 'all' || saved in MARKET_TONE ? saved : 'all';
+}
+
+function quietWarning(warning: string | null | undefined) {
+  if (!warning) return true;
+  return warning === '429' || /^429\b/.test(warning) || /ha respondido \d+/.test(warning);
+}
+
 const shift = {
   enter: (d: number) => ({ opacity: 0, x: 32 * d, scale: 0.985 }),
   center: { opacity: 1, x: 0, scale: 1 },
@@ -234,7 +244,7 @@ function CryptoBoard({ items, filtered, quiet, onOpen }: { items: MarketTapeItem
             animate={{ opacity: 1, y: 0, scale: 1 }}
             whileTap={still ? undefined : { scale: 0.985 }}
             transition={still ? { duration: 0 } : { ...softSpring, delay: Math.min(index, 10) * 0.035 }}
-            className="overflow-hidden rounded-[28px] bg-white p-4 text-left text-slate-900 shadow-sm ring-1 ring-slate-200/70 dark:bg-slate-900 dark:text-white dark:ring-white/10"
+            className="min-w-0 overflow-hidden rounded-[28px] bg-white p-4 text-left text-slate-900 shadow-sm ring-1 ring-slate-200/70 dark:bg-slate-900 dark:text-white dark:ring-white/10"
           >
             <span className="flex items-center gap-3">
               <Mark image={item.image} symbol={item.symbol} />
@@ -244,8 +254,8 @@ function CryptoBoard({ items, filtered, quiet, onOpen }: { items: MarketTapeItem
               </span>
               <Pct value={item.changePct} className={cn('rounded-full px-2.5 py-1 text-xs', (item.changePct ?? 0) === 0 || item.changePct == null ? 'bg-slate-100 text-slate-500 dark:bg-white/10' : (item.changePct ?? 0) > 0 ? 'bg-[#16c784]/15' : 'bg-[#ea3943]/15')} />
             </span>
-            <span className="mt-5 flex items-end justify-between gap-3">
-              <span className="text-[1.7rem] font-black tabular-nums tracking-tight">{quoteAmount(item.kind, item.priceEur)}</span>
+            <span className="mt-5 flex min-w-0 items-end justify-between gap-2">
+              <span className="min-w-0 truncate text-[clamp(1.2rem,5vw,1.7rem)] font-black tabular-nums tracking-tight">{quoteAmount(item.kind, item.priceEur)}</span>
               <Sparkline values={item.sparkline} up={up} />
             </span>
           </motion.button>
@@ -970,7 +980,7 @@ export function Market({ focusListing, focusTick = 0 }: { focusListing?: string 
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
   const [skinMatch, setSkinMatch] = useState(false);
-  const [market, setMarket] = useState('all');
+  const [market, setMarket] = useState(initialMarket);
   const [skinDesk, setSkinDesk] = useState<SkinHit | null>(null);
   const [wearPick, setWearPick] = useState('all');
   const [tapeFilter, setTapeFilter] = useState<TapeFilter>('all');
@@ -984,6 +994,9 @@ export function Market({ focusListing, focusTick = 0 }: { focusListing?: string 
     setListingFocus(focusListing);
     setDesk('csfloat');
   }, [focusListing, focusTick]);
+  useEffect(() => {
+    sessionStorage.setItem('pat_market', market);
+  }, [market]);
   useEffect(() => {
     const root = document.documentElement;
     const wash = market === 'all' ? 'rgba(142, 142, 147, 0.28)' : MARKET_TONE[market]?.wash;
@@ -1089,9 +1102,12 @@ export function Market({ focusListing, focusTick = 0 }: { focusListing?: string 
 
   return (
     <div className="relative mx-auto min-w-0 max-w-5xl space-y-5">
-      <div className="sticky top-0 z-30 -mx-4 bg-[linear-gradient(to_bottom,color-mix(in_srgb,var(--market-wash,transparent)_55%,transparent),transparent)] px-4 pb-3 pt-1 md:-mx-8 md:px-8">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div className="min-w-0">
+      <div
+        className="sticky top-0 z-30 -mx-3 px-3 pb-3 pt-1 sm:-mx-4 sm:px-4 md:-mx-8 md:px-8"
+        style={{ background: 'linear-gradient(to bottom, color-mix(in srgb, var(--market-wash, transparent) 62%, var(--app-bg)) 0%, color-mix(in srgb, var(--market-wash, transparent) 28%, var(--app-bg)) 70%, var(--app-bg) 100%)' }}
+      >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
           <AnimatePresence mode="wait" initial={false}>
             {market === 'all' ? (
               <motion.p key="kicker" initial={still ? false : { opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={still ? undefined : { opacity: 0, y: -6, transition: quickOut }} transition={softSpring} className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">Elige un mercado</motion.p>
@@ -1102,7 +1118,7 @@ export function Market({ focusListing, focusTick = 0 }: { focusListing?: string 
               </motion.button>
             )}
           </AnimatePresence>
-          <h1 className="flex min-w-0 items-center gap-2.5 text-2xl font-semibold tracking-tight sm:text-3xl">
+          <h1 className="flex min-w-0 items-center gap-2 text-xl font-semibold tracking-tight sm:gap-2.5 sm:text-3xl">
             {skinDesk?.image ? (
               <img src={skinDesk.image} alt="" referrerPolicy="no-referrer" className="h-9 w-12 shrink-0 object-contain" />
             ) : active ? (
@@ -1111,10 +1127,10 @@ export function Market({ focusListing, focusTick = 0 }: { focusListing?: string 
             <span className="truncate">{heading}</span>
           </h1>
         </div>
-        <div className="flex flex-col items-end gap-2">
-          <p className="flex items-center gap-2 text-xs font-bold text-slate-500">
-            <i className={cn('h-2 w-2 rounded-full', fresh ? 'bg-[#16c784]' : 'bg-amber-500')} />
-            {fresh ? `En vivo · ${formatAgo(data.updatedAt)}` : `Último intento ${formatAgo(data.updatedAt)}`}
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <p className="flex max-w-[7.5rem] items-center gap-1.5 text-[11px] font-bold text-slate-500 sm:max-w-none sm:text-xs">
+            <i className={cn('h-2 w-2 shrink-0 rounded-full', fresh ? 'bg-[#16c784]' : 'bg-amber-500')} />
+            <span className="truncate">{fresh ? `En vivo · ${formatAgo(data.updatedAt)}` : `Último intento ${formatAgo(data.updatedAt)}`}</span>
           </p>
           <div className="flex gap-2">
             <button type="button" aria-label="CSFloat" onClick={() => setDesk('csfloat')} className={cn('grid h-10 w-10 place-items-center rounded-full', desk === 'csfloat' ? 'text-slate-950 dark:text-white' : 'text-slate-500')}>
@@ -1128,7 +1144,7 @@ export function Market({ focusListing, focusTick = 0 }: { focusListing?: string 
       </div>
       </div>
       {searchOn && (
-        <div className="sticky top-0 z-30 -mx-1 px-1 py-2">
+        <div className="relative z-20 -mx-1 px-1">
           <div className="relative">
             <Input
               icon={<Search size={16} />}
@@ -1151,7 +1167,7 @@ export function Market({ focusListing, focusTick = 0 }: { focusListing?: string 
           </div>
         </div>
       )}
-      {data.warning && data.warning !== '429' && !/^429\b/.test(data.warning) && !skinDesk && <p className="rounded-2xl bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">{data.warning}</p>}
+      {data.warning && !quietWarning(data.warning) && !skinDesk && <p className="rounded-2xl bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">{data.warning}</p>}
       {desk === 'saved' && (
         <Modal title="Me interesa" onClose={() => setDesk(null)}>
           <SavedDesk needle={needle} />
