@@ -996,7 +996,13 @@ export function Market({ focusListing, focusTick = 0 }: { focusListing?: string 
   }, [focusListing, focusTick]);
   useEffect(() => {
     sessionStorage.setItem('pat_market', market);
+    const root = document.documentElement;
+    const accent = market === 'all' ? '#8e8e93' : MARKET_TONE[market]?.accent || '#8e8e93';
+    root.style.setProperty('--market-tint', `color-mix(in srgb, ${accent} 15%, var(--app-bg))`);
   }, [market]);
+  useEffect(() => () => {
+    document.documentElement.style.removeProperty('--market-tint');
+  }, []);
   const [, setTick] = useState(0);
 
   const load = () => {
@@ -1095,14 +1101,11 @@ export function Market({ focusListing, focusTick = 0 }: { focusListing?: string 
   return (
     <div className="relative mx-auto min-w-0 max-w-5xl space-y-5">
       <div
-        className="sticky -top-2 z-30 -mx-3 -mt-2 flex flex-col gap-1.5 px-3 pb-3 pt-4 sm:-mx-4 sm:px-4 md:-mx-8 md:px-8"
-        style={{ background: `color-mix(in srgb, ${market === 'all' ? '#8e8e93' : tone?.accent || '#8e8e93'} 14%, var(--app-bg))` }}
+        className="sticky -top-2 z-30 -mt-2 mx-[calc(50%-50vw)] px-3 pb-3 pt-4 sm:px-4 md:px-8"
+        style={{ background: 'linear-gradient(to bottom, var(--market-tint, var(--app-bg)) 0%, var(--market-tint, var(--app-bg)) 35%, var(--app-bg) 100%)' }}
       >
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-x-0 top-full h-4"
-          style={{ background: `linear-gradient(to bottom, color-mix(in srgb, ${market === 'all' ? '#8e8e93' : tone?.accent || '#8e8e93'} 14%, var(--app-bg)), transparent)` }}
-        />
+        <div aria-hidden className="pointer-events-none absolute inset-x-0 top-full h-5 bg-gradient-to-b from-[var(--app-bg)] to-transparent" />
+        <div className="mx-auto flex w-full min-w-0 max-w-5xl flex-col gap-1.5">
         <div className="flex min-w-0 items-center gap-2">
           {market !== 'all' && (
             <button type="button" onClick={back} className="inline-flex shrink-0 items-center gap-0.5 text-sm font-semibold text-slate-500" aria-label={skinDesk ? 'Volver a CS2' : 'Volver a mercados'}>
@@ -1150,6 +1153,7 @@ export function Market({ focusListing, focusTick = 0 }: { focusListing?: string 
             )}
           </div>
       )}
+        </div>
       </div>
       {data.warning && !quietWarning(data.warning) && !skinDesk && <p className="rounded-2xl bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">{data.warning}</p>}
       {desk === 'saved' && (
