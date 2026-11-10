@@ -141,10 +141,14 @@ function channel(hex: string): { r: number; g: number; b: number } | null {
   return { r: (value >> 16) & 255, g: (value >> 8) & 255, b: value & 255 };
 }
 
-function isLight(hex: string): boolean {
+function tone(hex: string): number {
   const rgb = channel(hex);
-  if (!rgb) return false;
-  return (rgb.r * 299 + rgb.g * 587 + rgb.b * 114) / 1000 > 210;
+  if (!rgb) return 0;
+  return (rgb.r * 299 + rgb.g * 587 + rgb.b * 114) / 1000;
+}
+
+function isLight(hex: string): boolean {
+  return tone(hex) > 210;
 }
 
 function narrowScreen(): boolean {
@@ -317,7 +321,7 @@ function RisingAmount({ value, hidden, signed = false, card = false, delay = 0, 
 
 const rise = glide;
 
-function Donut({ slices, hidden }: { slices: { key: string; name: string; eur: number }[]; hidden: boolean }) {
+function Donut({ slices, hidden }: { slices: { key: string; name: string; eur: number; color: string }[]; hidden: boolean }) {
   const [picked, setPicked] = useState<string | null>(null);
   const progress = useRise(1, true, 700, 40);
   const total = slices.reduce((sum, slice) => sum + slice.eur, 0);
@@ -328,31 +332,31 @@ function Donut({ slices, hidden }: { slices: { key: string; name: string; eur: n
   let cursor = 0;
   return (
     <div className="relative mx-auto h-52 w-52 sm:h-60 sm:w-60">
-      <svg viewBox="0 0 200 200" className="h-full w-full text-slate-900 dark:text-white" role="img" aria-label="Parte de cada cartera">
+      <svg viewBox="0 0 200 200" className="h-full w-full" role="img" aria-label="Parte de cada cartera">
         <circle cx="100" cy="100" r={radius} fill="none" stroke="currentColor" strokeWidth="24" className="text-slate-100 dark:text-slate-800" />
-        {total > 0 && slices.map((slice, index) => {
+        {total > 0 && slices.map((slice) => {
           const length = (slice.eur / total) * circumference * progress;
           const gap = slices.length > 1 ? 3 * progress : 0;
           const drawn = Math.max(0, length - gap);
           const on = !selected || selected.key === slice.key;
+          const ink = tone(slice.color);
+          const edge = ink > 210 || ink < 28;
+          const arc = {
+            cx: 100,
+            cy: 100,
+            r: radius,
+            fill: 'none' as const,
+            strokeDasharray: `${drawn} ${circumference - drawn}`,
+            strokeDashoffset: -cursor,
+            transform: 'rotate(-90 100 100)',
+          };
           const node = (
-            <circle
-              key={slice.key}
-              cx="100"
-              cy="100"
-              r={radius}
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="24"
-              strokeOpacity={on ? 1 - (index / Math.max(slices.length - 1, 1)) * 0.45 : 0.16}
-              strokeDasharray={`${drawn} ${circumference - drawn}`}
-              strokeDashoffset={-cursor}
-              transform="rotate(-90 100 100)"
-              className="cursor-pointer"
-              onClick={() => setPicked((current) => (current === slice.key ? null : slice.key))}
-            >
-              <title>{slice.name}</title>
-            </circle>
+            <g key={slice.key} className="cursor-pointer" onClick={() => setPicked((current) => (current === slice.key ? null : slice.key))}>
+              {edge && <circle {...arc} stroke="currentColor" strokeWidth={28} className="text-slate-400 dark:text-slate-500" strokeOpacity={on ? 1 : 0.35} />}
+              <circle {...arc} stroke={slice.color} strokeWidth={24} strokeOpacity={on ? 1 : 0.22}>
+                <title>{slice.name}</title>
+              </circle>
+            </g>
           );
           cursor += length;
           return node;
