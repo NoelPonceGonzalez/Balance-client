@@ -218,7 +218,9 @@ export function TicketCam({
     setError('');
     try {
       if (where === 'personal') {
-        await api('/api/plans/tique', { method: 'POST', body: JSON.stringify({ name: name.trim(), amount: value, accountId, receipt: photo }) });
+        for (const line of filled) {
+          await api('/api/plans/tique', { method: 'POST', body: JSON.stringify({ name: line.name.trim(), amount: readAmount(line.amount), accountId, receipt: photo }) });
+        }
       } else {
         await api(`/api/plans/${where}/gasto`, {
           method: 'POST',

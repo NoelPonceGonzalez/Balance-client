@@ -106,7 +106,7 @@ export function Shell({
         band.style.willChange = '';
       };
     };
-    const onPills = (event: Event) => event.target instanceof Element && Boolean(event.target.closest('.market-pills'));
+    const onPills = (event: Event) => event.target instanceof Element && Boolean(event.target.closest('.market-pills, .chart-finger'));
     const onTouchStart = (event: TouchEvent) => {
       if (onPills(event)) return;
       begin(event.touches[0]?.clientX ?? 0, event.touches[0]?.clientY ?? 0);

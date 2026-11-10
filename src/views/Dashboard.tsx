@@ -14,6 +14,7 @@ import { PLATFORM_COLORS } from '@/lib/platform-colors';
 import { findPlatform } from '@/lib/platforms';
 import { accountProducts, KIND_LABEL, kindClass, kindFromClass, partSection, type ProductKind, type ProductSection } from '@/lib/products';
 import { skinArt, skinArtSteam } from '@/lib/skin-art';
+import { shapeLine } from '@/lib/shape-line';
 import { cn } from '@/lib/utils';
 import { rankedOffers, watchListings, watchOfferSkips } from '@/components/OfferNotice';
 import { useOpenOffer } from '@/components/offer-focus';
@@ -941,6 +942,7 @@ function pendingMonth(data: DashboardData | null): number {
 
 export function Dashboard({ heroMs, home, books }: { heroMs: number; home: number; books: number }) {
   const [data, setData] = useState<DashboardData | null>(null);
+  const [lived, setLived] = useState<{ day: string; eur: number }[] | null>(null);
   const [view, setView] = useState<'general' | 'cartera'>('general');
   const [openWallet, setOpenWallet] = useState<string | null>(null);
   const [liveDay, setLiveDay] = useState<string | null>(null);
@@ -1033,6 +1035,27 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
       window.clearTimeout(timer);
     };
   }, [books, home]);
+
+  useEffect(() => {
+    if (!data || data.series.length >= 2) {
+      setLived(null);
+      return;
+    }
+    let cancelled = false;
+    const cash = data.accounts.reduce((sum, account) => sum + (account.currency === 'EUR' ? account.balance : 0), 0);
+    const total = data.netWorth.eur;
+    const today = data.today;
+    api<{ holdings?: { quantity: number; quoteSource?: string | null; quoteId?: string | null; unitMarketValue?: number | null }[] }>('/api/holdings')
+      .then((book) => shapeLine((book.holdings || []).map((item) => ({ quantity: item.quantity, source: item.quoteSource || '', quoteId: item.quoteId || '', unit: item.unitMarketValue || 0 }))))
+      .then((line) => {
+        if (cancelled || line.length < 2) return;
+        const next = line.map((point) => ({ day: point.day, eur: Math.round((point.eur + cash) * 100) / 100 }));
+        next[next.length - 1] = { day: today, eur: total };
+        setLived(next);
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [data]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1852,7 +1875,7 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
           quiet
           tone="ink"
           hidden={hidden}
-          points={data.series.map((point) => ({ day: point.day, eur: point.eur }))}
+          points={(lived && lived.length >= 2 ? lived : data.series).map((point) => ({ day: point.day, eur: point.eur }))}
           now={shownWorth ?? data.series[data.series.length - 1]?.eur ?? 0}
           onValue={setLineNow}
           onDay={setLineDay}

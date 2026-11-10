@@ -9,6 +9,7 @@ import { EntrySheet } from '@/components/EntrySheet';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { api, ApiError } from '@/lib/api';
+import { shapeLine } from '@/lib/shape-line';
 import { OriginGlyph, OriginPicker } from '@/components/OriginMark';
 import { formatDay, formatEur, formatNumber, formatPct, formatSignedEur } from '@/lib/format';
 import type { VerbId } from '@/lib/verbs';
@@ -312,19 +313,16 @@ function accentFor(label: string): string {
 export function CashChart({ points, now, hidden, base = null, label, showPct = false, beside = false, tall = false, plain = false, quiet = false, tone, beforePlot, onValue, onDay, onMove, emptyText = 'La gráfica aparece con el primer movimiento.' }: { points: LinePoint[]; now: number; hidden: boolean; base?: number | null; label?: string; showPct?: boolean; beside?: boolean; tall?: boolean; plain?: boolean; quiet?: boolean; tone?: 'ink' | string; beforePlot?: ReactNode; onValue?: (eur: number) => void; onDay?: (day: string | null) => void; onMove?: (move: { amount: number; pct: number | null } | null) => void; emptyText?: string }) {
   const fillId = `fill-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
   const pastId = `${fillId}-past`;
+  const strokeRef = useRef<SVGPathElement>(null);
   const futureId = `${fillId}-future`;
   const tailId = `${fillId}-tail`;
   const guideId = `${fillId}-guide`;
   const [box, setBox] = useState<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(0);
   const [scrub, setScrub] = useState<{ x: number; y: number; eur: number; day: string } | null>(null);
-  const pressed = useRef(false);
   const scrubOn = useRef(false);
-  const pendingX = useRef<number | null>(null);
-  const frame = useRef(0);
+  const pointerRef = useRef<number | null>(null);
   const sampleRef = useRef<(x: number) => { x: number; y: number; eur: number; day: string } | null>(() => null);
-  const pickAt = useRef<(clientX: number) => void>(() => {});
-  useEffect(() => () => { if (frame.current) cancelAnimationFrame(frame.current); }, []);
   useEffect(() => {
     if (!box) return;
     const watch = new ResizeObserver(([entry]) => setWidth(Math.round(entry.contentRect.width)));
@@ -383,79 +381,51 @@ export function CashChart({ points, now, hidden, base = null, label, showPct = f
     }
     return { ...placed, day };
   };
-  const pick = (clientX: number) => {
+  const placeFinger = (clientX: number) => {
     if (!box || !enough) return;
     const rect = box.getBoundingClientRect();
-    pendingX.current = Math.min(Math.max(clientX - rect.left, 0), rect.width);
-    if (frame.current) return;
-    frame.current = requestAnimationFrame(() => {
-      frame.current = 0;
-      const x = pendingX.current;
-      if (x == null) return;
-      const next = sampleRef.current(x);
-      if (!next) return;
-      scrubOn.current = true;
-      setScrub(next);
-    });
+    if (!(rect.width > 0)) return;
+    const local = Math.min(Math.max(clientX - rect.left, 0), rect.width);
+    const next = sampleRef.current((local / rect.width) * width);
+    if (!next) return;
+    scrubOn.current = true;
+    setScrub(next);
   };
-  pickAt.current = pick;
-  const release = () => {
-    pressed.current = false;
-    pendingX.current = null;
-    if (frame.current) cancelAnimationFrame(frame.current);
-    frame.current = 0;
+  const releaseFinger = () => {
+    pointerRef.current = null;
     if (!scrubOn.current) return;
     scrubOn.current = false;
     setScrub(null);
   };
-  useEffect(() => {
-    const el = box;
-    if (!el) return;
-    let mode: 'wait' | 'scrub' | 'scroll' = 'wait';
-    let x0 = 0;
-    let y0 = 0;
-    const begin = (event: TouchEvent) => {
-      if (event.touches.length !== 1) {
-        mode = 'scroll';
-        release();
-        return;
-      }
-      mode = 'wait';
-      x0 = event.touches[0].clientX;
-      y0 = event.touches[0].clientY;
-    };
-    const move = (event: TouchEvent) => {
-      if (event.touches.length !== 1 || mode === 'scroll') return;
-      const x = event.touches[0].clientX;
-      const y = event.touches[0].clientY;
-      if (mode === 'wait') {
-        const dx = x - x0;
-        const dy = y - y0;
-        if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
-        mode = Math.abs(dx) > Math.abs(dy) * 1.25 ? 'scrub' : 'scroll';
-        if (mode === 'scroll') return;
-      }
-      event.preventDefault();
-      event.stopPropagation();
-      pressed.current = true;
-      pickAt.current(x);
-    };
-    const end = () => {
-      mode = 'wait';
-      release();
-    };
-    el.addEventListener('touchstart', begin, { passive: true });
-    el.addEventListener('touchmove', move, { passive: false });
-    el.addEventListener('touchend', end);
-    el.addEventListener('touchcancel', end);
-    return () => {
-      el.removeEventListener('touchstart', begin);
-      el.removeEventListener('touchmove', move);
-      el.removeEventListener('touchend', end);
-      el.removeEventListener('touchcancel', end);
-    };
-  }, [box]);
   const shownDay = focus?.day || line[line.length - 1]?.day || null;
+  const drawKey = `${line[0]?.day ?? ''}:${line.length}:${line[line.length - 1]?.day ?? ''}`;
+  useEffect(() => {
+    const path = strokeRef.current;
+    if (!path || !enough) return undefined;
+    const clear = () => {
+      path.style.transition = 'none';
+      path.style.strokeDasharray = 'none';
+      path.style.strokeDashoffset = '0';
+    };
+    if (still) {
+      clear();
+      return undefined;
+    }
+    const total = path.getTotalLength();
+    if (!(total > 0)) return undefined;
+    path.style.transition = 'none';
+    path.style.strokeDasharray = `${total}px ${total}px`;
+    path.style.strokeDashoffset = `${total}px`;
+    const start = window.setTimeout(() => {
+      path.style.transition = 'stroke-dashoffset 1.15s cubic-bezier(0.22, 1, 0.36, 1)';
+      path.style.strokeDashoffset = '0px';
+    }, 30);
+    const finish = window.setTimeout(clear, 1500);
+    return () => {
+      window.clearTimeout(start);
+      window.clearTimeout(finish);
+    };
+  }, [drawKey, enough, still]);
   useEffect(() => { onValue?.(value); }, [onValue, value]);
   useEffect(() => { if (shownDay) onDay?.(shownDay); }, [onDay, shownDay]);
   useEffect(() => {
@@ -503,17 +473,21 @@ export function CashChart({ points, now, hidden, base = null, label, showPct = f
       {beforePlot}
       <div
         ref={setBox}
-        className={cn('relative select-none', plain ? '-mx-5 mt-1' : 'mt-4')}
-        style={{ height: enough || width === 0 ? height : 48, touchAction: 'pan-y' }}
+        className={cn('chart-finger relative select-none', plain ? '-mx-5 mt-1' : 'mt-4')}
+        style={{ height: enough || width === 0 ? height : 48, touchAction: 'none' }}
         onPointerDown={(event) => {
-          if (event.pointerType === 'touch') return;
-          pressed.current = true;
-          pick(event.clientX);
+          if (!event.isPrimary || pointerRef.current != null) return;
+          pointerRef.current = event.pointerId;
+          event.preventDefault();
           try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* un puntero sintético no se puede capturar */ }
+          placeFinger(event.clientX);
         }}
-        onPointerMove={(event) => { if (event.pointerType !== 'touch' && pressed.current) pick(event.clientX); }}
-        onPointerUp={release}
-        onPointerCancel={release}
+        onPointerMove={(event) => {
+          if (pointerRef.current !== event.pointerId) return;
+          placeFinger(event.clientX);
+        }}
+        onPointerUp={(event) => { if (pointerRef.current === event.pointerId) releaseFinger(); }}
+        onPointerCancel={(event) => { if (pointerRef.current === event.pointerId) releaseFinger(); }}
       >
         {enough ? (
           <>
@@ -548,10 +522,11 @@ export function CashChart({ points, now, hidden, base = null, label, showPct = f
                   clipPath={cut != null ? `url(#${pastId})` : undefined}
                   initial={still ? false : { opacity: 0 }}
                   animate={{ opacity: 1 }}
-                  transition={{ duration: 0.8, delay: 0.55, ease: [0.22, 1, 0.36, 1] }}
+                  transition={{ duration: still ? 0 : 0.7, delay: still ? 0 : 0.35, ease: [0.22, 1, 0.36, 1] }}
                 />
               )}
-              <motion.path
+              <path
+                ref={strokeRef}
                 d={d}
                 fill="none"
                 stroke={stroke}
@@ -559,9 +534,6 @@ export function CashChart({ points, now, hidden, base = null, label, showPct = f
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 clipPath={cut != null ? `url(#${pastId})` : undefined}
-                initial={still ? false : { pathLength: 0 }}
-                animate={{ pathLength: 1 }}
-                transition={{ duration: 1.3, ease: [0.65, 0, 0.35, 1] }}
               />
               {cut != null && (
                 <path
@@ -590,7 +562,7 @@ export function CashChart({ points, now, hidden, base = null, label, showPct = f
                 style={{ left: mark[0], top: mark[1], background: color }}
                 initial={still ? false : { scale: 0 }}
                 animate={{ scale: 1 }}
-                transition={{ ...jelly, delay: still ? 0 : 1.25 }}
+                transition={{ ...jelly, delay: still ? 0 : 1.05 }}
               >
                 {!still && (
                   <motion.span
@@ -629,7 +601,25 @@ function useSeries(accountKey: string | null, group: string, holdingId: string |
     let cancelled = false;
     const holding = holdingId ? `&holdingId=${encodeURIComponent(holdingId)}` : '';
     api<{ points: LinePoint[] }>(`/api/wallets/series?accountId=${encodeURIComponent(accountKey)}&group=${encodeURIComponent(group)}${holding}`)
-      .then((data) => { if (!cancelled) setPoints(data.points || []); })
+      .then(async (data) => {
+        if (cancelled) return;
+        const points = data.points || [];
+        const days = [...new Set(points.map((point) => point.day))].sort();
+        const span = days.length >= 2 ? Math.round((Date.parse(`${days[days.length - 1]}T00:00:00Z`) - Date.parse(`${days[0]}T00:00:00Z`)) / 86_400_000) : 0;
+        if (span >= 14) {
+          setPoints(points);
+          return;
+        }
+        try {
+          const book = await api<{ holdings?: { _id?: string; id?: string; accountId: string; assetClass: string; quantity: number; quoteSource?: string | null; quoteId?: string | null; unitMarketValue?: number | null }[] }>('/api/holdings');
+          const list = book.holdings || [];
+          const rows = list.filter((item) => String(item.accountId) === accountKey && (group === 'all' || item.assetClass === group || (group === 'valores' && (item.assetClass === 'etf' || item.assetClass === 'stock'))) && (!holdingId || String(item._id || item.id) === holdingId));
+          const shaped = await shapeLine(rows.map((item) => ({ quantity: item.quantity, source: item.quoteSource || '', quoteId: item.quoteId || '', unit: item.unitMarketValue || 0 })));
+          if (!cancelled) setPoints(shaped.length >= 2 ? shaped : points);
+        } catch {
+          if (!cancelled) setPoints(points);
+        }
+      })
       .catch(() => { if (!cancelled) setPoints([]); });
     return () => { cancelled = true; };
   }, [accountKey, group, holdingId]);
@@ -957,7 +947,9 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
     setLedger(null);
     setDetail(null);
     const opened = accounts.find((account) => account.key === openId);
-    const opensCash = Boolean(opened && !opened.extras && opened.sides.some((side) => side.group === 'cash'));
+    const cashSide = opened?.sides.find((side) => side.group === 'cash');
+    const hasBook = opened?.sides.some((side) => side.group !== 'cash' && side.total > 1);
+    const opensCash = Boolean(opened && !opened.extras && cashSide && (cashSide.total >= 1 || !hasBook));
     setPane(opensCash ? 0 : 1);
     setFocus('all');
     setAsset(null);
