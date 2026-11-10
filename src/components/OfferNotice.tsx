@@ -4,7 +4,7 @@ import { AnimatePresence, animate, motion, useMotionValue, type AnimationPlaybac
 import { ModalClose, modalOverlayClass, modalPanelClass } from '@/components/Modal';
 import { api, ApiError } from '@/lib/api';
 import { formatDay, formatEur } from '@/lib/format';
-import { quickOut, softSpring } from '@/lib/motion';
+import { glide, jelly, quickOut } from '@/lib/motion';
 import { skinArt, skinArtSteam } from '@/lib/skin-art';
 import { cn } from '@/lib/utils';
 import type { AppNotification } from '@/lib/types';
@@ -170,6 +170,16 @@ function wearOfHash(hash: string | undefined): string | null {
 function baseOfHash(hash: string): string {
   return hash.replace(/^★\s*/, '').replace(/\s*\((Factory New|Minimal Wear|Field-Tested|Well-Worn|Battle-Scarred)\)$/, '');
 }
+
+function readShift(node: HTMLElement): { x: number; y: number } {
+  const raw = getComputedStyle(node).transform;
+  if (!raw || raw === 'none') return { x: 0, y: 0 };
+  const match = raw.match(/matrix(?:3d)?\(([^)]+)\)/);
+  if (!match) return { x: 0, y: 0 };
+  const parts = match[1].split(',').map((part) => Number(part.trim()));
+  return parts.length === 16 ? { x: parts[12] || 0, y: parts[13] || 0 } : { x: parts[4] || 0, y: parts[5] || 0 };
+}
+
 export function OfferNotice({ focused = null, onFocusedClose }: { focused?: AppNotification | null; onFocusedClose?: () => void }) {
   const [items, setItems] = useState<AppNotification[]>([]);
   const [ceilings, setCeilings] = useState<Record<string, number>>({});
@@ -179,16 +189,19 @@ export function OfferNotice({ focused = null, onFocusedClose }: { focused?: AppN
   const [visit, setVisit] = useState(0);
   const [index, setIndex] = useState(0);
   const [nudge, setNudge] = useState(0);
+  const [dragOn, setDragOn] = useState(false);
   const dragX = useMotionValue(0);
   const dragY = useMotionValue(0);
-  const dragOrigin = useRef<{ x: number; y: number } | null>(null);
+  const dragOrigin = useRef<{ x: number; y: number; baseX: number; baseY: number } | null>(null);
   const dragAxis = useRef<'x' | 'y' | null>(null);
-  const flying = useRef<AnimationPlaybackControls | null>(null);
+  const enterRun = useRef<AnimationPlaybackControls | null>(null);
+  const caught = useRef(false);
+  const placeRef = useRef(0);
+  const deckLenRef = useRef(0);
   const deckReady = useRef('');
   const [quotes, setQuotes] = useState<Record<string, LiveQuote>>({});
   const quotesRef = useRef(quotes);
   quotesRef.current = quotes;
-  const [dragId, setDragId] = useState<string | null>(null);
   const [misses, setMisses] = useState<Record<string, number>>({});
   const [hashes, setHashes] = useState<Record<string, string>>({});
   const [wearRefs, setWearRefs] = useState<Record<string, number | null>>({});
@@ -295,11 +308,14 @@ export function OfferNotice({ focused = null, onFocusedClose }: { focused?: AppN
   const shown = deck[place] || null;
   const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const open = Boolean(shown) && (Boolean(picked) || !aside);
+  placeRef.current = place;
+  deckLenRef.current = deck.length;
 
   useEffect(() => {
     if (focusId) {
       const at = deck.findIndex((item) => item.id === focusId);
       if (at >= 0) setIndex(at);
+      setNudge(0);
       return;
     }
     const token = `${visit}:${sourceKey}`;
@@ -307,25 +323,32 @@ export function OfferNotice({ focused = null, onFocusedClose }: { focused?: AppN
     if (!deck.length) return;
     deckReady.current = token;
     setIndex(0);
+    setNudge(0);
   }, [visit, sourceKey, focusId]);
 
+  const stopFlight = () => {
+    const run = enterRun.current;
+    enterRun.current = null;
+    run?.stop();
+  };
   const leave = () => {
+    stopFlight();
+    setDragOn(false);
+    setNudge(0);
     if (picked) onFocusedClose?.();
     setAside(true);
   };
-  const settle = { type: 'spring' as const, stiffness: 420, damping: 38, mass: 0.7 };
-  const stopFlight = () => {
-    const run = flying.current;
-    flying.current = null;
-    run?.stop();
-  };
   const grab = (event: ReactPointerEvent<HTMLDivElement>) => {
     if ((event.target as HTMLElement).closest('button')) return;
+    const shift = readShift(event.currentTarget);
     stopFlight();
-    setDragId(shown?.id || null);
-    dragOrigin.current = { x: event.clientX, y: event.clientY };
+    dragX.set(shift.x);
+    dragY.set(shift.y);
+    setDragOn(true);
+    caught.current = Math.abs(shift.x) > 0.5 || Math.abs(shift.y) > 0.5;
+    dragOrigin.current = { x: event.clientX, y: event.clientY, baseX: shift.x, baseY: shift.y };
     dragAxis.current = null;
-    event.currentTarget.setPointerCapture(event.pointerId);
+    try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* el gesto sigue aunque el puntero no se pueda capturar */ }
   };
   const pull = (event: ReactPointerEvent<HTMLDivElement>) => {
     const origin = dragOrigin.current;
@@ -333,50 +356,59 @@ export function OfferNotice({ focused = null, onFocusedClose }: { focused?: AppN
     const dx = event.clientX - origin.x;
     const dy = event.clientY - origin.y;
     if (!dragAxis.current && Math.hypot(dx, dy) > 8) dragAxis.current = Math.abs(dy) > Math.abs(dx) ? 'y' : 'x';
-    if (dragAxis.current === 'y') dragY.set(Math.max(0, dy));
-    else if (dragAxis.current === 'x') dragX.set(dx);
+    if (dragAxis.current === 'y') dragY.set(Math.max(0, origin.baseY + dy));
+    else if (dragAxis.current === 'x') dragX.set(origin.baseX + dx);
+    else {
+      dragX.set(origin.baseX + dx);
+      dragY.set(Math.max(0, origin.baseY + dy));
+    }
   };
   const drop = () => {
-    if (!dragOrigin.current) return;
-    const dx = dragX.get();
-    const dy = dragY.get();
+    const origin = dragOrigin.current;
+    if (!origin) return;
+    const gestureX = dragX.get() - origin.baseX;
+    const gestureY = dragY.get() - origin.baseY;
     const axis = dragAxis.current;
+    const wasCaught = caught.current;
     dragOrigin.current = null;
     dragAxis.current = null;
-    if (axis === 'y') {
-      if (dy > 88) leave();
-      else void animate(dragY, 0, settle);
+    caught.current = false;
+    const stick = still ? { duration: 0 } : glide;
+    if (!axis) {
+      if (wasCaught || Math.abs(dragX.get()) > 0.5 || Math.abs(dragY.get()) > 0.5) {
+        enterRun.current = animate(dragX, 0, stick);
+        void animate(dragY, 0, stick);
+      }
       return;
     }
-    const travel = Math.min(window.innerWidth, 560);
-    const glideOff = { duration: 0.18, ease: [0.2, 0.8, 0.2, 1] as [number, number, number, number] };
-    if (dx <= -72) {
-      const run = animate(dragX, -travel, glideOff);
-      flying.current = run;
-      void run.finished.then(() => { if (flying.current === run) turn(1); }).catch(() => undefined);
-    } else if (dx >= 72) {
-      const run = animate(dragX, travel, glideOff);
-      flying.current = run;
-      void run.finished.then(() => { if (flying.current === run) turn(-1); }).catch(() => undefined);
-    } else {
-      flying.current = animate(dragX, 0, settle);
+    if (axis === 'y') {
+      if (gestureY > 88) leave();
+      else {
+        enterRun.current = animate(dragY, 0, stick);
+        if (Math.abs(dragX.get()) > 0.5) void animate(dragX, 0, stick);
+      }
+      return;
     }
-  };
-  const turn = (step: number) => {
-    flying.current = null;
-    dragX.set(0);
-    dragY.set(0);
-    setDragId(null);
-    if (deck.length < 2) return;
-    const next = (place + step + deck.length) % deck.length;
-    setNudge(step);
-    setIndex(next);
+    if ((gestureX <= -72 || gestureX >= 72) && deck.length > 1) {
+      const step = gestureX < 0 ? 1 : -1;
+      stopFlight();
+      dragX.set(0);
+      dragY.set(0);
+      setDragOn(false);
+      setNudge(step);
+      setIndex((place + step + deck.length) % deck.length);
+      return;
+    }
+    enterRun.current = animate(dragX, 0, stick);
+    if (Math.abs(dragY.get()) > 0.5) void animate(dragY, 0, stick);
   };
   const pass = () => {
     if (!shown) return;
     const id = shown.id;
     const remaining = deck.filter((item) => item.id !== id).length;
     rememberPassed(shown);
+    setDragOn(false);
+    setNudge(0);
     setSkip(skippedIds());
     setPassed(readPassed());
     if (remaining === 0) leave();
@@ -388,8 +420,7 @@ export function OfferNotice({ focused = null, onFocusedClose }: { focused?: AppN
     const url = shown.url;
     window.open(url, '_blank', 'noopener,noreferrer');
     void api(`/api/market/notifications/${id}/keep`, { method: 'POST' }).catch(() => undefined);
-    if (picked) onFocusedClose?.();
-    setAside(true);
+    leave();
   };
 
   const candidateKey = items.filter((item) => item.quoteKey?.startsWith('listing:')).map((item) => item.id).join('|');
@@ -471,17 +502,17 @@ export function OfferNotice({ focused = null, onFocusedClose }: { focused?: AppN
             role="dialog"
             aria-labelledby="offer-notice-title"
             aria-roledescription="Mazo de ofertas"
-            style={{ x: dragId === shown.id ? dragX : 0, y: dragId === shown.id ? dragY : 0 }}
+            style={dragOn ? { x: dragX, y: dragY } : undefined}
             onPointerDown={grab}
             onPointerMove={pull}
             onPointerUp={drop}
             onPointerCancel={drop}
             className={cn(modalPanelClass, 'max-w-sm cursor-grab touch-none active:cursor-grabbing')}
             onClick={(event) => event.stopPropagation()}
-            initial={still ? false : { opacity: 0, scale: nudge === 0 ? 0.96 : 1 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={still ? undefined : { opacity: 0, scale: 0.94, y: 16, transition: quickOut }}
-            transition={{ ...softSpring, opacity: { duration: 0.18 } }}
+            initial={still || dragOn ? false : nudge === 0 ? { opacity: 0, y: 28, scale: 0.96 } : { opacity: 1, x: Math.sign(nudge) * 48 }}
+            animate={dragOn ? { opacity: 1, scale: 1 } : { opacity: 1, x: 0, y: 0, scale: 1 }}
+            exit={still ? undefined : { opacity: 0, transition: quickOut }}
+            transition={still || dragOn ? { duration: 0 } : nudge === 0 ? { ...jelly, opacity: { duration: 0.18 } } : glide}
           >
             <div className="flex items-start justify-between gap-3">
               <h2 id="offer-notice-title" className="min-w-0 text-[17px] font-black tracking-tight">{name}</h2>

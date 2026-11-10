@@ -321,8 +321,9 @@ function sliceInk(hex: string, dark: boolean): string {
   const rgb = channel(hex);
   if (!rgb) return dark ? '#E4E4E7' : '#3F3F46';
   const lum = (rgb.r * 299 + rgb.g * 587 + rgb.b * 114) / 1000;
-  if (lum < 28) return dark ? '#E7E7EC' : '#3C3C43';
-  if (lum > 210) return dark ? '#D6D6DB' : '#5C6560';
+  // El negro y el blanco del logo se quedan al lado del color real, lo justo para verse en el anillo y no confundirse.
+  if (lum < 22) return dark ? '#F4F4F5' : '#242426';
+  if (lum > 228) return dark ? '#323234' : '#D4D4D0';
   return hex;
 }
 
@@ -366,7 +367,7 @@ function Donut({ slices, hidden }: { slices: { key: string; name: string; eur: n
               fill="none"
               stroke={sliceInk(slice.color, dark)}
               strokeWidth="24"
-              strokeOpacity={on ? 0.82 : 0.18}
+              strokeOpacity={on ? 0.92 : 0.18}
               strokeDasharray={`${drawn} ${circumference - drawn}`}
               strokeDashoffset={-cursor}
               transform="rotate(-90 100 100)"
