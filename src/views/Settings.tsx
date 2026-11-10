@@ -63,7 +63,9 @@ export function Settings({
   onLogout: () => void;
 }) {
   const [name, setName] = useState(user.name);
+  const [username, setUsername] = useState(user.username || '');
   const [message, setMessage] = useState('');
+  const [userMessage, setUserMessage] = useState('');
   const [error, setError] = useState('');
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [erase, setErase] = useState<'idle' | 'confirm'>('idle');
@@ -75,6 +77,8 @@ export function Settings({
   const [csfloatKey, setCsfloatKey] = useState('');
   const [csfloatNote, setCsfloatNote] = useState('');
   const dirty = name.trim() !== user.name.trim() && name.trim().length > 0;
+  const usernameClean = username.trim().toLowerCase();
+  const usernameDirty = usernameClean.length > 0 && usernameClean !== (user.username || '').toLowerCase();
 
   const refreshDevice = () => {
     void phoneStatus().then((next) => {
@@ -132,6 +136,27 @@ export function Settings({
       setMessage('Nombre guardado.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se ha podido guardar.');
+    }
+  };
+
+  const saveUsername = async () => {
+    setError('');
+    setUserMessage('');
+    if (!/^[a-z][a-z0-9._-]{2,23}$/.test(usernameClean)) {
+      setError('El usuario empieza por una letra y tiene entre 3 y 24 caracteres.');
+      return;
+    }
+    try {
+      const data = await api<{ user: User }>('/api/auth/me', { method: 'PATCH', body: JSON.stringify({ username: usernameClean }) });
+      onUser(data.user);
+      setUsername(data.user.username || '');
+      if ((data.user.username || '').toLowerCase() !== usernameClean) {
+        setError('No se ha podido cambiar el usuario.');
+        return;
+      }
+      setUserMessage('Guardado. Ya puedes entrar con ese nombre.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se ha podido guardar el usuario.');
     }
   };
 
@@ -203,6 +228,26 @@ export function Settings({
               Guardar
             </button>
           )}
+        </div>
+        <div className="mt-5">
+          <Input
+            label="Usuario"
+            value={username}
+            onChange={(event) => { setUsername(event.target.value); setUserMessage(''); }}
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+            autoComplete="username"
+            placeholder="noel"
+          />
+          <div className="mt-2 flex items-center justify-between gap-3 px-1">
+            <p className="text-xs font-medium text-slate-400">{userMessage || 'Con este nombre entras, sin el correo.'}</p>
+            {usernameDirty && (
+              <button type="button" onClick={() => void saveUsername()} className="shrink-0 rounded-full border border-slate-200/90 bg-white px-3 py-1.5 text-[13px] font-semibold text-slate-700 dark:border-white/15 dark:bg-white/5 dark:text-slate-200">
+                Guardar
+              </button>
+            )}
+          </div>
         </div>
       </section>
 

@@ -10,6 +10,13 @@ import type { AppNotification } from '@/lib/types';
 
 const SKIP = 'pat_offer_skip';
 const PASSED = 'pat_offer_passed';
+const OFFER_LIMIT = 10;
+const offerSkipWatchers = new Set<() => void>();
+
+export function watchOfferSkips(onChange: () => void): () => void {
+  offerSkipWatchers.add(onChange);
+  return () => { offerSkipWatchers.delete(onChange); };
+}
 
 function skippedIds(): Set<string> {
   try {
@@ -24,6 +31,7 @@ function rememberSkip(id: string) {
   const next = skippedIds();
   next.add(id);
   localStorage.setItem(SKIP, JSON.stringify([...next]));
+  offerSkipWatchers.forEach((notify) => notify());
 }
 
 type PassedOffer = { listing: string; price: number };
@@ -68,7 +76,8 @@ export function rankedOffers(items: AppNotification[]): AppNotification[] {
   const passed = readPassed();
   return items
     .filter((item) => item.quoteKey?.startsWith('listing:') && !dismissed(item, skip, passed) && listingStillUp(item.url))
-    .sort((a, b) => (a.priceEur ?? Number.POSITIVE_INFINITY) - (b.priceEur ?? Number.POSITIVE_INFINITY) || a.createdAt.localeCompare(b.createdAt));
+    .sort((a, b) => (a.priceEur ?? Number.POSITIVE_INFINITY) - (b.priceEur ?? Number.POSITIVE_INFINITY) || a.createdAt.localeCompare(b.createdAt))
+    .slice(0, OFFER_LIMIT);
 }
 
 export function nextOffer(items: AppNotification[]): AppNotification | null {
@@ -200,27 +209,30 @@ export function OfferNotice({ focused = null, onFocusedClose }: { focused?: AppN
   }
   unique.sort((a, b) => (a.priceEur ?? Number.POSITIVE_INFINITY) - (b.priceEur ?? Number.POSITIVE_INFINITY) || a.createdAt.localeCompare(b.createdAt));
   const picked = focused?.quoteKey?.startsWith('listing:') ? focused : null;
-  if (picked && listingStillUp(picked.url) && !unique.some((item) => item.id === picked.id)) unique.unshift(picked);
-  const deckKey = unique.map((item) => item.id).join('|');
+  const deck = unique.filter((item) => !dismissed(item, skip, passed)).slice(0, OFFER_LIMIT);
+  if (picked && listingStillUp(picked.url) && !deck.some((item) => item.id === picked.id)) {
+    deck.unshift(picked);
+    deck.splice(OFFER_LIMIT);
+  }
+  const sourceKey = unique.map((item) => item.id).join('|');
   const focusId = picked?.id || '';
-  const place = unique.length === 0 ? 0 : Math.min(index, unique.length - 1);
-  const shown = unique[place] || null;
+  const place = deck.length === 0 ? 0 : Math.min(index, deck.length - 1);
+  const shown = deck[place] || null;
   const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const open = Boolean(shown) && Boolean(picked);
 
   useEffect(() => {
     if (focusId) {
-      const at = unique.findIndex((item) => item.id === focusId);
+      const at = deck.findIndex((item) => item.id === focusId);
       if (at >= 0) setIndex(at);
       return;
     }
-    const token = `${visit}:${deckKey}`;
-    if (!deckKey || deckReady.current === token) return;
-    const at = unique.findIndex((item) => !dismissed(item, skip, passed));
-    if (at < 0) return;
+    const token = `${visit}:${sourceKey}`;
+    if (!sourceKey || deckReady.current === token) return;
+    if (!deck.length) return;
     deckReady.current = token;
-    setIndex(at);
-  }, [visit, deckKey, focusId]);
+    setIndex(0);
+  }, [visit, sourceKey, focusId]);
 
   const leave = () => {
     if (picked) onFocusedClose?.();
@@ -280,26 +292,19 @@ export function OfferNotice({ focused = null, onFocusedClose }: { focused?: AppN
     dragX.set(0);
     dragY.set(0);
     setDragId(null);
-    if (unique.length < 2) return;
-    const next = (place + step + unique.length) % unique.length;
+    if (deck.length < 2) return;
+    const next = (place + step + deck.length) % deck.length;
     setNudge(step);
     setIndex(next);
   };
   const pass = () => {
     if (!shown) return;
     const id = shown.id;
+    const remaining = deck.filter((item) => item.id !== id).length;
     rememberPassed(shown);
-    const nextSkip = skippedIds();
-    const nextPassed = readPassed();
-    setSkip(nextSkip);
-    setPassed(nextPassed);
-    const later = unique.findIndex((item, at) => at > place && !dismissed(item, nextSkip, nextPassed));
-    const earlier = unique.findIndex((item) => !dismissed(item, nextSkip, nextPassed));
-    if (later >= 0) turn(later - place);
-    else if (earlier >= 0) {
-      setNudge(-1);
-      setIndex(earlier);
-    } else leave();
+    setSkip(skippedIds());
+    setPassed(readPassed());
+    if (remaining === 0) leave();
     void api(`/api/market/notifications/${id}/pass`, { method: 'POST' }).catch(() => undefined);
   };
   const interest = () => {
@@ -400,7 +405,7 @@ export function OfferNotice({ focused = null, onFocusedClose }: { focused?: AppN
               <h2 id="offer-notice-title" className="min-w-0 text-[17px] font-black tracking-tight">{name}</h2>
               <span onPointerDown={(event) => event.stopPropagation()}><ModalClose onClose={leave} /></span>
             </div>
-            <p className="mt-2 text-center text-[13px] font-black tabular-nums tracking-wide text-slate-400" aria-label={`Oferta ${place + 1} de ${unique.length}`}>{place + 1}/{unique.length}</p>
+            <p className="mt-2 text-center text-[13px] font-black tabular-nums tracking-wide text-slate-400" aria-label={`Oferta ${place + 1} de ${deck.length}`}>{place + 1}/{deck.length}</p>
             {shown.image && (
               <div className="relative mt-3 grid place-items-center">
                 <img src={shown.image} alt="" draggable={false} referrerPolicy="no-referrer" className="h-36 w-52 object-contain" />
