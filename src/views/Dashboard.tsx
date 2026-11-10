@@ -14,7 +14,7 @@ import { PLATFORM_COLORS } from '@/lib/platform-colors';
 import { findPlatform } from '@/lib/platforms';
 import { accountProducts, KIND_LABEL, kindClass, kindFromClass, partSection, type ProductKind, type ProductSection } from '@/lib/products';
 import { cn } from '@/lib/utils';
-import { nextOffer } from '@/components/OfferNotice';
+import { rankedOffers } from '@/components/OfferNotice';
 import { useOpenOffer } from '@/components/offer-focus';
 import type { AppNotification, DashboardData } from '@/lib/types';
 import { useHideChrome } from '@/components/Shell';
@@ -955,6 +955,7 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
   const [dueLine, setDueLine] = useState<{ label: string; amount: number; direction: 'in' | 'out' } | null>(null);
   const [markLine, setMarkLine] = useState<{ planId: string; label: string; amount: number } | null>(null);
   const [offerLine, setOfferLine] = useState<AppNotification | null>(null);
+  const [offerCount, setOfferCount] = useState(0);
   const [monthLine, setMonthLine] = useState<{ confirmed: number; estimated: number } | null>(null);
   const openOffer = useOpenOffer();
   const [adding, setAdding] = useState(false);
@@ -1041,8 +1042,13 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
         setMonthLine(null);
       });
     api<{ notifications: AppNotification[] }>('/api/market/notifications')
-      .then((payload) => { if (!cancelled) setOfferLine(nextOffer(payload.notifications || [])); })
-      .catch(() => { if (!cancelled) setOfferLine(null); });
+      .then((payload) => {
+        if (cancelled) return;
+        const offers = rankedOffers(payload.notifications || []);
+        setOfferLine(offers[0] || null);
+        setOfferCount(offers.length);
+      })
+      .catch(() => { if (!cancelled) { setOfferLine(null); setOfferCount(0); } });
     return () => { cancelled = true; };
   }, [books, home]);
 
@@ -1495,7 +1501,7 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
           <p className="mt-1.5 text-[13px] font-semibold text-slate-400">{formatDay(lineDay)}</p>
         )}
         {!inAccount && view === 'general' && (
-          <div className="flex gap-4">
+          <div className="inline-flex rounded-full bg-white p-1 ring-1 ring-slate-200/80 dark:bg-white/10 dark:ring-white/10">
             {([['line', 'Línea'], ['ring', 'Reparto']] as const).map(([id, label]) => (
               <button
                 key={id}
@@ -1505,7 +1511,7 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
                   setChart(id);
                   localStorage.setItem('pat_chart', id);
                 }}
-                className={cn('text-[13px] font-semibold', chart === id ? 'text-slate-950 dark:text-white' : 'text-slate-400')}
+                className={cn('rounded-full px-3 py-1 text-[13px] font-semibold', chart === id ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950' : 'text-slate-500')}
               >
                 {label}
               </button>
@@ -1533,8 +1539,8 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
           </button>
         )}
         {!inAccount && offerLine && (
-          <button type="button" onClick={() => openOffer(offerLine)} className="text-left text-[13px] font-semibold text-slate-500">
-            {hidden ? 'Hay una oferta.' : offerLine.priceEur == null ? `Oferta, ${offerLine.title.split(' por debajo de ')[0] || offerLine.title}` : `Oferta, ${offerLine.title.split(' por debajo de ')[0] || offerLine.title}, ${formatEur(offerLine.priceEur)}`}
+          <button type="button" onClick={() => openOffer(offerLine)} className="truncate text-left text-[13px] font-semibold text-slate-500">
+            {hidden ? (offerCount > 1 ? `${offerCount} ofertas` : 'Hay una oferta') : offerCount > 1 ? `${offerCount} ofertas, desde ${offerLine.priceEur == null ? '—' : formatEur(offerLine.priceEur)}` : `Oferta, ${(offerLine.title.split(' por debajo de ')[0] || offerLine.title).replace(/^Oferta:\s*/, '')}${offerLine.priceEur == null ? '' : `, ${formatEur(offerLine.priceEur)}`}`}
           </button>
         )}
         {!inAccount && data?.variation.available && data.variation.amount != null && data.contributions.complete && (
@@ -1728,7 +1734,6 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
         data.series.length > 1 ? (
           <CashChart
             quiet
-            tall
             tone="ink"
             hidden={hidden}
             points={data.series.map((point) => ({ day: point.day, eur: point.eur }))}

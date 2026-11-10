@@ -206,6 +206,8 @@ export interface AppNotification {
   changePct: number | null;
   priceEur?: number | null;
   floatValue?: number | null;
+  paintSeed?: number | null;
+  referenceEur?: number | null;
   image?: string | null;
   url?: string | null;
   read: boolean;
