@@ -1094,8 +1094,16 @@ export function Market({ focusListing, focusTick = 0 }: { focusListing?: string 
 
   return (
     <div className="relative mx-auto min-w-0 max-w-5xl space-y-5">
-      <div className="sticky top-0 z-30 -mx-3 flex flex-col gap-1 bg-[var(--app-bg)] px-3 py-2 sm:-mx-4 sm:px-4 md:-mx-8 md:px-8">
-        <div className="flex items-center gap-2">
+      <div
+        className="sticky -top-2 z-30 -mx-3 -mt-2 flex flex-col gap-1.5 px-3 pb-3 pt-4 sm:-mx-4 sm:px-4 md:-mx-8 md:px-8"
+        style={{ background: `color-mix(in srgb, ${market === 'all' ? '#8e8e93' : tone?.accent || '#8e8e93'} 14%, var(--app-bg))` }}
+      >
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 top-full h-4"
+          style={{ background: `linear-gradient(to bottom, color-mix(in srgb, ${market === 'all' ? '#8e8e93' : tone?.accent || '#8e8e93'} 14%, var(--app-bg)), transparent)` }}
+        />
+        <div className="flex min-w-0 items-center gap-2">
           {market !== 'all' && (
             <button type="button" onClick={back} className="inline-flex shrink-0 items-center gap-0.5 text-sm font-semibold text-slate-500" aria-label={skinDesk ? 'Volver a CS2' : 'Volver a mercados'}>
               <ChevronLeft size={16} />
@@ -1117,13 +1125,11 @@ export function Market({ focusListing, focusTick = 0 }: { focusListing?: string 
             </button>
           </div>
         </div>
-        <p className="text-[13px] font-semibold text-slate-400">
+        <p className="truncate text-[13px] font-semibold text-slate-500 dark:text-slate-400">
           {fresh ? `En vivo · ${formatAgo(data.updatedAt)}` : `Último intento ${formatAgo(data.updatedAt)}`}
         </p>
-      </div>
       {searchOn && (
-        <div className="relative z-20 -mx-1 px-1">
-          <div className="relative">
+          <div className="relative mt-1">
             <Input
               icon={<Search size={16} />}
               value={query}
@@ -1143,8 +1149,8 @@ export function Market({ focusListing, focusTick = 0 }: { focusListing?: string 
               <SkinSuggest query={needle} onMatch={setSkinMatch} onPick={openSkin} />
             )}
           </div>
-        </div>
       )}
+      </div>
       {data.warning && !quietWarning(data.warning) && !skinDesk && <p className="rounded-2xl bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">{data.warning}</p>}
       {desk === 'saved' && (
         <Modal title="Me interesa" onClose={() => setDesk(null)}>
