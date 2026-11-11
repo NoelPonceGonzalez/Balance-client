@@ -213,7 +213,7 @@ export function Shell({
           <button
             type="button"
             onClick={onTicket}
-            aria-label="Fotografiar un tique"
+            aria-label="Hacer una foto"
             className="absolute left-1/2 top-1/2 z-10 grid h-10 w-10 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-slate-950 text-white dark:bg-white dark:text-slate-950"
           >
             <Camera size={18} strokeWidth={1.75} />

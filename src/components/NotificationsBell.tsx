@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { AnimatePresence, motion } from 'motion/react';
 import { Bell } from 'lucide-react';
 import { api } from '@/lib/api';
 import { activatePush } from '@/lib/device';
@@ -14,6 +15,12 @@ function OfferThumb({ item }: { item: AppNotification }) {
   const src = sources[miss];
   if (!src) return null;
   return <img key={src} src={src} alt="" referrerPolicy="no-referrer" decoding="async" onError={() => setMiss((value) => value + 1)} className="h-10 w-14 shrink-0 object-contain" />;
+}
+
+const EASE_OUT = [0.16, 1, 0.3, 1] as const;
+
+function prefersStill() {
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
 
 function noticeKind(item: AppNotification): string {
@@ -67,21 +74,37 @@ export function NotificationsBell({ align = 'left', onDue, onPlan, onOffer, onLi
     };
   }, [permission, open]);
 
+  const place = () => {
+    const button = buttonRef.current;
+    if (!button) return null;
+    const rect = button.getBoundingClientRect();
+    const width = Math.min(320, window.innerWidth - 24);
+    const left = align === 'right' ? Math.max(12, rect.right - width) : Math.min(rect.right + 12, window.innerWidth - width - 12);
+    const top = align === 'right' ? rect.bottom + 8 : rect.top;
+    return { top, left };
+  };
+
   useEffect(() => {
     if (!open) return;
-    const place = () => {
-      const button = buttonRef.current;
-      if (!button) return;
-      const rect = button.getBoundingClientRect();
-      const width = Math.min(320, window.innerWidth - 24);
-      const left = align === 'right' ? Math.max(12, rect.right - width) : Math.min(rect.right + 12, window.innerWidth - width - 12);
-      const top = align === 'right' ? rect.bottom + 8 : rect.top;
-      setSpot({ top, left });
+    const update = () => {
+      const next = place();
+      if (next) setSpot(next);
     };
-    place();
-    window.addEventListener('resize', place);
-    return () => window.removeEventListener('resize', place);
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
   }, [open, align]);
+
+  const toggle = () => {
+    if (open) {
+      setOpen(false);
+      return;
+    }
+    const next = place();
+    if (!next) return;
+    setSpot(next);
+    setOpen(true);
+  };
 
   const unread = items.filter((item) => !item.read).length;
 
@@ -96,10 +119,33 @@ export function NotificationsBell({ align = 'left', onDue, onPlan, onOffer, onLi
     setPhone(message);
   };
 
-  const panel = open && spot ? (
-    <>
-    <button type="button" className="fixed inset-0 z-[65] cursor-default" aria-label="Cerrar avisos" onClick={() => setOpen(false)} />
-    <div className="fixed z-[70] w-[min(20rem,calc(100vw-1.5rem))] rounded-3xl border border-slate-200 bg-white p-3 shadow-2xl dark:border-slate-800 dark:bg-slate-950" style={{ top: spot.top, left: spot.left }}>
+  const still = prefersStill();
+  const fromBell = align === 'right' ? -8 : 8;
+  const panel = (
+    <AnimatePresence>
+    {open && spot && (
+    <motion.button
+      key="avisos-fondo"
+      type="button"
+      className="fixed inset-0 z-[65] cursor-default"
+      aria-label="Cerrar avisos"
+      onClick={() => setOpen(false)}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: still ? 0 : 0.2 }}
+    />
+    )}
+    {open && spot && (
+    <motion.div
+      key="avisos"
+      className="fixed z-[70] w-[min(20rem,calc(100vw-1.5rem))] rounded-3xl border border-slate-200 bg-white p-3 shadow-2xl dark:border-slate-800 dark:bg-slate-950"
+      style={{ top: spot.top, left: spot.left, transformOrigin: align === 'right' ? 'top right' : 'top left' }}
+      initial={still ? false : { opacity: 0, y: fromBell, scale: 0.96 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={still ? { opacity: 0 } : { opacity: 0, y: fromBell / 2, scale: 0.98, transition: { duration: 0.2, ease: [0.4, 0, 0.2, 1] } }}
+      transition={still ? { duration: 0 } : { duration: 0.34, ease: EASE_OUT }}
+    >
       <div className="mb-2 flex items-center justify-between gap-2">
         <p className="font-black">Avisos</p>
         {unread > 0 && <button type="button" onClick={() => void markRead()} className="text-xs font-semibold text-slate-900 dark:text-white">Marcar leídos</button>}
@@ -174,17 +220,18 @@ export function NotificationsBell({ align = 'left', onDue, onPlan, onOffer, onLi
           );
         })}
       </div>
-    </div>
-    </>
-  ) : null;
+    </motion.div>
+    )}
+    </AnimatePresence>
+  );
 
   return (
     <div className="relative">
-      <button ref={buttonRef} type="button" onClick={() => setOpen((value) => !value)} className="relative rounded-2xl p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-900" aria-label="Avisos">
+      <button ref={buttonRef} type="button" onClick={toggle} className="relative rounded-2xl p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-900" aria-label="Avisos" aria-expanded={open}>
         <Bell size={18} />
         {unread > 0 && <span className="absolute right-1 top-1 grid h-4 min-w-4 place-items-center rounded-full bg-[#ea3943] px-1 text-[10px] font-black text-white">{unread}</span>}
       </button>
-      {panel && createPortal(panel, document.body)}
+      {createPortal(panel, document.body)}
     </div>
   );
 }

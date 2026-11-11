@@ -4,10 +4,13 @@ import { AnimatePresence, animate, motion, useMotionValue, type AnimationPlaybac
 import { ModalClose, modalOverlayClass, modalPanelClass } from '@/components/Modal';
 import { api, ApiError } from '@/lib/api';
 import { formatDay, formatEur } from '@/lib/format';
-import { glide, jelly, quickOut } from '@/lib/motion';
+import { glide } from '@/lib/motion';
 import { skinArt, skinArtSteam } from '@/lib/skin-art';
 import { cn } from '@/lib/utils';
 import type { AppNotification } from '@/lib/types';
+
+const rise = { type: 'spring' as const, stiffness: 260, damping: 32, mass: 0.92 };
+const fadeOut = { duration: 0.22, ease: [0.4, 0, 0.2, 1] as const };
 
 const SKIP = 'pat_offer_skip';
 const PASSED = 'pat_offer_passed';
@@ -495,7 +498,8 @@ export function OfferNotice({ focused = null, onFocusedClose }: { focused?: AppN
             onPointerDown={(event) => { if (event.target === event.currentTarget) leave(); }}
           initial={still ? false : { opacity: 0 }}
           animate={{ opacity: 1 }}
-          exit={still ? undefined : { opacity: 0, transition: quickOut }}
+          exit={still ? undefined : { opacity: 0, transition: fadeOut }}
+          transition={still ? { duration: 0 } : { duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
         >
           <motion.div
             key={shown.id}
@@ -509,10 +513,10 @@ export function OfferNotice({ focused = null, onFocusedClose }: { focused?: AppN
             onPointerCancel={drop}
             className={cn(modalPanelClass, 'max-w-sm cursor-grab touch-none active:cursor-grabbing')}
             onClick={(event) => event.stopPropagation()}
-            initial={still || dragOn ? false : nudge === 0 ? { opacity: 0, y: 28, scale: 0.96 } : { opacity: 1, x: Math.sign(nudge) * 48 }}
+            initial={still || dragOn ? false : nudge === 0 ? { opacity: 0, y: 14, scale: 0.985 } : { opacity: 1, x: Math.sign(nudge) * 36 }}
             animate={dragOn ? { opacity: 1, scale: 1 } : { opacity: 1, x: 0, y: 0, scale: 1 }}
-            exit={still ? undefined : { opacity: 0, transition: quickOut }}
-            transition={still || dragOn ? { duration: 0 } : nudge === 0 ? { ...jelly, opacity: { duration: 0.18 } } : glide}
+            exit={still ? undefined : { opacity: 0, scale: 0.985, transition: fadeOut }}
+            transition={still || dragOn ? { duration: 0 } : nudge === 0 ? { ...rise, opacity: { duration: 0.24, ease: [0.22, 1, 0.36, 1] } } : glide}
           >
             <div className="flex items-start justify-between gap-3">
               <h2 id="offer-notice-title" className="min-w-0 text-[17px] font-black tracking-tight">{name}</h2>

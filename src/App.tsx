@@ -104,7 +104,6 @@ export default function App() {
   };
 
   useEffect(() => {
-    localStorage.removeItem('pat_login_id');
     restoreSession();
     const params = new URLSearchParams(window.location.search);
     const fromUrl = params.get('junta') || '';
