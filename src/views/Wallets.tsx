@@ -219,6 +219,52 @@ function matchesActivity(label: string, note: string, amount: number, query: str
   return plain.startsWith(text) || String(abs).startsWith(numeric) || Math.abs(abs - Number(numeric)) < 0.001;
 }
 
+const BOOK_IN = new Set(['deposit', 'income', 'reward', 'sell']);
+const BOOK_OUT = new Set(['withdrawal', 'expense', 'fee', 'buy']);
+const BOOK_NAME: Record<string, string> = {
+  withdrawal: 'Retirada',
+  deposit: 'Depósito',
+  expense: 'Gasto',
+  income: 'Ingreso',
+  fee: 'Comisión',
+  buy: 'Compra',
+  sell: 'Venta',
+  reward: 'Recompensa',
+  transfer: 'Transferencia',
+  adjustment: 'Ajuste',
+};
+
+interface BookedMove {
+  _id: string;
+  type: string;
+  date: string;
+  amount: number;
+  description?: string;
+  accountId: string;
+  counterAccountId?: string | null;
+  direction?: 'in' | 'out' | null;
+  applyToBalances?: boolean;
+}
+
+function bookedDelta(move: BookedMove, accountId: string): number | null {
+  if (move.applyToBalances === false) return null;
+  const amount = Math.abs(move.amount);
+  if (!(amount > 0)) return null;
+  if (move.type === 'transfer') {
+    if (String(move.accountId) === accountId) return -amount;
+    if (String(move.counterAccountId || '') === accountId) return amount;
+    return null;
+  }
+  if (move.type === 'adjustment') {
+    if (move.direction === 'in') return amount;
+    if (move.direction === 'out') return -amount;
+    return null;
+  }
+  if (BOOK_IN.has(move.type)) return amount;
+  if (BOOK_OUT.has(move.type)) return -amount;
+  return null;
+}
+
 function cashPath(cash: number, events: { day: string; amount: number; absorbed?: boolean; open?: boolean }[], today: string): LinePoint[] {
   const ordered = [...events].filter((row) => !row.open).sort((a, b) => a.day.localeCompare(b.day));
   if (!ordered.length) return [];
@@ -310,7 +356,7 @@ function accentFor(label: string): string {
   return ACCENT_PALETTE[hash % ACCENT_PALETTE.length];
 }
 
-export function CashChart({ points, now, hidden, base = null, spent = null, label, showPct = false, beside = false, tall = false, plain = false, quiet = false, tone, beforePlot, onValue, onDay, onMove, emptyText = 'La gráfica aparece con el primer movimiento.' }: { points: LinePoint[]; now: number; hidden: boolean; base?: number | null; spent?: number | null; label?: string; showPct?: boolean; beside?: boolean; tall?: boolean; plain?: boolean; quiet?: boolean; tone?: 'ink' | string; beforePlot?: ReactNode; onValue?: (eur: number) => void; onDay?: (day: string | null) => void; onMove?: (move: { amount: number; pct: number | null } | null) => void; emptyText?: string }) {
+export function CashChart({ points, now, hidden, base = null, spent = null, label, showPct = false, beside = false, tall = false, plain = false, quiet = false, showNow = false, tone, beforePlot, onValue, onDay, onMove, emptyText = 'La gráfica aparece con el primer movimiento.' }: { points: LinePoint[]; now: number; hidden: boolean; base?: number | null; spent?: number | null; label?: string; showPct?: boolean; beside?: boolean; tall?: boolean; plain?: boolean; quiet?: boolean; showNow?: boolean; tone?: 'ink' | string; beforePlot?: ReactNode; onValue?: (eur: number) => void; onDay?: (day: string | null) => void; onMove?: (move: { amount: number; pct: number | null } | null) => void; emptyText?: string }) {
   const fillId = `fill-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
   const pastId = `${fillId}-past`;
   const strokeRef = useRef<SVGPathElement>(null);
@@ -449,7 +495,11 @@ export function CashChart({ points, now, hidden, base = null, spent = null, labe
         ) : null;
         const since = moved ? (focus ? formatDay(focus.day) : reference != null ? 'Desde la compra' : `Desde ${formatDay(line[0].day)}`) : '';
         if (quiet) {
-          const here = onMove ? null : delta;
+          const here = showNow ? (
+            <p className={cn('text-[1.65rem] font-semibold leading-none tabular-nums', hidden ? 'text-slate-400' : toneClass(now))}>
+              {hidden ? '*****' : formatEur(now)}
+            </p>
+          ) : onMove ? null : delta;
           if (!label && !here) return null;
           return (
             <div>
@@ -898,6 +948,7 @@ const card = 'rounded-[24px] border border-white/70 bg-white/80 p-4 dark:border-
 
 export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, onOpen, onAdd, onSections, onSaved, onKeep, onEditExtra, onFigure, onDay, onMove }: { accounts: CarteraAccount[]; hidden: boolean; beat?: number; openId: string | null; paneSlot?: HTMLElement | null; onOpen: (id: string | null) => void; onAdd?: (accountKey: string, section?: string) => void; onSections?: (accountKey: string, sections: string[]) => Promise<void>; onSaved?: () => Promise<void> | void; onKeep?: (name: string, amount: number) => void; onEditExtra?: (id: string) => void; onFigure?: (amount: number | null) => void; onDay?: (day: string | null) => void; onMove?: (move: { amount: number; pct: number | null } | null) => void }) {
   const [notes, setNotes] = useState<WalletRow[]>([]);
+  const [booked, setBooked] = useState<BookedMove[]>([]);
   const [error, setError] = useState('');
   const [entryDraft, setEntryDraft] = useState<EntryDraft | null>(null);
   const [sheet, setSheet] = useState<VerbId | null>(null);
@@ -958,7 +1009,7 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
     const opened = accounts.find((account) => account.key === openId);
     const cashSide = opened?.sides.find((side) => side.group === 'cash');
     const hasBook = opened?.sides.some((side) => side.group !== 'cash' && side.total > 1);
-    const opensCash = Boolean(opened && !opened.extras && cashSide && (cashSide.total >= 1 || !hasBook));
+    const opensCash = Boolean(opened && !opened.extras && cashSide && (Math.abs(cashSide.total) >= 0.01 || !hasBook));
     setPane(opensCash ? 0 : 1);
     setFocus('all');
     setAsset(null);
@@ -968,6 +1019,24 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
   }, [openId]);
 
   const current = accounts.find((account) => account.key === openId) || null;
+  const openCash = current?.cash;
+  useEffect(() => {
+    if (!openId || openId === 'extras') {
+      setBooked([]);
+      return;
+    }
+    let cancelled = false;
+    api<{ movements: BookedMove[] }>(`/api/movements?accountId=${encodeURIComponent(openId)}`)
+      .then((data) => {
+        if (!cancelled) setBooked(data.movements || []);
+      })
+      .catch(() => {
+        if (!cancelled) setBooked([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [openId, openCash]);
   const book = notes.find((wallet) => String(wallet.accountId) === openId);
   const lines = [...(book?.entries || [])].sort((a, b) => b.date.localeCompare(a.date) || b._id.localeCompare(a._id));
   const statement = (() => {
@@ -1018,7 +1087,36 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
         automatic: false,
         image: line.image || null,
       })),
-    ].sort((a, b) => a.day.localeCompare(b.day) || a.label.localeCompare(b.label));
+    ];
+    const taken = rows.map((row) => ({ day: row.day, amount: Math.abs(row.amount), label: fold(row.label), used: false }));
+    for (const move of booked) {
+      const delta = bookedDelta(move, current.key);
+      if (delta == null) continue;
+      const day = String(move.date || '').slice(0, 10);
+      const desc = fold(move.description || '');
+      const hit = taken.find((item) => !item.used && item.day === day && Math.abs(item.amount - Math.abs(delta)) < 0.02 && desc.length > 0 && item.label.length > 0 && (desc.includes(item.label) || item.label.includes(desc)));
+      if (hit) {
+        hit.used = true;
+        continue;
+      }
+      const label = (move.description || '').trim() || BOOK_NAME[move.type] || 'Movimiento';
+      rows.push({
+        id: `move:${move._id}`,
+        day,
+        label,
+        name: label,
+        origin: '',
+        amount: delta,
+        source: 'move' as const,
+        key: '',
+        surprise: false,
+        absorbed: true,
+        open: false,
+        automatic: false,
+        image: null,
+      });
+    }
+    rows.sort((a, b) => a.day.localeCompare(b.day) || a.label.localeCompare(b.label));
     let balance = current.cash;
     const walked = rows.map((row) => {
       if (!row.absorbed && !row.open) balance = Math.round((balance + row.amount) * 100) / 100;
@@ -1141,7 +1239,7 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
     .flatMap((side) => side.items.flatMap((item) => (item.moves || []).map((move) => ({ ...move, label: item.label, image: item.image }))))
     .sort((a, b) => b.at.localeCompare(a.at) || a.label.localeCompare(b.label));
   const cashRows: Activity[] = statement.map((row) => {
-    const note = row.absorbed ? `${formatDay(row.day)} · ${row.open ? 'Falta confirmarlo' : 'ya en el efectivo'}` : `${formatDay(row.day)} · queda ${money(row.balance, hidden)}`;
+    const note = row.source === 'move' ? formatDay(row.day) : row.absorbed ? `${formatDay(row.day)} · ${row.open ? 'Falta confirmarlo' : 'ya en el efectivo'}` : `${formatDay(row.day)} · queda ${money(row.balance, hidden)}`;
     return {
       id: row.id,
       day: row.day,
@@ -1150,6 +1248,10 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
       amount: row.amount,
       image: row.image,
       onOpen: () => {
+        if (row.source === 'move') {
+          setDetail({ label: row.label, note, amount: row.amount, image: row.image });
+          return;
+        }
         if (row.source === 'wallet' || row.key) {
           setEntryMore(true);
           setEntryDraft({
@@ -1398,6 +1500,7 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
                 key={current.key}
                 label="Disponible"
                 quiet
+                showNow
                 onValue={setLive}
                 onDay={onDay}
                 hidden={hidden}

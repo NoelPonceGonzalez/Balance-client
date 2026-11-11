@@ -451,12 +451,23 @@ function makeSide(group: string, title: string, items: AccountPart[], section?: 
   return { group, title, items, total, invested, gain, icon: section?.icon, hint: section?.hint };
 }
 
-function accountSides(parts: AccountPart[], name: string): Side[] {
+function accountSides(parts: AccountPart[], name: string, balance = 0): Side[] {
   const products = accountProducts(name);
   const skins = Boolean(products.auto);
   const sides: Side[] = [];
   const cash = parts.filter((part) => (part.group || 'other') === 'cash');
   if (cash.length) sides.push(makeSide('cash', products.cash?.title || 'Líquido', cash));
+  else if (products.cash) {
+    sides.push(makeSide('cash', products.cash.title, [{
+      label: products.cash.title,
+      eur: Math.round(balance * 100) / 100,
+      group: 'cash',
+      costEur: null,
+      detail: '',
+      image: null,
+      id: null,
+    }]));
+  }
   const placed = new Map<string, AccountPart[]>();
   const loose = new Map<PartGroup, AccountPart[]>();
   for (const part of parts) {
@@ -1133,12 +1144,14 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
     return data.accounts.map((account) => {
       const gain = accountGain(account, data.pnl);
       const name = account.platform || account.name;
+      const sides = accountSides(account.parts || [], name, account.balance);
+      const covered = Math.round(sides.reduce((sum, side) => sum + side.total, 0) * 100) / 100;
       return {
         key: account.id,
         name,
         logoName: name,
         color: brandColor(name),
-        value: account.valueEur,
+        value: account.valueEur == null ? covered : Math.max(account.valueEur, covered),
         cash: account.balance,
         planId: account.planId || null,
         flows: account.flows || [],
@@ -1148,7 +1161,7 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
         kind: account.kind,
         currency: account.currency,
         balance: account.balance,
-        sides: accountSides(account.parts || [], name),
+        sides,
         sections: account.sections || [],
         gainEur: gain?.eur ?? null,
         gainPct: gain?.percent ?? null,
@@ -2025,8 +2038,8 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
                             {side.group === 'cash' && (
                               <div className="flex items-center justify-between gap-3 py-3.5">
                                 <span className="text-[15px] font-bold">{side.title}</span>
-                                <span className="text-[15px] font-semibold tabular-nums">
-                                  <RisingAmount value={side.total} hidden={hidden} />
+                                <span className={cn('text-[15px] font-semibold tabular-nums', side.total < 0 && 'text-rose-600')}>
+                                  <RisingAmount value={side.total} hidden={hidden} signed={side.total < 0} />
                                 </span>
                               </div>
                             )}

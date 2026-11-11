@@ -3,9 +3,9 @@ import { createPortal } from 'react-dom';
 import { Camera, ChevronDown, ImagePlus, Plus, X } from 'lucide-react';
 import { motion } from 'motion/react';
 import { modalPanelClass } from '@/components/Modal';
-import { glide, softSpring } from '@/lib/motion';
+import { softSpring } from '@/lib/motion';
 import { PlatformLogo } from '@/components/PlatformLogo';
-import { api } from '@/lib/api';
+import { api, ApiError } from '@/lib/api';
 import { classifyLine, fold, groupForKind, isCashName, isLiquidName, looksLikeWallet, paintLine, readWalletText, type PhotoClass, type PhotoRead } from '@/lib/read-wallet';
 import { cachedWallets, loadWallets, type WalletAccount } from '@/lib/wallet-accounts';
 import { PLATFORMS, type PlatformPreset } from '@/lib/platforms';
@@ -80,6 +80,56 @@ function prefersStill(): boolean {
   return typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
 
+function AcceptButton({
+  mark,
+  disabled,
+  onClick,
+}: {
+  mark: 'idle' | 'spin' | 'ok' | 'bad';
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  const still = prefersStill();
+  const live = mark !== 'idle';
+  const label = mark === 'spin' ? 'Guardando' : mark === 'ok' ? 'Guardado' : mark === 'bad' ? 'No se ha guardado' : 'Aceptar';
+  return (
+    <button
+      type="button"
+      disabled={disabled || live}
+      onClick={onClick}
+      aria-live="polite"
+      aria-label={label}
+      className={cn('relative grid h-[52px] w-full place-items-center overflow-hidden rounded-full bg-slate-950 text-[15px] font-semibold text-white dark:bg-white dark:text-slate-950', disabled && !live && 'opacity-40')}
+    >
+      <motion.span animate={{ opacity: live ? 0 : 1, y: live ? 10 : 0 }} transition={{ duration: still ? 0 : 0.22 }} className={cn(live && 'pointer-events-none')}>
+        Aceptar
+      </motion.span>
+      <motion.span aria-hidden className="absolute grid place-items-center" initial={false} animate={{ opacity: live ? 1 : 0, scale: live ? 1 : 0.7 }} transition={still ? { duration: 0 } : { type: 'spring', stiffness: 460, damping: 28 }}>
+        <svg viewBox="0 0 32 32" className="h-7 w-7">
+          <motion.circle
+            cx="16"
+            cy="16"
+            r="11"
+            fill="none"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            className={mark === 'ok' ? 'stroke-emerald-300' : mark === 'bad' ? 'stroke-rose-300' : 'stroke-current'}
+            style={{ transformOrigin: '16px 16px' }}
+            animate={mark === 'spin' ? { rotate: 360, pathLength: 0.26 } : { rotate: 0, pathLength: mark === 'idle' ? 0 : 1 }}
+            transition={mark === 'spin' ? { rotate: { duration: still ? 0 : 0.85, repeat: Infinity, ease: 'linear' }, pathLength: { duration: 0.2 } } : { duration: still ? 0 : 0.34, ease: [0.22, 1, 0.36, 1] }}
+          />
+          {mark === 'ok' && (
+            <motion.path d="M10.2 16.5 14.1 20.2 21.8 12.2" fill="none" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="stroke-emerald-300" initial={{ pathLength: 0 }} animate={{ pathLength: 1 }} transition={{ duration: still ? 0 : 0.32, delay: still ? 0 : 0.12 }} />
+          )}
+          {mark === 'bad' && (
+            <motion.path d="M12 12 20 20 M20 12 12 20" fill="none" strokeWidth="2.2" strokeLinecap="round" className="stroke-rose-300" initial={{ pathLength: 0 }} animate={{ pathLength: 1 }} transition={{ duration: still ? 0 : 0.28, delay: still ? 0 : 0.08 }} />
+          )}
+        </svg>
+      </motion.span>
+    </button>
+  );
+}
+
 function ChipRail({ children }: { children: ReactNode }) {
   const frame = useRef<HTMLDivElement>(null);
   const moved = useRef(false);
@@ -104,12 +154,15 @@ function ChipRail({ children }: { children: ReactNode }) {
       lastTime = event.timeStamp;
       velocity = 0;
       cancelAnimationFrame(coast);
-      try { node.setPointerCapture(event.pointerId); } catch { /* el gesto sintético no se puede capturar */ }
     };
     const move = (event: PointerEvent) => {
       if (!active) return;
       const dx = event.clientX - originX;
-      if (Math.abs(dx) > 6) moved.current = true;
+      if (Math.abs(dx) <= 8) return;
+      if (!moved.current) {
+        moved.current = true;
+        try { node.setPointerCapture(event.pointerId); } catch { /* el gesto sintético no se puede capturar */ }
+      }
       const dt = event.timeStamp - lastTime;
       if (dt > 0) velocity = (event.clientX - lastX) / dt;
       lastX = event.clientX;
@@ -510,7 +563,7 @@ export function TicketCam({
   const [payer, setPayer] = useState(userId);
   const [accountId, setAccountId] = useState('');
   const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [mark, setMark] = useState<'idle' | 'spin' | 'ok' | 'bad'>('idle');
 
   useEffect(() => {
     let cancel = false;
@@ -791,13 +844,14 @@ export function TicketCam({
       setError('Elige el banco del que sale.');
       return;
     }
-    setBusy(true);
+    setMark('spin');
     setError('');
     try {
       const receipt = await fitReceipt(photo);
       if (!receipt || receipt.length > 500_000) {
         setError('La foto pesa demasiado.');
-        setBusy(false);
+        setMark('bad');
+        window.setTimeout(() => setMark('idle'), 1100);
         return;
       }
       if (where === 'personal') {
@@ -819,10 +873,12 @@ export function TicketCam({
           }),
         });
       }
-      onSaved();
+      setMark('ok');
+      window.setTimeout(onSaved, 720);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se ha podido guardar.');
-      setBusy(false);
+      setMark('bad');
+      window.setTimeout(() => setMark('idle'), 1100);
     }
   };
 
@@ -893,7 +949,6 @@ export function TicketCam({
     const broken = filled.some((line) => {
       const amount = readAmount(line.amount);
       if (!line.name.trim() || !Number.isFinite(amount) || amount === 0) return true;
-      if (amount < 0 && !isLiquidName(line.name) && !line.cash) return true;
       if (line.gain.trim() && !Number.isFinite(readAmount(line.gain))) return true;
       return false;
     });
@@ -903,13 +958,13 @@ export function TicketCam({
     }
     const positions = filled.filter((line) => readAmount(line.amount) > 0 && !isCashName(line.name) && !line.cash);
     const cash = filled.filter((line) => isCashName(line.name));
-    const flows = filled.filter((line) => line.cash);
+    const flows = filled.filter((line) => line.cash || (readAmount(line.amount) < 0 && !isCashName(line.name)));
     const pulls = filled.filter((line) => readAmount(line.amount) < 0 && isLiquidName(line.name) && !isCashName(line.name));
     const liquidIn = cash.filter((line) => readAmount(line.amount) > 0);
     const liquidOut = cash.filter((line) => readAmount(line.amount) < 0);
     const chosen = accounts.find((account) => account.id === walletId);
     if ((!chosen && !fresh) || !filled.length) return;
-    setBusy(true);
+    setMark('spin');
     setError('');
     try {
       let target = chosen?.id || '';
@@ -920,6 +975,7 @@ export function TicketCam({
       if (flows.length) pocket = Math.max(0, Math.round((pocket + flows.reduce((sum, line) => sum + readAmount(line.amount), 0)) * 100) / 100);
       const touchedCash = liquidIn.length > 0 || liquidOut.length > 0 || flows.length > 0;
       if (!chosen && fresh) {
+        const onlyMoves = flows.length > 0 && positions.length === 0 && pulls.length === 0;
         const onlyBalance = (fresh.tracking === 'balance' || flows.length > 0) && positions.length === 0 && pulls.length === 0;
         const created = await api<{ account: { _id: string } }>('/api/accounts', {
           method: 'POST',
@@ -929,22 +985,75 @@ export function TicketCam({
             kind: fresh.kind,
             tracking: onlyBalance ? 'balance' : 'positions',
             currency: 'EUR',
-            balance: onlyBalance ? (flows.length ? pocket : Math.max(0, filled[0] ? readAmount(filled[0].amount) : 0)) : (touchedCash ? pocket : 0),
+            balance: onlyMoves ? 0 : onlyBalance ? Math.max(0, filled[0] ? readAmount(filled[0].amount) : 0) : (touchedCash ? pocket : 0),
           }),
         });
         target = String(created.account._id);
         tracking = onlyBalance ? 'balance' : 'positions';
-        if (tracking === 'balance') {
-          onSaved();
-          return;
+      }
+      if (flows.length && positions.length === 0) {
+        const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+        const listed = await api<{ movements: { type: string; date: string; amount: number; description?: string; accountId: string }[] }>(
+          `/api/movements?accountId=${encodeURIComponent(target)}&from=${day}&to=${day}`,
+        );
+        const seen = new Map<string, number>();
+        const flowKey = (type: string, amount: number, description: string) =>
+          `${type}|${amount.toFixed(2)}|${description.trim().toLowerCase().replace(/\s+/g, ' ')}`;
+        for (const move of listed.movements || []) {
+          if (move.date.slice(0, 10) !== day || String(move.accountId) !== target) continue;
+          const key = flowKey(move.type, move.amount, move.description || '');
+          seen.set(key, (seen.get(key) || 0) + 1);
         }
-      } else if ((tracking === 'balance' || flows.length > 0) && positions.length === 0) {
+        let failed: unknown = null;
+        for (const line of flows) {
+          const amount = readAmount(line.amount);
+          if (!Number.isFinite(amount) || amount === 0) continue;
+          const type = amount < 0 ? 'withdrawal' : 'deposit';
+          const key = flowKey(type, Math.abs(amount), line.name);
+          const already = seen.get(key) || 0;
+          if (already > 0) {
+            seen.set(key, already - 1);
+            continue;
+          }
+          try {
+            await api('/api/movements', {
+              method: 'POST',
+              body: JSON.stringify({
+                type,
+                date: day,
+                amount: Math.abs(amount),
+                currency: 'EUR',
+                description: line.name.trim(),
+                accountId: target,
+                applyToBalances: true,
+                confirmDuplicate: true,
+              }),
+            });
+            seen.set(key, 0);
+          } catch (err) {
+            if (err instanceof ApiError && err.code === 'duplicate') continue;
+            failed = failed || err;
+          }
+        }
+        if (failed) throw failed;
+        setMark('ok');
+        window.setTimeout(onSaved, 720);
+        return;
+      }
+      if (!chosen && fresh && tracking === 'balance') {
+        setMark('ok');
+        window.setTimeout(onSaved, 720);
+        return;
+      }
+      if (chosen && tracking === 'balance' && positions.length === 0) {
         const delta = pulls.reduce((sum, line) => sum + readAmount(line.amount), 0);
         const next = Math.max(0, Math.round((pocket + delta) * 100) / 100);
         await api(`/api/accounts/${target}`, { method: 'PATCH', body: JSON.stringify({ balance: next }) });
-        onSaved();
+        setMark('ok');
+        window.setTimeout(onSaved, 720);
         return;
-      } else if (tracking === 'balance') {
+      }
+      if (tracking === 'balance') {
         await api(`/api/accounts/${target}`, { method: 'PATCH', body: JSON.stringify({ tracking: 'positions', ...(touchedCash ? { balance: pocket } : {}) }) });
       } else if (touchedCash) {
         await api(`/api/accounts/${target}`, { method: 'PATCH', body: JSON.stringify({ balance: pocket }) });
@@ -1004,10 +1113,12 @@ export function TicketCam({
         const next = Math.max(0, Math.round((pocket + loose) * 100) / 100);
         await api(`/api/accounts/${target}`, { method: 'PATCH', body: JSON.stringify({ balance: next }) });
       }
-      onSaved();
+      setMark('ok');
+      window.setTimeout(onSaved, 720);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se ha podido guardar.');
-      setBusy(false);
+      setMark('bad');
+      window.setTimeout(() => setMark('idle'), 1100);
     }
   };
 
@@ -1087,10 +1198,10 @@ export function TicketCam({
               </div>
               <ChipRail>
                 {fresh && !accounts.some((account) => fold(account.name) === fold(fresh.name) || fold(account.platform || '') === fold(fresh.name)) && (
-                  <motion.button layout data-chip key={fresh.id} type="button" aria-pressed transition={glide} onClick={() => { setCatalog(false); setQuery(''); }} className="inline-flex shrink-0 snap-start items-center gap-2 rounded-full bg-slate-950 px-3 py-2 text-[13px] font-semibold text-white dark:bg-white dark:text-slate-950">
+                  <button data-chip key={fresh.id} type="button" aria-pressed onClick={() => { setCatalog(false); setQuery(''); }} className="inline-flex shrink-0 snap-start items-center gap-2 rounded-full bg-slate-950 px-3 py-2 text-[13px] font-semibold text-white dark:bg-white dark:text-slate-950">
                     <PlatformLogo name={fresh.name} size={22} />
                     {fresh.name}
-                  </motion.button>
+                  </button>
                 )}
                 {walletWait && accounts.length === 0 && (
                   <span className="inline-flex shrink-0 items-center rounded-full bg-slate-100 px-3 py-2 text-[13px] font-medium text-slate-400">Buscando tus carteras…</span>
@@ -1098,10 +1209,10 @@ export function TicketCam({
                 {[...accounts].sort((a, b) => Number(b.id === walletId) - Number(a.id === walletId)).map((account) => {
                   const on = walletId === account.id;
                   return (
-                    <motion.button layout data-chip key={account.id} type="button" aria-pressed={on} transition={glide} onClick={() => retitle(account.id)} className={cn('inline-flex shrink-0 snap-start items-center gap-2 rounded-full px-3 py-2 text-[13px] font-semibold', on ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950' : 'bg-slate-100 text-slate-600 dark:bg-white/10 dark:text-slate-200')}>
+                    <button data-chip key={account.id} type="button" aria-pressed={on} onClick={() => retitle(account.id)} className={cn('inline-flex shrink-0 snap-start items-center gap-2 rounded-full px-3 py-2 text-[13px] font-semibold', on ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950' : 'bg-slate-100 text-slate-600 dark:bg-white/10 dark:text-slate-200')}>
                       <PlatformLogo name={account.platform || account.name} size={22} />
                       {account.name}
-                    </motion.button>
+                    </button>
                   );
                 })}
               </ChipRail>
@@ -1170,9 +1281,7 @@ export function TicketCam({
               </div>
               <div className="shrink-0 px-5 pt-3 pb-5">
               {error && <p className="mb-3 text-sm font-medium text-rose-600">{error}</p>}
-              <button type="button" disabled={(!walletId && !fresh) || catalog || busy || reading} onClick={() => void saveWallet()} className="w-full rounded-full bg-slate-950 py-3.5 text-[15px] font-semibold text-white disabled:opacity-40 dark:bg-white dark:text-slate-950">
-                {busy ? 'Guardando…' : 'Aceptar'}
-              </button>
+              <AcceptButton mark={mark} disabled={(!walletId && !fresh) || catalog || reading} onClick={() => void saveWallet()} />
               </div>
             </motion.div>
             ) : (
@@ -1258,9 +1367,9 @@ export function TicketCam({
                 <p className="mt-3 text-[13px] font-medium text-slate-500">{other.name} lo acepta al entrar en el plan. Entonces se resta el 100% de su banco.</p>
               )}
               {error && <p className="mt-3 text-sm font-medium text-rose-600">{error}</p>}
-              <button type="button" disabled={busy || reading} onClick={() => void save()} className="mt-4 w-full rounded-full bg-slate-950 py-3.5 text-[15px] font-semibold text-white disabled:opacity-50 dark:bg-white dark:text-slate-950">
-                {busy ? 'Guardando…' : 'Aceptar'}
-              </button>
+              <div className="mt-4">
+                <AcceptButton mark={mark} disabled={reading} onClick={() => void save()} />
+              </div>
             </motion.div>
             )}
           </div>
