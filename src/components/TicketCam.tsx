@@ -6,24 +6,22 @@ import { modalPanelClass } from '@/components/Modal';
 import { glide, softSpring } from '@/lib/motion';
 import { PlatformLogo } from '@/components/PlatformLogo';
 import { api } from '@/lib/api';
-import { classifyLine, fold, groupForKind, isCashName, looksLikeWallet, readWalletText, type PhotoClass, type PhotoRead } from '@/lib/read-wallet';
+import { classifyLine, fold, groupForKind, isCashName, isLiquidName, looksLikeWallet, paintLine, readWalletText, type PhotoClass, type PhotoRead } from '@/lib/read-wallet';
+import { cachedWallets, loadWallets, type WalletAccount } from '@/lib/wallet-accounts';
 import { PLATFORMS, type PlatformPreset } from '@/lib/platforms';
 import { cn } from '@/lib/utils';
 import type { PlanRow } from '@/lib/types';
 
-interface Bank {
-  id: string;
-  name: string;
-  kind: string;
-  tracking: 'balance' | 'positions';
-  platform: string;
-}
+type Bank = WalletAccount;
 
 interface WalletLine {
   key: string;
   name: string;
   amount: string;
+  gain: string;
+  tone: '' | 'up' | 'down';
   assetClass: PhotoClass;
+  cash?: boolean;
 }
 
 interface Member {
@@ -226,9 +224,91 @@ function showAmount(value: number): string {
 }
 
 function readAmount(raw: string): number {
-  const token = raw.trim().replace(/\s/g, '');
+  const token = raw.trim().replace(/\s/g, '').replace(/−/g, '-').replace(/^\+/, '');
   if (token.includes(',')) return Number(token.replace(/\./g, '').replace(',', '.'));
   return Number(token);
+}
+
+function plainAmount(raw: string): string {
+  return raw.trim().replace(/^[+−-]\s*/, '');
+}
+
+function LineSheet({
+  line,
+  onClose,
+  onApply,
+  onRemove,
+}: {
+  line: WalletLine;
+  onClose: () => void;
+  onApply: (next: Pick<WalletLine, 'name' | 'amount' | 'gain' | 'tone'>) => void;
+  onRemove: () => void;
+}) {
+  const opening = line.gain.trim();
+  const gainNumber = readAmount(opening);
+  const knownGain = opening !== '' && Number.isFinite(gainNumber);
+  const amountNumber = readAmount(line.amount);
+  const cashLine = !!line.cash;
+  const [name, setName] = useState(line.name);
+  const [amount, setAmount] = useState(plainAmount(line.amount).replace(/^[+−-]/, ''));
+  const [side, setSide] = useState<'up' | 'down' | 'none'>(
+    knownGain ? (gainNumber < 0 ? 'down' : 'up')
+      : cashLine ? (amountNumber < 0 ? 'down' : 'up')
+        : line.tone === 'down' ? 'down' : line.tone === 'up' ? 'up' : 'none',
+  );
+  const [gain, setGain] = useState(knownGain ? showAmount(Math.abs(gainNumber)) : '');
+  const field = 'w-full rounded-2xl bg-slate-100 px-3 py-3 text-[16px] font-semibold outline-none placeholder:font-medium placeholder:text-slate-400 dark:bg-white/10';
+  const apply = () => {
+    const magnitude = plainAmount(amount).replace(/^[+−-]/, '');
+    if (cashLine) {
+      onApply({
+        name: name.trim(),
+        amount: side === 'down' ? `−${magnitude}` : side === 'up' ? magnitude : amountNumber < 0 ? `−${magnitude}` : magnitude,
+        gain: '',
+        tone: '',
+      });
+      return;
+    }
+    const difference = plainAmount(gain);
+    const signed = side === 'none' || !difference ? '' : `${side === 'down' ? '−' : '+'}${difference}`;
+    onApply({
+      name: name.trim(),
+      amount: magnitude,
+      gain: signed,
+      tone: signed ? '' : side === 'none' ? '' : side,
+    });
+  };
+  return (
+    <div className="absolute inset-0 z-20 flex items-end justify-center bg-slate-900/25 p-3 sm:items-center" onClick={onClose}>
+      <motion.div role="dialog" aria-labelledby="line-edit" className={cn(modalPanelClass, 'w-full max-w-sm')} onClick={(event) => event.stopPropagation()} initial={prefersStill() ? false : sheetIn} animate={sheetOn} transition={sheetSpring}>
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <h2 id="line-edit" className="text-[20px] font-semibold tracking-tight">La línea</h2>
+          <button type="button" onClick={onClose} className="rounded-full border border-slate-200/90 bg-white/60 px-3 py-1 text-[13px] font-medium text-slate-600">Cerrar</button>
+        </div>
+        <label className="block">
+          <span className="text-[13px] font-medium text-slate-500">Qué es</span>
+          <textarea value={name} autoFocus rows={2} onChange={(event) => setName(event.target.value)} placeholder="Steam, HYPE…" className={cn(field, 'mt-1.5 resize-none leading-snug')} />
+        </label>
+        <label className="mt-3 block">
+          <span className="text-[13px] font-medium text-slate-500">Importe</span>
+          <input value={amount} onChange={(event) => setAmount(event.target.value)} inputMode="decimal" placeholder="0,00" className={cn(field, 'mt-1.5 text-right tabular-nums')} />
+        </label>
+        <p className="mt-4 text-[13px] font-medium text-slate-500">{cashLine ? 'El movimiento' : 'La diferencia'}</p>
+        <div className="mt-1.5 grid grid-cols-2 rounded-full bg-slate-100 p-1 dark:bg-white/10">
+          <button type="button" aria-pressed={side === 'up'} onClick={() => setSide(side === 'up' ? 'none' : 'up')} className={cn('rounded-full py-2 text-[14px] font-semibold', side === 'up' ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-500')}>{cashLine ? 'Ha entrado' : 'Subido'}</button>
+          <button type="button" aria-pressed={side === 'down'} onClick={() => setSide(side === 'down' ? 'none' : 'down')} className={cn('rounded-full py-2 text-[14px] font-semibold', side === 'down' ? 'bg-white text-rose-700 shadow-sm' : 'text-slate-500')}>{cashLine ? 'Ha salido' : 'Bajado'}</button>
+        </div>
+        {!cashLine && side !== 'none' && (
+          <label className="mt-3 block">
+            <span className={cn('text-[13px] font-medium', side === 'down' ? 'text-rose-600' : 'text-emerald-700')}>{side === 'down' ? 'Cuánto ha bajado' : 'Cuánto ha subido'}</span>
+            <input value={gain} onChange={(event) => setGain(event.target.value)} inputMode="decimal" placeholder="0,00" className={cn(field, 'mt-1.5 text-right tabular-nums', side === 'down' ? 'text-rose-600' : 'text-emerald-700')} />
+          </label>
+        )}
+        <button type="button" onClick={apply} className="mt-4 w-full rounded-full bg-slate-950 py-3.5 text-[15px] font-semibold text-white">Listo</button>
+        <button type="button" onClick={onRemove} className="mt-2 w-full py-2 text-[13px] font-semibold text-slate-400">Quitar esta línea</button>
+      </motion.div>
+    </div>
+  );
 }
 
 function ticketTitle(rows: TicketLine[]): string {
@@ -278,7 +358,12 @@ async function fitReceipt(dataUrl: string): Promise<string> {
   return shrinkPhoto(image, image.naturalWidth, image.naturalHeight, false);
 }
 
-function enhanceForRead(dataUrl: string): Promise<string> {
+interface OcrWord {
+  text: string;
+  bbox: { x0: number; y0: number; x1: number; y1: number };
+}
+
+function preparePhoto(dataUrl: string): Promise<{ image: string; pixels: ImageData | null }> {
   return new Promise((resolve) => {
     const image = new Image();
     image.onload = () => {
@@ -287,11 +372,12 @@ function enhanceForRead(dataUrl: string): Promise<string> {
       canvas.height = image.height;
       const pen = canvas.getContext('2d', { willReadFrequently: true });
       if (!pen) {
-        resolve(dataUrl);
+        resolve({ image: dataUrl, pixels: null });
         return;
       }
       pen.drawImage(image, 0, 0);
       const frame = pen.getImageData(0, 0, canvas.width, canvas.height);
+      const pixels = new ImageData(new Uint8ClampedArray(frame.data), frame.width, frame.height);
       const data = frame.data;
       let total = 0;
       const count = data.length / 4;
@@ -300,19 +386,90 @@ function enhanceForRead(dataUrl: string): Promise<string> {
       }
       const dark = count > 0 && total / count < 120;
       for (let index = 0; index < data.length; index += 4) {
-        let gray = data[index] * 0.3 + data[index + 1] * 0.59 + data[index + 2] * 0.11;
+        const red = data[index];
+        const green = data[index + 1];
+        const blue = data[index + 2];
+        const max = Math.max(red, green, blue);
+        const min = Math.min(red, green, blue);
+        const sat = max === 0 ? 0 : (max - min) / max;
+        const colored = sat > 0.25 && ((green > red + 28 && green > blue + 8 && green > 70) || (red > green + 28 && red > blue + 8 && red > 70));
+        let gray = red * 0.3 + green * 0.59 + blue * 0.11;
         if (dark) gray = 255 - gray;
+        if (colored) gray = 16;
         const contrast = Math.min(255, Math.max(0, (gray - 128) * 1.35 + 128));
         data[index] = contrast;
         data[index + 1] = contrast;
         data[index + 2] = contrast;
       }
       pen.putImageData(frame, 0, 0);
-      resolve(canvas.toDataURL('image/png'));
+      resolve({ image: canvas.toDataURL('image/png'), pixels });
     };
-    image.onerror = () => resolve(dataUrl);
+    image.onerror = () => resolve({ image: dataUrl, pixels: null });
     image.src = dataUrl;
   });
+}
+
+function wordInk(pixels: ImageData, box: OcrWord['bbox']): 'green' | 'red' | 'plain' {
+  let green = 0;
+  let red = 0;
+  let ink = 0;
+  const x0 = Math.max(0, Math.floor(box.x0));
+  const y0 = Math.max(0, Math.floor(box.y0));
+  const x1 = Math.min(pixels.width, Math.ceil(box.x1));
+  const y1 = Math.min(pixels.height, Math.ceil(box.y1));
+  const data = pixels.data;
+  for (let y = y0; y < y1; y += 1) {
+    for (let x = x0; x < x1; x += 1) {
+      const index = (y * pixels.width + x) * 4;
+      const r = data[index];
+      const g = data[index + 1];
+      const b = data[index + 2];
+      const max = Math.max(r, g, b);
+      const min = Math.min(r, g, b);
+      if (max > 242 && min > 220) continue;
+      const sat = max === 0 ? 0 : (max - min) / max;
+      if (sat < 0.22 || max < 48) continue;
+      ink += 1;
+      if (g > r + 22 && g >= b) green += 1;
+      else if (r > g + 22 && r >= b) red += 1;
+    }
+  }
+  if (green > red && green >= 6 && green > ink * 0.18) return 'green';
+  if (red > green && red >= 6 && red > ink * 0.18) return 'red';
+  return 'plain';
+}
+
+function wordsIn(blocks: { paragraphs?: { lines?: { words?: OcrWord[] }[] }[] }[] | null | undefined): OcrWord[] {
+  const words: OcrWord[] = [];
+  (blocks || []).forEach((block) => {
+    (block.paragraphs || []).forEach((paragraph) => {
+      (paragraph.lines || []).forEach((line) => {
+        (line.words || []).forEach((word) => {
+          if (word?.text && word.bbox) words.push(word);
+        });
+      });
+    });
+  });
+  return words;
+}
+
+function textFromWords(words: OcrWord[], pixels: ImageData | null): { text: string; tones: { value: number; ink: 'up' | 'down' }[] } {
+  const sorted = words.filter((word) => word.text.trim()).sort((a, b) => a.bbox.y0 - b.bbox.y0 || a.bbox.x0 - b.bbox.x0);
+  const rows: OcrWord[][] = [];
+  sorted.forEach((word) => {
+    const row = rows[rows.length - 1];
+    const prev = row?.[row.length - 1];
+    const height = Math.max(8, (word.bbox.y1 - word.bbox.y0 + (prev ? prev.bbox.y1 - prev.bbox.y0 : 0)) / (prev ? 2 : 1));
+    if (!row || !prev || word.bbox.y0 > prev.bbox.y0 + height * 0.65) rows.push([word]);
+    else row.push(word);
+  });
+  const tones: { value: number; ink: 'up' | 'down' }[] = [];
+  const text = rows.map((row) => {
+    const painted = paintLine(row.map((word) => ({ text: word.text, ink: pixels ? wordInk(pixels, word.bbox) : 'plain' })));
+    if (painted.tone) tones.push(painted.tone);
+    return painted.text;
+  }).join('\n');
+  return { text, tones };
 }
 
 export function TicketCam({
@@ -328,23 +485,26 @@ export function TicketCam({
   const streamRef = useRef<MediaStream | null>(null);
   const lineKey = useRef(1);
   const walletKey = useRef(1);
-  const accountsRef = useRef<Bank[]>([]);
+  const accountsRef = useRef<Bank[]>(cachedWallets());
   const ocrRef = useRef('');
   const touched = useRef(false);
-  const ocrWorker = useRef<Promise<{ recognize: (image: string) => Promise<{ data: { text: string } }>; terminate: () => Promise<unknown> }> | null>(null);
+  const ocrWorker = useRef<Promise<{ recognize: (image: string, opts?: object, output?: { text?: boolean; blocks?: boolean }) => Promise<{ data: { text: string; blocks?: { paragraphs?: { lines?: { words?: OcrWord[] }[] }[] }[] | null } }>; terminate: () => Promise<unknown> }> | null>(null);
   const [photo, setPhoto] = useState('');
   const [shot, setShot] = useState<'tique' | 'cartera' | null>(null);
   const [cameraError, setCameraError] = useState('');
   const [cameraTry, setCameraTry] = useState(0);
   const [lines, setLines] = useState<TicketLine[]>([{ key: '1', name: '', amount: '' }]);
   const [walletLines, setWalletLines] = useState<WalletLine[]>([]);
+  const [editKey, setEditKey] = useState<string | null>(null);
+  const draftNew = useRef(false);
   const [walletId, setWalletId] = useState('');
   const [fresh, setFresh] = useState<PlatformPreset | null>(null);
   const [catalog, setCatalog] = useState(false);
   const [query, setQuery] = useState('');
   const [reading, setReading] = useState(false);
   const [plans, setPlans] = useState<PlanRow[]>([]);
-  const [accounts, setAccounts] = useState<Bank[]>([]);
+  const [accounts, setAccounts] = useState<Bank[]>(() => cachedWallets());
+  const [walletWait, setWalletWait] = useState(() => cachedWallets().length === 0);
   const [where, setWhere] = useState('personal');
   const [outside, setOutside] = useState(false);
   const [payer, setPayer] = useState(userId);
@@ -359,21 +519,17 @@ export function TicketCam({
         if (!cancel) setPlans(data.plans.map((item) => item.plan));
       })
       .catch(() => undefined);
-    api<{ accounts: { _id: string; name: string; currency: string; archived?: boolean; kind: string; tracking: 'balance' | 'positions'; platform: string }[] }>('/api/accounts')
-      .then((data) => {
+    loadWallets()
+      .then((euros) => {
         if (cancel) return;
-        const euros = data.accounts.filter((account) => account.currency === 'EUR' && !account.archived).map((account) => ({
-          id: String(account._id),
-          name: account.name,
-          kind: account.kind,
-          tracking: account.tracking,
-          platform: account.platform,
-        }));
         setAccounts(euros);
         accountsRef.current = euros;
         setAccountId((current) => current || euros[0]?.id || '');
+        setWalletWait(false);
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (!cancel) setWalletWait(false);
+      });
     return () => {
       cancel = true;
     };
@@ -416,7 +572,7 @@ export function TicketCam({
     };
   }, [photo, cameraTry]);
 
-  const showRead = (read: PhotoRead) => {
+  const showRead = (read: PhotoRead, tones: { value: number; ink: 'up' | 'down' }[] = []) => {
     walletKey.current = read.lines.length;
     if (!touched.current) {
       if (read.accountId) {
@@ -430,12 +586,18 @@ export function TicketCam({
         setFresh(null);
       }
     }
-    setWalletLines(read.lines.map((line, index) => ({
-      key: String(index + 1),
-      name: line.name,
-      amount: showAmount(line.amount),
-      assetClass: line.assetClass,
-    })));
+    setWalletLines(read.lines.map((line, index) => {
+      const tone = line.gain == null ? tones.find((item) => Math.abs(item.value - Math.abs(line.amount)) < 0.02)?.ink || '' : '';
+      return {
+        key: String(index + 1),
+        name: line.name,
+        amount: showAmount(line.amount),
+        gain: line.gain == null ? '' : (line.gain > 0 ? `+${showAmount(line.gain)}` : showAmount(line.gain)),
+        tone: line.cash ? '' : tone,
+        cash: line.cash,
+        assetClass: line.assetClass,
+      };
+    }));
     if (!read.lines.length) setError('No he reconocido importes. Puedes escribirlos.');
   };
 
@@ -468,15 +630,22 @@ export function TicketCam({
     const run = async () => {
       try {
         const worker = await readWorker();
-        const prepared = await enhanceForRead(photo);
-        const result = await worker.recognize(prepared);
+        const prepared = await preparePhoto(photo);
+        const result = await worker.recognize(prepared.image, {}, { text: true, blocks: true });
         if (cancel) return;
-        const text = result.data.text || '';
+        const plain = result.data.text || '';
+        const colored = textFromWords(wordsIn(result.data.blocks), prepared.pixels);
+        const fromPlain = readWalletText(plain, accountsRef.current);
+        const fromColor = readWalletText(colored.text, accountsRef.current);
+        const plainGains = fromPlain.lines.filter((line) => line.gain != null || line.amount < 0).length;
+        const colorGains = fromColor.lines.filter((line) => line.gain != null || line.amount < 0).length;
+        const useColor = fromColor.lines.length > 0 && (colorGains > plainGains || (colorGains === plainGains && fromColor.lines.length >= fromPlain.lines.length));
+        const read = useColor ? fromColor : fromPlain;
+        const text = useColor ? colored.text : plain;
         ocrRef.current = text;
-        const read = readWalletText(text, accountsRef.current);
         if (looksLikeWallet(read, text)) {
           setShot('cartera');
-          showRead(read);
+          showRead(read, useColor ? colored.tones : []);
         } else {
           setShot('tique');
         }
@@ -686,15 +855,58 @@ export function TicketCam({
     setError('');
   };
 
+  const editing = walletLines.find((line) => line.key === editKey) || null;
+  const walletGroup = () => {
+    const account = accounts.find((item) => item.id === walletId);
+    return account ? groupForKind(account.kind, account.name) : (fresh?.group || null);
+  };
+  const closeEdit = () => {
+    if (draftNew.current) {
+      setWalletLines((rows) => rows.filter((line) => line.key !== editKey || line.name.trim() || line.amount.trim() || line.gain.trim()));
+    }
+    draftNew.current = false;
+    setEditKey(null);
+  };
+  const applyEdit = (next: Pick<WalletLine, 'name' | 'amount' | 'gain' | 'tone'>) => {
+    const group = walletGroup();
+    draftNew.current = false;
+    setWalletLines((rows) => rows.map((line) => (line.key === editKey ? { ...line, ...next, assetClass: classifyLine(next.name, group) } : line)));
+    setEditKey(null);
+    setError('');
+  };
+  const removeEdit = () => {
+    draftNew.current = false;
+    setWalletLines((rows) => rows.filter((line) => line.key !== editKey));
+    setEditKey(null);
+  };
+  const addWalletLine = () => {
+    walletKey.current += 1;
+    const key = `w${walletKey.current}`;
+    draftNew.current = true;
+    setWalletLines((rows) => [...rows, { key, name: '', amount: '', gain: '', tone: '', assetClass: 'other' }]);
+    setEditKey(key);
+    setError('');
+  };
+
   const saveWallet = async () => {
     const filled = walletLines.filter((line) => line.name.trim() || line.amount.trim());
-    if (filled.some((line) => !line.name.trim() || !Number.isFinite(readAmount(line.amount)) || readAmount(line.amount) <= 0)) {
+    const broken = filled.some((line) => {
+      const amount = readAmount(line.amount);
+      if (!line.name.trim() || !Number.isFinite(amount) || amount === 0) return true;
+      if (amount < 0 && !isLiquidName(line.name) && !line.cash) return true;
+      if (line.gain.trim() && !Number.isFinite(readAmount(line.gain))) return true;
+      return false;
+    });
+    if (broken) {
       setError('Completa cada cosa de la lista.');
       return;
     }
-    const positions = filled.filter((line) => !isCashName(line.name));
+    const positions = filled.filter((line) => readAmount(line.amount) > 0 && !isCashName(line.name) && !line.cash);
     const cash = filled.filter((line) => isCashName(line.name));
-    const liquid = cash.length ? Math.max(...cash.map((line) => readAmount(line.amount))) : 0;
+    const flows = filled.filter((line) => line.cash);
+    const pulls = filled.filter((line) => readAmount(line.amount) < 0 && isLiquidName(line.name) && !isCashName(line.name));
+    const liquidIn = cash.filter((line) => readAmount(line.amount) > 0);
+    const liquidOut = cash.filter((line) => readAmount(line.amount) < 0);
     const chosen = accounts.find((account) => account.id === walletId);
     if ((!chosen && !fresh) || !filled.length) return;
     setBusy(true);
@@ -702,8 +914,13 @@ export function TicketCam({
     try {
       let target = chosen?.id || '';
       let tracking = chosen?.tracking || fresh?.tracking || 'positions';
+      let pocket = chosen?.balance ?? 0;
+      if (liquidIn.length) pocket = Math.max(...liquidIn.map((line) => readAmount(line.amount)));
+      if (liquidOut.length) pocket = Math.max(0, Math.round((pocket + liquidOut.reduce((sum, line) => sum + readAmount(line.amount), 0)) * 100) / 100);
+      if (flows.length) pocket = Math.max(0, Math.round((pocket + flows.reduce((sum, line) => sum + readAmount(line.amount), 0)) * 100) / 100);
+      const touchedCash = liquidIn.length > 0 || liquidOut.length > 0 || flows.length > 0;
       if (!chosen && fresh) {
-        const onlyBalance = fresh.tracking === 'balance' && positions.length === 0;
+        const onlyBalance = (fresh.tracking === 'balance' || flows.length > 0) && positions.length === 0 && pulls.length === 0;
         const created = await api<{ account: { _id: string } }>('/api/accounts', {
           method: 'POST',
           body: JSON.stringify({
@@ -712,7 +929,7 @@ export function TicketCam({
             kind: fresh.kind,
             tracking: onlyBalance ? 'balance' : 'positions',
             currency: 'EUR',
-            balance: onlyBalance ? (filled[0] ? readAmount(filled[0].amount) : 0) : liquid,
+            balance: onlyBalance ? (flows.length ? pocket : Math.max(0, filled[0] ? readAmount(filled[0].amount) : 0)) : (touchedCash ? pocket : 0),
           }),
         });
         target = String(created.account._id);
@@ -721,41 +938,71 @@ export function TicketCam({
           onSaved();
           return;
         }
-      } else if (tracking === 'balance' && positions.length === 0) {
-        const amount = filled.length ? Math.max(...filled.map((line) => readAmount(line.amount))) : 0;
-        await api(`/api/accounts/${target}`, { method: 'PATCH', body: JSON.stringify({ balance: amount }) });
+      } else if ((tracking === 'balance' || flows.length > 0) && positions.length === 0) {
+        const delta = pulls.reduce((sum, line) => sum + readAmount(line.amount), 0);
+        const next = Math.max(0, Math.round((pocket + delta) * 100) / 100);
+        await api(`/api/accounts/${target}`, { method: 'PATCH', body: JSON.stringify({ balance: next }) });
         onSaved();
         return;
       } else if (tracking === 'balance') {
-        await api(`/api/accounts/${target}`, { method: 'PATCH', body: JSON.stringify({ tracking: 'positions', ...(cash.length ? { balance: liquid } : {}) }) });
-      } else if (cash.length) {
-        await api(`/api/accounts/${target}`, { method: 'PATCH', body: JSON.stringify({ balance: liquid }) });
+        await api(`/api/accounts/${target}`, { method: 'PATCH', body: JSON.stringify({ tracking: 'positions', ...(touchedCash ? { balance: pocket } : {}) }) });
+      } else if (touchedCash) {
+        await api(`/api/accounts/${target}`, { method: 'PATCH', body: JSON.stringify({ balance: pocket }) });
       }
-      const book = await api<{ holdings: { _id: string; accountId: string; name: string; quantity: number }[] }>('/api/holdings');
+      const book = await api<{ holdings: { _id: string; accountId: string; name: string; quantity: number; unitMarketValue?: number | null }[] }>('/api/holdings');
       const mine = (book.holdings || []).filter((item) => String(item.accountId) === target);
-      for (const line of positions) {
-        const amount = readAmount(line.amount);
+      const writePosition = async (line: WalletLine, amount: number) => {
+        const gain = line.gain.trim() ? readAmount(line.gain) : null;
+        const cost = gain != null && Number.isFinite(gain) ? Math.round((amount - gain) * 100) / 100 : null;
         const found = mine.find((item) => item.name.trim().toLowerCase() === line.name.trim().toLowerCase());
         if (found) {
           const qty = found.quantity > 0 ? found.quantity : 1;
           await api(`/api/holdings/${found._id}`, {
             method: 'PATCH',
-            body: JSON.stringify({ name: line.name.trim(), assetClass: line.assetClass, quantity: qty, unitMarketValue: amount / qty }),
-          });
-        } else {
-          await api('/api/holdings', {
-            method: 'POST',
             body: JSON.stringify({
-              accountId: target,
               name: line.name.trim(),
-              symbol: '',
               assetClass: line.assetClass,
-              quantity: 1,
-              unitMarketValue: amount,
-              currency: 'EUR',
+              quantity: qty,
+              unitMarketValue: amount / qty,
+              ...(cost != null && cost >= 0 ? { costBasis: cost } : {}),
             }),
           });
+          return;
         }
+        await api('/api/holdings', {
+          method: 'POST',
+          body: JSON.stringify({
+            accountId: target,
+            name: line.name.trim(),
+            symbol: '',
+            assetClass: line.assetClass,
+            quantity: 1,
+            unitMarketValue: amount,
+            currency: 'EUR',
+            ...(cost != null && cost >= 0 ? { costBasis: cost } : {}),
+          }),
+        });
+      };
+      for (const line of positions) await writePosition(line, readAmount(line.amount));
+      let loose = 0;
+      for (const line of pulls) {
+        const amount = readAmount(line.amount);
+        const found = mine.find((item) => item.name.trim().toLowerCase() === line.name.trim().toLowerCase());
+        if (!found) {
+          loose += amount;
+          continue;
+        }
+        const qty = found.quantity > 0 ? found.quantity : 1;
+        const worth = (found.unitMarketValue || 0) * qty;
+        const next = Math.max(0, Math.round((worth + amount) * 100) / 100);
+        await api(`/api/holdings/${found._id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ name: line.name.trim(), assetClass: line.assetClass, quantity: qty, unitMarketValue: next / qty }),
+        });
+      }
+      if (loose !== 0) {
+        const next = Math.max(0, Math.round((pocket + loose) * 100) / 100);
+        await api(`/api/accounts/${target}`, { method: 'PATCH', body: JSON.stringify({ balance: next }) });
       }
       onSaved();
     } catch (err) {
@@ -839,11 +1086,14 @@ export function TicketCam({
                 <button type="button" onClick={close} className="shrink-0 rounded-full border border-slate-200/90 bg-white/60 px-3 py-1 text-[13px] font-medium text-slate-600">Cerrar</button>
               </div>
               <ChipRail>
-                {fresh && (
+                {fresh && !accounts.some((account) => fold(account.name) === fold(fresh.name) || fold(account.platform || '') === fold(fresh.name)) && (
                   <motion.button layout data-chip key={fresh.id} type="button" aria-pressed transition={glide} onClick={() => { setCatalog(false); setQuery(''); }} className="inline-flex shrink-0 snap-start items-center gap-2 rounded-full bg-slate-950 px-3 py-2 text-[13px] font-semibold text-white dark:bg-white dark:text-slate-950">
                     <PlatformLogo name={fresh.name} size={22} />
                     {fresh.name}
                   </motion.button>
+                )}
+                {walletWait && accounts.length === 0 && (
+                  <span className="inline-flex shrink-0 items-center rounded-full bg-slate-100 px-3 py-2 text-[13px] font-medium text-slate-400">Buscando tus carteras…</span>
                 )}
                 {[...accounts].sort((a, b) => Number(b.id === walletId) - Number(a.id === walletId)).map((account) => {
                   const on = walletId === account.id;
@@ -887,23 +1137,31 @@ export function TicketCam({
               ) : (
                 <div className="space-y-1">
                   {walletLines.length === 0 && <p className="py-2 text-sm font-medium text-slate-500">No he visto importes. Añádelos tú.</p>}
-                  {walletLines.map((line, index) => (
-                    <div key={line.key} className="flex items-center gap-2 rounded-2xl px-1 py-2">
-                      <LineMark name={line.name} />
-                      <input value={line.name} onChange={(event) => {
-                        const account = accounts.find((item) => item.id === walletId);
-                        const group = account ? groupForKind(account.kind, account.name) : (fresh?.group || null);
-                        const name = event.target.value;
-                        setWalletLines(walletLines.map((item) => (item.key === line.key ? { ...item, name, assetClass: classifyLine(name, group) } : item)));
-                      }} placeholder="Qué es" aria-label={`Qué es, línea ${index + 1}`} className="min-w-0 flex-1 bg-transparent text-[16px] font-semibold tracking-tight outline-none placeholder:font-medium placeholder:text-slate-400" />
-                      <input value={line.amount} onChange={(event) => setWalletLines(walletLines.map((item) => (item.key === line.key ? { ...item, amount: event.target.value } : item)))} inputMode="decimal" placeholder="0,00" aria-label={`Importe, línea ${index + 1}`} className="w-24 bg-transparent text-right text-[16px] font-semibold tabular-nums outline-none placeholder:font-medium placeholder:text-slate-400" />
-                      <span className="text-sm font-medium text-slate-400">€</span>
-                      <button type="button" onClick={() => setWalletLines(walletLines.filter((item) => item.key !== line.key))} className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-slate-300 hover:text-slate-500" aria-label={`Quitar línea ${index + 1}`}>
-                        <X size={15} />
+                  {walletLines.map((line, index) => {
+                    const gainValue = readAmount(line.gain);
+                    const hasGain = line.gain.trim() !== '' && Number.isFinite(gainValue);
+                    const amountValue = readAmount(line.amount);
+                    const tintUp = !hasGain && (line.tone === 'up' || (!!line.cash && amountValue > 0));
+                    const tintDown = !hasGain && (line.tone === 'down' || amountValue < 0);
+                    const prefix = tintUp && !/^[+−-]/.test(line.amount.trim()) ? '+' : tintDown && line.tone === 'down' && amountValue >= 0 ? '−' : '';
+                    return (
+                      <button key={line.key} type="button" onClick={() => { draftNew.current = false; setEditKey(line.key); }} className="flex w-full items-start gap-3 rounded-2xl px-1 py-2 text-left active:bg-slate-50" aria-label={`Editar línea ${index + 1}`}>
+                        <LineMark name={line.name} />
+                        <span className="min-w-0 flex-1 break-words text-[16px] font-semibold leading-snug tracking-tight">{line.name || 'Sin nombre'}</span>
+                        <span className="shrink-0 text-right">
+                          <span className={cn('block text-[16px] font-semibold tabular-nums', tintUp && 'text-emerald-600', tintDown && 'text-rose-600')}>
+                            {prefix}{line.amount || '0,00'} €
+                          </span>
+                          {hasGain && (
+                            <span className={cn('block text-[13px] font-bold tabular-nums', gainValue < 0 ? 'text-rose-600' : 'text-emerald-600')}>
+                              {gainValue < 0 ? '−' : '+'}{showAmount(Math.abs(gainValue))} €
+                            </span>
+                          )}
+                        </span>
                       </button>
-                    </div>
-                  ))}
-                  <button type="button" onClick={() => { walletKey.current += 1; setWalletLines((rows) => [...rows, { key: `w${walletKey.current}`, name: '', amount: '', assetClass: 'other' }]); setError(''); }} className="mt-1 inline-flex items-center gap-1 rounded-full px-2 py-2 text-[13px] font-semibold text-slate-500">
+                    );
+                  })}
+                  <button type="button" onClick={addWalletLine} className="mt-1 inline-flex items-center gap-1 rounded-full px-2 py-2 text-[13px] font-semibold text-slate-500">
                     <Plus size={14} />
                     Añadir
                   </button>
@@ -1006,6 +1264,9 @@ export function TicketCam({
             </motion.div>
             )}
           </div>
+          {shot === 'cartera' && editing && (
+            <LineSheet key={editing.key} line={editing} onClose={closeEdit} onApply={applyEdit} onRemove={removeEdit} />
+          )}
         </div>
       )}
     </div>,
