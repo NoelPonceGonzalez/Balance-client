@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { Camera, Plus, X } from 'lucide-react';
+import { Camera, ChevronDown, ImagePlus, Plus, X } from 'lucide-react';
+import { motion } from 'motion/react';
 import { modalPanelClass } from '@/components/Modal';
+import { glide, softSpring } from '@/lib/motion';
 import { PlatformLogo } from '@/components/PlatformLogo';
 import { api } from '@/lib/api';
 import { classifyLine, fold, groupForKind, isCashName, looksLikeWallet, readWalletText, type PhotoClass, type PhotoRead } from '@/lib/read-wallet';
@@ -30,8 +32,184 @@ interface Member {
   color: string;
 }
 
-const quiet = 'border border-slate-200/90 bg-white text-slate-800 shadow-[0_8px_24px_rgba(15,23,42,0.06)] dark:border-white/10 dark:bg-slate-900 dark:text-white';
 const chipOn = 'border-slate-200 bg-slate-100 text-slate-800 dark:border-white/15 dark:bg-white/10 dark:text-white';
+const sheetIn = { opacity: 0, y: 28, scale: 0.96 };
+const sheetOn = { opacity: 1, y: 0, scale: 1 };
+const sheetSpring = { ...softSpring, opacity: { duration: 0.18 } };
+
+function PhotoWash({ src }: { src: string }) {
+  return (
+    <>
+      <img src={src} alt="" className="absolute inset-0 h-full w-full scale-110 object-cover blur-3xl" />
+      <div className="absolute inset-0 bg-white/80" />
+    </>
+  );
+}
+
+function ReadMark() {
+  const still = prefersStill();
+  return (
+    <div className="relative h-16 w-16" aria-hidden>
+      <svg viewBox="0 0 64 64" className="h-full w-full">
+        <circle cx="32" cy="32" r="26" fill="none" className="stroke-slate-200" strokeWidth="3" />
+      </svg>
+      <motion.svg
+        viewBox="0 0 64 64"
+        className="absolute inset-0 h-full w-full"
+        animate={still ? undefined : { rotate: 360 }}
+        transition={still ? undefined : { duration: 1.05, repeat: Infinity, ease: 'linear' }}
+      >
+        <circle cx="32" cy="32" r="26" fill="none" className="stroke-slate-950" strokeWidth="3" strokeLinecap="round" strokeDasharray="28 136" />
+      </motion.svg>
+      <motion.svg
+        viewBox="0 0 64 64"
+        className="absolute inset-0 h-full w-full"
+        animate={still ? undefined : { rotate: -360 }}
+        transition={still ? undefined : { duration: 1.7, repeat: Infinity, ease: 'linear' }}
+      >
+        <circle cx="32" cy="32" r="18" fill="none" className="stroke-slate-400" strokeWidth="2" strokeLinecap="round" strokeDasharray="16 98" />
+      </motion.svg>
+      <motion.span
+        className="absolute top-1/2 left-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-slate-950"
+        animate={still ? undefined : { scale: [0.8, 1.25, 0.8], opacity: [0.45, 1, 0.45] }}
+        transition={still ? undefined : { duration: 1.05, repeat: Infinity, ease: [0.45, 0.05, 0.55, 0.95] }}
+      />
+    </div>
+  );
+}
+
+function prefersStill(): boolean {
+  return typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+function ChipRail({ children }: { children: ReactNode }) {
+  const frame = useRef<HTMLDivElement>(null);
+  const moved = useRef(false);
+
+  useEffect(() => {
+    const node = frame.current;
+    if (!node) return;
+    let active = false;
+    let originX = 0;
+    let originLeft = 0;
+    let lastX = 0;
+    let lastTime = 0;
+    let velocity = 0;
+    let coast = 0;
+
+    const down = (event: PointerEvent) => {
+      active = true;
+      moved.current = false;
+      originX = event.clientX;
+      originLeft = node.scrollLeft;
+      lastX = event.clientX;
+      lastTime = event.timeStamp;
+      velocity = 0;
+      cancelAnimationFrame(coast);
+      try { node.setPointerCapture(event.pointerId); } catch { /* el gesto sintético no se puede capturar */ }
+    };
+    const move = (event: PointerEvent) => {
+      if (!active) return;
+      const dx = event.clientX - originX;
+      if (Math.abs(dx) > 6) moved.current = true;
+      const dt = event.timeStamp - lastTime;
+      if (dt > 0) velocity = (event.clientX - lastX) / dt;
+      lastX = event.clientX;
+      lastTime = event.timeStamp;
+      node.scrollLeft = originLeft - dx;
+    };
+    const up = (event: PointerEvent) => {
+      if (!active) return;
+      active = false;
+      try { if (node.hasPointerCapture(event.pointerId)) node.releasePointerCapture(event.pointerId); } catch { /* ya suelto */ }
+      const max = node.scrollWidth - node.clientWidth;
+      let speed = -velocity * 16;
+      const tick = () => {
+        speed *= 0.9;
+        if (Math.abs(speed) < 0.4) return;
+        const next = node.scrollLeft + speed;
+        node.scrollLeft = Math.min(max, Math.max(0, next));
+        if (next <= 0 || next >= max) return;
+        coast = requestAnimationFrame(tick);
+      };
+      coast = requestAnimationFrame(tick);
+    };
+
+    node.addEventListener('pointerdown', down);
+    node.addEventListener('pointermove', move);
+    node.addEventListener('pointerup', up);
+    node.addEventListener('pointercancel', up);
+    return () => {
+      cancelAnimationFrame(coast);
+      node.removeEventListener('pointerdown', down);
+      node.removeEventListener('pointermove', move);
+      node.removeEventListener('pointerup', up);
+      node.removeEventListener('pointercancel', up);
+    };
+  }, []);
+
+  return (
+    <div className="w-full min-w-0 px-5">
+      <div
+        ref={frame}
+        data-rail="follow"
+        onClickCapture={(event) => {
+          if (!moved.current) return;
+          event.preventDefault();
+          event.stopPropagation();
+          moved.current = false;
+        }}
+        className="w-full min-w-0 cursor-grab touch-pan-y overflow-x-auto overscroll-x-contain pb-1 active:cursor-grabbing [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
+        <div className="flex w-max gap-2 pr-4">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+const COIN_MARK: Record<string, { color: string; ink: string; glyph: string }> = {
+  BTC: { color: '#f7931a', ink: '#fff', glyph: '₿' },
+  ETH: { color: '#627eea', ink: '#fff', glyph: 'Ξ' },
+  BETH: { color: '#627eea', ink: '#fff', glyph: 'Ξ' },
+  SOL: { color: '#9945ff', ink: '#fff', glyph: 'S' },
+  OKSOL: { color: '#9945ff', ink: '#fff', glyph: 'S' },
+  BNB: { color: '#f3ba2f', ink: '#1c1917', glyph: 'B' },
+  USDC: { color: '#2775ca', ink: '#fff', glyph: '$' },
+  USDT: { color: '#26a17b', ink: '#fff', glyph: '₮' },
+  XRP: { color: '#23292f', ink: '#fff', glyph: 'X' },
+  EUR: { color: '#1d4ed8', ink: '#fff', glyph: '€' },
+  DOGE: { color: '#c2a633', ink: '#fff', glyph: 'Ð' },
+  HYPE: { color: '#0d9488', ink: '#fff', glyph: 'H' },
+  PEPE: { color: '#3c9d45', ink: '#fff', glyph: 'P' },
+  PENGU: { color: '#38bdf8', ink: '#0f172a', glyph: 'P' },
+  LINK: { color: '#2a5ada', ink: '#fff', glyph: 'L' },
+  AVAX: { color: '#e84142', ink: '#fff', glyph: 'A' },
+  ADA: { color: '#0033ad', ink: '#fff', glyph: 'A' },
+  LINEA: { color: '#61dfff', ink: '#0f172a', glyph: 'L' },
+  ASTER: { color: '#7c3aed', ink: '#fff', glyph: 'A' },
+};
+
+function coinKey(name: string): string {
+  const hit = name.toUpperCase().match(/\b(OKSOL|BETH|USDC|USDT|BTC|ETH|HYPE|SOL|BNB|XRP|EUR|DOGE|ADA|AVAX|LINK|PEPE|PENGU|LINEA|ASTER)\b/);
+  return hit?.[1] || name.replace(/[^a-zA-Z0-9]/g, '').slice(0, 4).toUpperCase();
+}
+
+function LineMark({ name }: { name: string }) {
+  const key = coinKey(name);
+  const mark = COIN_MARK[key];
+  if (mark) {
+    return (
+      <span aria-hidden className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-[13px] font-bold" style={{ background: mark.color, color: mark.ink }}>
+        {mark.glyph}
+      </span>
+    );
+  }
+  return (
+    <span aria-hidden className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-slate-100 text-[11px] font-bold text-slate-600">
+      {(key || '?').slice(0, 2)}
+    </span>
+  );
+}
 
 interface TicketLine {
   key: string;
@@ -83,6 +261,21 @@ function shrinkPhoto(source: CanvasImageSource, width: number, height: number, s
     url = canvas.toDataURL('image/jpeg', quality);
   }
   return url.length > 500_000 ? '' : url;
+}
+
+function loadImage(url: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('foto'));
+    image.src = url;
+  });
+}
+
+async function fitReceipt(dataUrl: string): Promise<string> {
+  if (dataUrl.length <= 500_000) return dataUrl;
+  const image = await loadImage(dataUrl);
+  return shrinkPhoto(image, image.naturalWidth, image.naturalHeight, false);
 }
 
 function enhanceForRead(dataUrl: string): Promise<string> {
@@ -138,10 +331,9 @@ export function TicketCam({
   const accountsRef = useRef<Bank[]>([]);
   const ocrRef = useRef('');
   const touched = useRef(false);
-  const modePicked = useRef(false);
-  const shotRef = useRef<'tique' | 'cartera'>('tique');
+  const ocrWorker = useRef<Promise<{ recognize: (image: string) => Promise<{ data: { text: string } }>; terminate: () => Promise<unknown> }> | null>(null);
   const [photo, setPhoto] = useState('');
-  const [shot, setShot] = useState<'tique' | 'cartera'>('tique');
+  const [shot, setShot] = useState<'tique' | 'cartera' | null>(null);
   const [cameraError, setCameraError] = useState('');
   const [cameraTry, setCameraTry] = useState(0);
   const [lines, setLines] = useState<TicketLine[]>([{ key: '1', name: '', amount: '' }]);
@@ -192,7 +384,7 @@ export function TicketCam({
     let stop = false;
     const boot = async () => {
       if (!navigator.mediaDevices?.getUserMedia) {
-        setCameraError('Este navegador no deja abrir la cámara. Puedes elegir la foto.');
+        setCameraError('Este navegador no abre la cámara.');
         return;
       }
       try {
@@ -210,10 +402,10 @@ export function TicketCam({
         if (stop) return;
         const name = err instanceof DOMException ? err.name : '';
         if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
-          setCameraError('El teléfono tiene la cámara bloqueada. En los ajustes del móvil, entra en Balance y permite la cámara. También puedes elegir la foto.');
+          setCameraError('La cámara está bloqueada.');
           return;
         }
-        setCameraError('No se ha podido usar la cámara. Revisa el permiso o elige la foto.');
+        setCameraError('No he podido abrir la cámara.');
       }
     };
     void boot();
@@ -223,8 +415,6 @@ export function TicketCam({
       streamRef.current = null;
     };
   }, [photo, cameraTry]);
-
-  shotRef.current = shot;
 
   const showRead = (read: PhotoRead) => {
     walletKey.current = read.lines.length;
@@ -249,32 +439,52 @@ export function TicketCam({
     if (!read.lines.length) setError('No he reconocido importes. Puedes escribirlos.');
   };
 
+  const readWorker = () => {
+    if (!ocrWorker.current) {
+      ocrWorker.current = import('tesseract.js').then(async ({ createWorker, PSM }) => {
+        const worker = await createWorker('spa+eng');
+        await worker.setParameters({ tessedit_pageseg_mode: PSM.SINGLE_BLOCK, user_defined_dpi: '300' });
+        return worker;
+      });
+    }
+    return ocrWorker.current;
+  };
+
+  useEffect(() => {
+    void readWorker();
+    return () => {
+      const pending = ocrWorker.current;
+      ocrWorker.current = null;
+      pending?.then((worker) => worker.terminate()).catch(() => undefined);
+    };
+  }, []);
+
   useEffect(() => {
     if (!photo) return undefined;
     let cancel = false;
     setReading(true);
+    setShot(null);
     setError('');
     const run = async () => {
       try {
-        const { createWorker, PSM } = await import('tesseract.js');
-        const worker = await createWorker('spa+eng');
-        try {
-          await worker.setParameters({ tessedit_pageseg_mode: PSM.SINGLE_BLOCK, user_defined_dpi: '300' });
-          const prepared = await enhanceForRead(photo);
-          const result = await worker.recognize(prepared);
-          if (cancel) return;
-          const text = result.data.text || '';
-          ocrRef.current = text;
-          const read = readWalletText(text, accountsRef.current);
-          const wantWallet = shotRef.current === 'cartera' || (!modePicked.current && looksLikeWallet(read, text));
-          if (!wantWallet) return;
-          if (shotRef.current !== 'cartera') setShot('cartera');
+        const worker = await readWorker();
+        const prepared = await enhanceForRead(photo);
+        const result = await worker.recognize(prepared);
+        if (cancel) return;
+        const text = result.data.text || '';
+        ocrRef.current = text;
+        const read = readWalletText(text, accountsRef.current);
+        if (looksLikeWallet(read, text)) {
+          setShot('cartera');
           showRead(read);
-        } finally {
-          await worker.terminate();
+        } else {
+          setShot('tique');
         }
       } catch {
-        if (!cancel) setError('No he podido leer la foto. Escribe los importes.');
+        if (!cancel) {
+          setShot('tique');
+          setError('No he podido leer la foto. Escribe los importes.');
+        }
       } finally {
         if (!cancel) setReading(false);
       }
@@ -326,7 +536,7 @@ export function TicketCam({
   const take = () => {
     const video = videoRef.current;
     if (!video || !video.videoWidth) return;
-    const url = shrinkPhoto(video, video.videoWidth, video.videoHeight, shot === 'cartera');
+    const url = shrinkPhoto(video, video.videoWidth, video.videoHeight, true);
     if (!url) {
       setCameraError('La foto pesa demasiado. Acércala un poco menos.');
       return;
@@ -334,6 +544,7 @@ export function TicketCam({
     streamRef.current?.getTracks().forEach((track) => track.stop());
     ocrRef.current = '';
     touched.current = false;
+    setShot(null);
     setReading(true);
     setWalletId('');
     setFresh(null);
@@ -346,7 +557,7 @@ export function TicketCam({
 
   const fromFile = async (file: File) => {
     const bitmap = await createImageBitmap(file);
-    const url = shrinkPhoto(bitmap, bitmap.width, bitmap.height, shot === 'cartera');
+    const url = shrinkPhoto(bitmap, bitmap.width, bitmap.height, true);
     bitmap.close();
     if (!url) {
       setCameraError('La foto pesa demasiado.');
@@ -355,6 +566,7 @@ export function TicketCam({
     setCameraError('');
     ocrRef.current = '';
     touched.current = false;
+    setShot(null);
     setReading(true);
     setWalletId('');
     setFresh(null);
@@ -365,12 +577,10 @@ export function TicketCam({
     setPhoto(url);
   };
 
-  const chooseShot = (id: 'tique' | 'cartera') => {
-    modePicked.current = true;
-    setShot(id);
-    setError('');
-    if (id !== 'cartera' || !ocrRef.current) return;
-    showRead(readWalletText(ocrRef.current, accountsRef.current));
+  const pickFile = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (file) void fromFile(file);
   };
 
   const shares = plans.filter((plan) => plan.kind === 'gastos' && (plan.tripStatus || 'active') === 'active');
@@ -415,9 +625,15 @@ export function TicketCam({
     setBusy(true);
     setError('');
     try {
+      const receipt = await fitReceipt(photo);
+      if (!receipt || receipt.length > 500_000) {
+        setError('La foto pesa demasiado.');
+        setBusy(false);
+        return;
+      }
       if (where === 'personal') {
         for (const line of filled) {
-          await api('/api/plans/tique', { method: 'POST', body: JSON.stringify({ name: line.name.trim(), amount: readAmount(line.amount), accountId, receipt: photo }) });
+          await api('/api/plans/tique', { method: 'POST', body: JSON.stringify({ name: line.name.trim(), amount: readAmount(line.amount), accountId, receipt }) });
         }
       } else {
         await api(`/api/plans/${where}/gasto`, {
@@ -429,7 +645,7 @@ export function TicketCam({
             splitAmong: [],
             category: '',
             counts: !outside,
-            receipt: photo,
+            receipt,
             accountId: payer === userId ? accountId : undefined,
           }),
         });
@@ -549,74 +765,96 @@ export function TicketCam({
   };
 
   return createPortal(
-    <div className="fixed inset-0 z-[80] bg-slate-950/80 text-white">
+    <div className={cn('fixed inset-0 z-[80]', photo ? 'bg-[#e8edf3]' : 'bg-slate-950/80 text-white')}>
       {!photo ? (
-        <div className="relative h-full">
-          <video ref={videoRef} playsInline muted autoPlay className="h-full w-full object-cover" />
+        <div className={cn('relative h-full', cameraError && 'bg-slate-950')}>
+          <video ref={videoRef} playsInline muted autoPlay className={cn('h-full w-full object-cover', cameraError && 'hidden')} />
           <button type="button" onClick={close} className="absolute left-4 top-4 grid h-10 w-10 place-items-center rounded-full bg-white/90 text-slate-800" aria-label="Cerrar">
             <X size={18} />
           </button>
-          <div className="absolute left-1/2 top-4 flex -translate-x-1/2 gap-1 rounded-full bg-black/45 p-1">
-            {([['tique', 'Tique'], ['cartera', 'Cartera']] as const).map(([id, label]) => (
-              <button
-                key={id}
-                type="button"
-                aria-pressed={shot === id}
-                onClick={() => chooseShot(id)}
-                className={cn('rounded-full px-4 py-2 text-[13px] font-semibold', shot === id ? 'bg-white text-slate-950' : 'text-white')}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          {cameraError && (
-            <div className="absolute inset-x-4 top-20 rounded-3xl bg-white p-4 text-sm font-medium text-slate-700">
-              <p>{cameraError}</p>
-              <button type="button" onClick={() => { setCameraError(''); setCameraTry((value) => value + 1); }} className={cn(quiet, 'mt-3 w-full rounded-2xl px-4 py-3 text-[15px] font-bold')}>Activar cámara</button>
-              <label className={cn(quiet, 'mt-3 flex cursor-pointer items-center justify-center rounded-2xl px-4 py-3 text-[15px] font-bold')}>
+          {cameraError ? (
+            <div className="flex h-full flex-col items-center justify-center px-8 text-center">
+              <p className="text-[20px] font-semibold tracking-tight">Elige la foto</p>
+              <p className="mt-2 max-w-xs text-sm font-medium text-white/70">{cameraError} La leo y veo si es un tique o una cartera.</p>
+              <label className="mt-6 flex cursor-pointer items-center justify-center rounded-full bg-white px-6 py-3.5 text-[15px] font-semibold text-slate-950">
                 Elegir foto
-                <input type="file" accept="image/*" capture="environment" className="sr-only" onChange={(event) => { const file = event.target.files?.[0]; if (file) void fromFile(file); }} />
+                <input type="file" accept="image/*" className="sr-only" onChange={pickFile} />
               </label>
+              <button type="button" onClick={() => { setCameraError(''); setCameraTry((value) => value + 1); }} className="mt-4 text-sm font-semibold text-white/70">
+                Reintentar la cámara
+              </button>
             </div>
+          ) : (
+            <>
+              <button type="button" onClick={take} className="absolute bottom-10 left-1/2 grid h-20 w-20 -translate-x-1/2 place-items-center rounded-full border-4 border-white bg-white/20" aria-label="Hacer la foto">
+                <span className="grid h-14 w-14 place-items-center rounded-full bg-white text-slate-900">
+                  <Camera size={26} />
+                </span>
+              </button>
+              <label className="absolute bottom-14 right-6 grid h-12 w-12 cursor-pointer place-items-center rounded-full bg-white/90 text-slate-800" aria-label="Elegir foto">
+                <ImagePlus size={20} />
+                <input type="file" accept="image/*" className="sr-only" onChange={pickFile} />
+              </label>
+            </>
           )}
-          <button type="button" onClick={take} className="absolute bottom-10 left-1/2 grid h-20 w-20 -translate-x-1/2 place-items-center rounded-full border-4 border-white bg-white/20" aria-label="Hacer la foto">
-            <span className="grid h-14 w-14 place-items-center rounded-full bg-white text-slate-900">
-              <Camera size={26} />
-            </span>
+        </div>
+      ) : !shot ? (
+        <div className="relative h-full overflow-hidden">
+          <PhotoWash src={photo} />
+          <button type="button" onClick={close} className="absolute left-4 top-4 grid h-10 w-10 place-items-center rounded-full bg-white/90 text-slate-800" aria-label="Cerrar">
+            <X size={18} />
           </button>
+          <div className="absolute inset-0 flex items-end justify-center p-3 sm:items-center">
+            <motion.div role="status" aria-live="polite" className={cn(modalPanelClass, 'flex max-w-md flex-col items-center px-8 py-8 text-center')} initial={prefersStill() ? false : sheetIn} animate={sheetOn} transition={sheetSpring}>
+              <ReadMark />
+              <p className="mt-5 text-[13px] font-medium text-slate-500">De la foto</p>
+              <h2 className="mt-1 text-[22px] font-semibold tracking-tight">Leyendo la foto</h2>
+              <div className="mt-4 flex items-center gap-1.5">
+                {[0, 1, 2].map((dot) => (
+                  <motion.span
+                    key={dot}
+                    className="h-1.5 w-1.5 rounded-full bg-slate-900"
+                    animate={prefersStill() ? undefined : { y: [0, -4, 0], opacity: [0.3, 1, 0.3] }}
+                    transition={prefersStill() ? undefined : { duration: 0.85, repeat: Infinity, delay: dot * 0.12, ease: [0.34, 1.15, 0.64, 1] }}
+                  />
+                ))}
+              </div>
+            </motion.div>
+          </div>
         </div>
       ) : (
-        <div className="relative h-full">
-          <img src={photo} alt="Tique" className="h-full w-full object-cover" />
-          <div className="absolute inset-0 bg-black/25 dark:bg-black/50" />
+        <div className="relative h-full overflow-hidden">
+          <PhotoWash src={photo} />
           <div className="absolute inset-0 flex items-end justify-center p-3 sm:items-center" onClick={close}>
             {shot === 'cartera' ? (
-            <div role="dialog" aria-labelledby="wallet-read" className={cn(modalPanelClass, 'flex max-h-[85dvh] max-w-md flex-col overflow-hidden p-0')} onClick={(event) => event.stopPropagation()}>
+            <motion.div role="dialog" aria-labelledby="wallet-read" className={cn(modalPanelClass, 'flex max-h-[85dvh] max-w-md flex-col overflow-hidden p-0')} onClick={(event) => event.stopPropagation()} initial={prefersStill() ? false : sheetIn} animate={sheetOn} transition={sheetSpring}>
               <div className="mb-4 flex shrink-0 items-start justify-between gap-3 px-5 pt-5">
-                <div>
-                  <p className="text-[13px] font-medium text-slate-500">{reading ? 'Leyendo la foto…' : 'De la foto'}</p>
-                  <h2 id="wallet-read" className="text-[22px] font-semibold tracking-tight">{accounts.find((account) => account.id === walletId)?.name || fresh?.name || 'Elige la cartera'}</h2>
-                </div>
+                <button type="button" aria-expanded={catalog} onClick={() => { setCatalog((open) => !open); setQuery(''); setError(''); }} className="min-w-0 text-left">
+                  <p className="text-[13px] font-medium text-slate-500">De la foto</p>
+                  <h2 id="wallet-read" className="flex items-center gap-1 text-[22px] font-semibold tracking-tight">
+                    <span className="truncate">{accounts.find((account) => account.id === walletId)?.name || fresh?.name || 'Elige la cartera'}</span>
+                    <ChevronDown size={18} className={cn('shrink-0 text-slate-400 transition-transform', catalog && 'rotate-180')} />
+                  </h2>
+                </button>
                 <button type="button" onClick={close} className="shrink-0 rounded-full border border-slate-200/90 bg-white/60 px-3 py-1 text-[13px] font-medium text-slate-600">Cerrar</button>
               </div>
-              <div className="flex shrink-0 flex-wrap gap-2 px-5">
-                {accounts.map((account) => {
-                  const on = walletId === account.id;
-                  return (
-                    <button key={account.id} type="button" aria-pressed={on} onClick={() => retitle(account.id)} className={cn('inline-flex items-center gap-2 rounded-full px-3 py-2 text-[13px] font-semibold', on ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950' : 'bg-slate-100 text-slate-600 dark:bg-white/10 dark:text-slate-200')}>
-                      <PlatformLogo name={account.platform || account.name} size={22} />
-                      {account.name}
-                    </button>
-                  );
-                })}
+              <ChipRail>
                 {fresh && (
-                  <button type="button" aria-pressed className="inline-flex items-center gap-2 rounded-full bg-slate-950 px-3 py-2 text-[13px] font-semibold text-white dark:bg-white dark:text-slate-950">
+                  <motion.button layout data-chip key={fresh.id} type="button" aria-pressed transition={glide} onClick={() => { setCatalog(false); setQuery(''); }} className="inline-flex shrink-0 snap-start items-center gap-2 rounded-full bg-slate-950 px-3 py-2 text-[13px] font-semibold text-white dark:bg-white dark:text-slate-950">
                     <PlatformLogo name={fresh.name} size={22} />
                     {fresh.name}
-                  </button>
+                  </motion.button>
                 )}
-                <button type="button" aria-pressed={catalog} onClick={() => { setCatalog((open) => !open); setQuery(''); setError(''); }} className={cn('rounded-full px-3 py-2 text-[13px] font-semibold', catalog ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950' : 'bg-slate-100 text-slate-600 dark:bg-white/10 dark:text-slate-200')}>Otra</button>
-              </div>
+                {[...accounts].sort((a, b) => Number(b.id === walletId) - Number(a.id === walletId)).map((account) => {
+                  const on = walletId === account.id;
+                  return (
+                    <motion.button layout data-chip key={account.id} type="button" aria-pressed={on} transition={glide} onClick={() => retitle(account.id)} className={cn('inline-flex shrink-0 snap-start items-center gap-2 rounded-full px-3 py-2 text-[13px] font-semibold', on ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950' : 'bg-slate-100 text-slate-600 dark:bg-white/10 dark:text-slate-200')}>
+                      <PlatformLogo name={account.platform || account.name} size={22} />
+                      {account.name}
+                    </motion.button>
+                  );
+                })}
+              </ChipRail>
               {catalog ? (
                 <input
                   value={query}
@@ -628,7 +866,7 @@ export function TicketCam({
                   className="mx-5 mt-3 block w-[calc(100%-2.5rem)] shrink-0 rounded-2xl bg-slate-100 px-3 py-2.5 text-[15px] font-semibold outline-none placeholder:font-medium placeholder:text-slate-400 dark:bg-white/10"
                 />
               ) : !walletId && !fresh && !reading ? (
-                <p className="mt-3 px-5 text-sm font-medium text-slate-500">Si no está, pulsa Otra.</p>
+                <p className="mt-3 px-5 text-sm font-medium text-slate-500">Pulsa el nombre para ver todas.</p>
               ) : null}
               {(walletId || fresh) && !catalog && !reading && (
                 <p className="mt-3 px-5 text-sm font-medium text-slate-500">{walletId && followed.length ? `Se actualiza en ${followed.map((plan) => plan.name).join(', ')}.` : 'Ningún plan sigue esta cartera.'}</p>
@@ -650,7 +888,8 @@ export function TicketCam({
                 <div className="space-y-1">
                   {walletLines.length === 0 && <p className="py-2 text-sm font-medium text-slate-500">No he visto importes. Añádelos tú.</p>}
                   {walletLines.map((line, index) => (
-                    <div key={line.key} className="flex items-center gap-2 rounded-2xl px-2 py-2.5">
+                    <div key={line.key} className="flex items-center gap-2 rounded-2xl px-1 py-2">
+                      <LineMark name={line.name} />
                       <input value={line.name} onChange={(event) => {
                         const account = accounts.find((item) => item.id === walletId);
                         const group = account ? groupForKind(account.kind, account.name) : (fresh?.group || null);
@@ -677,22 +916,16 @@ export function TicketCam({
                 {busy ? 'Guardando…' : 'Aceptar'}
               </button>
               </div>
-            </div>
+            </motion.div>
             ) : (
-            <div role="dialog" aria-labelledby="ticket-read" className={cn(modalPanelClass, 'max-w-sm')} onClick={(event) => event.stopPropagation()}>
+            <motion.div role="dialog" aria-labelledby="ticket-read" className={cn(modalPanelClass, 'max-w-sm')} onClick={(event) => event.stopPropagation()} initial={prefersStill() ? false : sheetIn} animate={sheetOn} transition={sheetSpring}>
               <div className="mb-4 flex items-start justify-between gap-3">
                 <div>
-                  <div className="mb-2 flex gap-1 rounded-full bg-slate-100 p-1 dark:bg-white/10">
-                    {([['tique', 'Tique'], ['cartera', 'Cartera']] as const).map(([id, label]) => (
-                      <button key={id} type="button" aria-pressed={shot === id} onClick={() => chooseShot(id)} className={cn('rounded-full px-3 py-1.5 text-[13px] font-semibold', shot === id ? 'bg-white text-slate-950 shadow-sm dark:bg-slate-950 dark:text-white' : 'text-slate-500')}>{label}</button>
-                    ))}
-                  </div>
                   <p className="text-[13px] font-medium text-slate-500">He leído esto</p>
                   <h2 id="ticket-read" className="text-[22px] font-semibold tracking-tight">¿Está todo correcto?</h2>
                 </div>
                 <button type="button" onClick={close} className="shrink-0 rounded-full border border-slate-200/90 bg-white/60 px-3 py-1 text-[13px] font-medium text-slate-600">Cerrar</button>
               </div>
-              {reading && <p className="mb-3 text-sm font-medium text-slate-500">Estoy leyendo la foto.</p>}
               <div className="overflow-hidden rounded-2xl border border-white/80 bg-white/80 dark:border-white/10 dark:bg-white/5">
                 {lines.map((line, index) => (
                   <div key={line.key} className={cn('grid items-center gap-2 px-3 py-2', lines.length > 1 ? 'grid-cols-[1fr_5.5rem_auto]' : 'grid-cols-[1fr_5.5rem]', index > 0 && 'border-t border-slate-200/80 dark:border-white/10')}>
@@ -770,7 +1003,7 @@ export function TicketCam({
               <button type="button" disabled={busy || reading} onClick={() => void save()} className="mt-4 w-full rounded-full bg-slate-950 py-3.5 text-[15px] font-semibold text-white disabled:opacity-50 dark:bg-white dark:text-slate-950">
                 {busy ? 'Guardando…' : 'Aceptar'}
               </button>
-            </div>
+            </motion.div>
             )}
           </div>
         </div>
