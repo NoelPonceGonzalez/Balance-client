@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronLeft, Heart, Search, Star, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { CsfloatFeed, CsfloatFinder, SkinMarket, SkinSuggest, type SkinHit } from '@/components/CsfloatFinder';
+import { CsfloatFinder, SkinMarket, SkinSuggest, type SkinHit } from '@/components/CsfloatFinder';
 import { DragRow } from '@/components/DragRow';
 import { Modal } from '@/components/Modal';
 import { QuietLoad } from '@/components/QuietLoad';
@@ -401,7 +401,7 @@ function GameBoard({ items, filtered, quiet, warm, onOpen }: { items: MarketTape
             <span className="block truncate text-sm font-semibold">{item.name}</span>
             <span className="mt-1 flex items-center justify-between gap-2">
               <span className="text-sm font-black tabular-nums">{quoteAmount(item.kind, item.priceEur)}</span>
-              <Pct value={item.changePct} className="text-[11px]" />
+              {item.changePct != null && <Pct value={item.changePct} className="text-[11px]" />}
             </span>
           </span>
         </motion.button>
@@ -1520,12 +1520,15 @@ export function Market({ focusListing, focusTick = 0, focusSkin = null }: { focu
                         </span>
                       ) : (
                         <span className="mt-auto block space-y-1 pt-2">
-                          {section.preview.map((item) => (
-                            <span key={item.key} className="flex items-center justify-between gap-2 text-[11px] font-bold">
-                              <span className="truncate text-slate-500">{item.symbol}</span>
-                              <Pct value={item.changePct} className="text-[11px]" />
-                            </span>
-                          ))}
+                          {section.preview.map((item) => {
+                            const game = item.kind === 'cs2' || item.kind === 'tf2';
+                            return (
+                              <span key={item.key} className="flex items-center justify-between gap-2 text-[11px] font-bold">
+                                <span className="truncate text-slate-500">{game ? item.name : item.symbol}</span>
+                                {game ? <span className="shrink-0 tabular-nums text-slate-700 dark:text-slate-200">{quoteAmount(item.kind, item.priceEur)}</span> : <Pct value={item.changePct} className="text-[11px]" />}
+                              </span>
+                            );
+                          })}
                         </span>
                       )}
                     </motion.button>
@@ -1545,10 +1548,8 @@ export function Market({ focusListing, focusTick = 0, focusSkin = null }: { focu
             <IndexBoard items={shown} filtered={filtered} onOpen={openTape} />
           ) : hero ? (
             <HeroBoard item={active?.raw[0]} accent={tone?.accent || '#94a3b8'} onOpen={openTape} />
-          ) : market === 'cs2' ? (
-            needle.length >= 2 ? null : <CsfloatFeed />
           ) : (
-            <GameBoard items={shown} filtered={filtered} quiet={false} warm onOpen={openTape} />
+            <GameBoard items={shown} filtered={filtered} quiet={market === 'cs2' && skinMatch && shown.length === 0} warm={market === 'cs2'} onOpen={openTape} />
           )}
         </motion.div>
       </AnimatePresence>
