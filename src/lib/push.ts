@@ -75,6 +75,23 @@ export async function enablePhonePush(ping = false): Promise<string> {
     : 'El móvil ha quedado registrado. Si no vibra, vuelve a pulsar Probar aviso.';
 }
 
+/** Al cerrar sesión el móvil deja de recibir avisos de esa cuenta hasta que alguien vuelva a entrar. */
+export async function disablePhonePush(): Promise<void> {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+  const registration = await navigator.serviceWorker.getRegistration();
+  const subscription = await registration?.pushManager.getSubscription();
+  if (!subscription) return;
+  const token = localStorage.getItem('pat_token');
+  if (token) {
+    void api('/api/market/push', {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ endpoint: subscription.endpoint }),
+    }).catch(() => undefined);
+  }
+  await subscription.unsubscribe().catch(() => undefined);
+}
+
 /** Si el permiso ya está dado, vuelve a registrar el móvil sin pedir otro aviso de prueba. */
 export async function syncPhonePush(): Promise<void> {
   if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
