@@ -128,6 +128,22 @@ interface EntryDraft {
   surprise: boolean;
 }
 
+interface StatementLine {
+  id: string;
+  day: string;
+  label: string;
+  name: string;
+  origin: string;
+  amount: number;
+  source: 'plan' | 'wallet' | 'move';
+  key: string;
+  surprise: boolean;
+  absorbed: boolean;
+  open: boolean;
+  automatic: boolean;
+  image: string | null;
+}
+
 function todayKey(): string {
   return new Date().toISOString().slice(0, 10);
 }
@@ -1041,7 +1057,7 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
   const lines = [...(book?.entries || [])].sort((a, b) => b.date.localeCompare(a.date) || b._id.localeCompare(a._id));
   const statement = (() => {
     if (!current) return [];
-    const rows = [
+    const rows: StatementLine[] = [
       ...(current.flows || []).map((flow) => ({
         id: `plan:${flow.key}`,
         day: flow.day.slice(0, 10),
