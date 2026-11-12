@@ -35,6 +35,92 @@ const sheetIn = { opacity: 0, y: 28, scale: 0.96 };
 const sheetOn = { opacity: 1, y: 0, scale: 1 };
 const sheetSpring = { ...softSpring, opacity: { duration: 0.18 } };
 
+function madridMinute(): string {
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date());
+  const pick = (type: string) => parts.find((part) => part.type === type)?.value || '00';
+  return `${pick('year')}-${pick('month')}-${pick('day')}T${pick('hour')}:${pick('minute')}`;
+}
+
+function madridDay(daysBack = 0): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(Date.now() - daysBack * 86_400_000));
+}
+
+const COIN_ALIAS: [RegExp, string][] = [
+  [/\bbitcoin\b/i, 'BTC'],
+  [/\bethereum\b|\bether\b/i, 'ETH'],
+  [/\bsolana\b/i, 'SOL'],
+  [/\bripple\b/i, 'XRP'],
+  [/\bdogecoin\b/i, 'DOGE'],
+  [/\bcardano\b/i, 'ADA'],
+  [/\bavalanche\b/i, 'AVAX'],
+  [/\bchainlink\b/i, 'LINK'],
+];
+
+/** La moneda que nombra una línea, venga como «Bitcoin», «BTC» o «Bitcoin (BTC)». */
+function tickerOf(name: string): string | null {
+  const hit = name.toUpperCase().match(/\b(OKSOL|BETH|USDC|USDT|BTC|ETH|HYPE|SOL|BNB|XRP|DOGE|ADA|AVAX|LINK|PEPE|PENGU|LINEA|ASTER)\b/);
+  return hit?.[1] ?? COIN_ALIAS.find(([test]) => test.test(name))?.[1] ?? null;
+}
+
+interface BookHolding {
+  _id: string;
+  accountId: string;
+  name: string;
+  symbol?: string;
+  currency?: string;
+  quantity: number;
+  unitMarketValue?: number | null;
+  costBasis?: number | null;
+  quoteSource?: string | null;
+}
+
+function holdingFor(items: BookHolding[], name: string): BookHolding | undefined {
+  const exact = items.find((item) => fold(item.name) === fold(name));
+  if (exact) return exact;
+  const ticker = tickerOf(name);
+  if (!ticker) return undefined;
+  return items.find((item) => tickerOf(item.name) === ticker || (item.symbol || '').trim().toUpperCase() === ticker);
+}
+
+const cents = (value: number) => Math.round(value * 100) / 100;
+
+const COINGECKO_ID: Record<string, string> = {
+  BTC: 'bitcoin',
+  ETH: 'ethereum',
+  SOL: 'solana',
+  XRP: 'ripple',
+  BNB: 'binancecoin',
+  ADA: 'cardano',
+  DOGE: 'dogecoin',
+  AVAX: 'avalanche-2',
+  LINK: 'chainlink',
+};
+
+/** Compra o venta apuntada como movimiento: mueve la pieza y el efectivo, y la cuentan los planes. */
+async function postTrade(accountId: string, holding: BookHolding, type: 'buy' | 'sell', eur: number, quantity: number, label: string): Promise<boolean> {
+  try {
+    await api('/api/movements', {
+      method: 'POST',
+      body: JSON.stringify({
+        type,
+        date: madridDay(),
+        amount: cents(eur),
+        currency: holding.currency || 'EUR',
+        description: `${type === 'buy' ? 'Compra' : 'Venta'} de ${label.trim()}`,
+        accountId,
+        holdingId: holding._id,
+        quantity: Number(quantity.toFixed(8)),
+        applyToBalances: true,
+        confirmDuplicate: true,
+      }),
+    });
+    return true;
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 400) return false;
+    throw err;
+  }
+}
+
 function PhotoWash({ src }: { src: string }) {
   return (
     <>
@@ -992,15 +1078,26 @@ export function TicketCam({
         tracking = onlyBalance ? 'balance' : 'positions';
       }
       if (flows.length && positions.length === 0) {
-        const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
-        const listed = await api<{ movements: { type: string; date: string; amount: number; description?: string; accountId: string }[] }>(
-          `/api/movements?accountId=${encodeURIComponent(target)}&from=${day}&to=${day}`,
-        );
+        const day = madridDay();
+        const [listed, book] = await Promise.all([
+          api<{ movements: { type: string; date: string; amount: number; description?: string; accountId: string; holdingId?: string | null }[] }>(
+            `/api/movements?accountId=${encodeURIComponent(target)}&from=${madridDay(31)}&to=${day}`,
+          ),
+          api<{ holdings: BookHolding[] }>('/api/holdings'),
+        ]);
+        const coins = (book.holdings || []).filter((item) => String(item.accountId) === target);
         const seen = new Map<string, number>();
         const flowKey = (type: string, amount: number, description: string) =>
           `${type}|${amount.toFixed(2)}|${description.trim().toLowerCase().replace(/\s+/g, ' ')}`;
+        const tradeKey = (type: string, holdingId: string, amount: number) => `${type}|${holdingId}|${amount.toFixed(2)}`;
         for (const move of listed.movements || []) {
-          if (move.date.slice(0, 10) !== day || String(move.accountId) !== target) continue;
+          if (String(move.accountId) !== target) continue;
+          if ((move.type === 'buy' || move.type === 'sell') && move.holdingId) {
+            const key = tradeKey(move.type, String(move.holdingId), move.amount);
+            seen.set(key, (seen.get(key) || 0) + 1);
+            continue;
+          }
+          if (move.date.slice(0, 10) !== day) continue;
           const key = flowKey(move.type, move.amount, move.description || '');
           seen.set(key, (seen.get(key) || 0) + 1);
         }
@@ -1008,6 +1105,28 @@ export function TicketCam({
         for (const line of flows) {
           const amount = readAmount(line.amount);
           if (!Number.isFinite(amount) || amount === 0) continue;
+          const coin = tickerOf(line.name) && !isLiquidName(line.name) ? holdingFor(coins, line.name) : undefined;
+          const price = coin?.unitMarketValue ?? 0;
+          if (coin && price > 0) {
+            // Una línea de cripto en la lista es una compra o una venta de esa moneda, no dinero que entra o sale.
+            const side = amount < 0 ? 'buy' : 'sell';
+            const key = tradeKey(side, coin._id, Math.abs(amount));
+            const already = seen.get(key) || 0;
+            if (already > 0) {
+              seen.set(key, already - 1);
+              continue;
+            }
+            const quantity = Math.abs(amount) / price;
+            try {
+              if (await postTrade(target, coin, side, Math.abs(amount), quantity, coin.name)) {
+                coin.quantity += side === 'buy' ? quantity : -quantity;
+                continue;
+              }
+            } catch (err) {
+              failed = failed || err;
+              continue;
+            }
+          }
           const type = amount < 0 ? 'withdrawal' : 'deposit';
           const key = flowKey(type, Math.abs(amount), line.name);
           const already = seen.get(key) || 0;
@@ -1058,12 +1177,48 @@ export function TicketCam({
       } else if (touchedCash) {
         await api(`/api/accounts/${target}`, { method: 'PATCH', body: JSON.stringify({ balance: pocket }) });
       }
-      const book = await api<{ holdings: { _id: string; accountId: string; name: string; quantity: number; unitMarketValue?: number | null }[] }>('/api/holdings');
+      const book = await api<{ holdings: BookHolding[] }>('/api/holdings');
       const mine = (book.holdings || []).filter((item) => String(item.accountId) === target);
+      let cashShift = 0;
+      let cashUnbooked = 0;
       const writePosition = async (line: WalletLine, amount: number) => {
         const gain = line.gain.trim() ? readAmount(line.gain) : null;
         const cost = gain != null && Number.isFinite(gain) ? Math.round((amount - gain) * 100) / 100 : null;
-        const found = mine.find((item) => item.name.trim().toLowerCase() === line.name.trim().toLowerCase());
+        const found = holdingFor(mine, line.name);
+        const price = found?.unitMarketValue ?? 0;
+        if (found && (found.quoteSource === 'coingecko' || found.quoteSource === 'yahoo') && price > 0) {
+          // Con cotización en vivo la foto no pisa el precio: lo que haya de más es una compra y lo que falte, una venta.
+          const nextQty = amount / price;
+          const extra = (nextQty - found.quantity) * price;
+          const noise = Math.max(1, amount * 0.005);
+          const costNow = found.costBasis ?? 0;
+          if (extra > noise) {
+            const spent = cents(cost != null && cost - costNow > 0.5 ? cost - costNow : extra);
+            const quantity = nextQty - found.quantity;
+            if (await postTrade(target, found, 'buy', spent, quantity, found.name)) cashShift -= spent;
+            else {
+              await api(`/api/holdings/${found._id}`, {
+                method: 'PATCH',
+                body: JSON.stringify({ buy: { at: madridMinute(), spentEur: spent, mode: 'manual', quantity: Number(quantity.toFixed(8)) } }),
+              });
+            }
+          } else if (extra < -noise) {
+            const kept = found.quantity > 0 ? nextQty / found.quantity : 0;
+            const sold = cents(-extra);
+            if (await postTrade(target, found, 'sell', sold, found.quantity - nextQty, found.name)) {
+              cashShift += sold;
+              if (cost != null) await api(`/api/holdings/${found._id}`, { method: 'PATCH', body: JSON.stringify({ costBasis: cost }) });
+            } else {
+              await api(`/api/holdings/${found._id}`, {
+                method: 'PATCH',
+                body: JSON.stringify({ quantity: Number(nextQty.toFixed(8)), costBasis: Math.round((cost ?? costNow * kept) * 100) / 100 }),
+              });
+            }
+          } else if (cost != null && Math.abs(cost - costNow) > 0.5) {
+            await api(`/api/holdings/${found._id}`, { method: 'PATCH', body: JSON.stringify({ costBasis: cost }) });
+          }
+          return;
+        }
         if (found) {
           const qty = found.quantity > 0 ? found.quantity : 1;
           await api(`/api/holdings/${found._id}`, {
@@ -1076,6 +1231,32 @@ export function TicketCam({
               ...(cost != null && cost >= 0 ? { costBasis: cost } : {}),
             }),
           });
+          return;
+        }
+        const ticker = line.assetClass === 'crypto' ? tickerOf(line.name) : null;
+        const coinId = ticker ? COINGECKO_ID[ticker] : undefined;
+        const live = coinId
+          ? (book.holdings || []).find((item) => item.quoteSource === 'coingecko' && (item.unitMarketValue ?? 0) > 0 && (tickerOf(item.name) === ticker || (item.symbol || '').toUpperCase() === ticker))
+          : undefined;
+        if (ticker && coinId && live?.unitMarketValue) {
+          // Una cripto nueva en la cartera se enlaza a su precio en vivo y cuenta como compra, para que la vean los planes.
+          const quantity = Number((amount / live.unitMarketValue).toFixed(8));
+          const spent = cents(cost != null && cost > 0 ? cost : amount);
+          await api('/api/holdings', {
+            method: 'POST',
+            body: JSON.stringify({
+              accountId: target,
+              name: line.name.trim(),
+              symbol: ticker,
+              assetClass: 'crypto',
+              currency: 'EUR',
+              quoteSource: 'coingecko',
+              quoteId: coinId,
+              buy: { at: madridMinute(), spentEur: spent, mode: 'manual', quantity },
+            }),
+          });
+          cashShift -= spent;
+          cashUnbooked -= spent;
           return;
         }
         await api('/api/holdings', {
@@ -1109,9 +1290,13 @@ export function TicketCam({
           body: JSON.stringify({ name: line.name.trim(), assetClass: line.assetClass, quantity: qty, unitMarketValue: next / qty }),
         });
       }
-      if (loose !== 0) {
-        const next = Math.max(0, Math.round((pocket + loose) * 100) / 100);
-        await api(`/api/accounts/${target}`, { method: 'PATCH', body: JSON.stringify({ balance: next }) });
+      if (loose !== 0 || cashShift !== 0) {
+        // Si la foto trae el efectivo, ese es el bueno; si no, las compras y ventas lo han movido ya.
+        const base = touchedCash ? pocket : pocket + cashShift;
+        const next = Math.max(0, cents(base + loose));
+        if (loose !== 0 || touchedCash || next !== cents(pocket + cashShift - cashUnbooked)) {
+          await api(`/api/accounts/${target}`, { method: 'PATCH', body: JSON.stringify({ balance: next }) });
+        }
       }
       setMark('ok');
       window.setTimeout(onSaved, 720);

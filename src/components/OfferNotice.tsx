@@ -22,6 +22,20 @@ export function watchOfferSkips(onChange: () => void): () => void {
   return () => { offerSkipWatchers.delete(onChange); };
 }
 
+/** Avisos de compra que siguen puestos. Mientras no se sepa, no se enseña ninguna oferta. */
+let liveWatchIds: Set<string> | null = null;
+
+function setLiveWatches(ids: string[]) {
+  liveWatchIds = new Set(ids);
+  for (const notify of offerSkipWatchers) notify();
+}
+
+/** Una oferta solo se enseña si el aviso que la trajo sigue puesto. */
+function fromLiveWatch(item: AppNotification): boolean {
+  const id = item.quoteKey?.match(/^listing:([a-f0-9]{24}):/)?.[1];
+  return Boolean(id && liveWatchIds?.has(id));
+}
+
 function skippedIds(): Set<string> {
   try {
     const raw = JSON.parse(localStorage.getItem(SKIP) || '[]') as unknown;
@@ -92,7 +106,7 @@ export function rankedOffers(items: AppNotification[]): AppNotification[] {
   const skip = skippedIds();
   const passed = readPassed();
   return items
-    .filter((item) => item.quoteKey?.startsWith('listing:') && !dismissed(item, skip, passed) && listingStillUp(item.url))
+    .filter((item) => item.quoteKey?.startsWith('listing:') && fromLiveWatch(item) && !dismissed(item, skip, passed) && listingStillUp(item.url))
     .sort((a, b) => (a.priceEur ?? Number.POSITIVE_INFINITY) - (b.priceEur ?? Number.POSITIVE_INFINITY) || a.createdAt.localeCompare(b.createdAt))
     .slice(0, OFFER_LIMIT);
 }
@@ -256,6 +270,7 @@ export function OfferNotice({ focused = null, onFocusedClose }: { focused?: AppN
           }
           setCeilings(next);
           setHashes(names);
+          setLiveWatches(Object.keys(next));
         })
         .catch(() => {
           if (cancelled || retry >= 3) return;
@@ -290,7 +305,7 @@ export function OfferNotice({ focused = null, onFocusedClose }: { focused?: AppN
   const unique: AppNotification[] = [];
   const buckets = new Set<string>();
   for (const item of items) {
-    if (!item.quoteKey?.startsWith('listing:')) continue;
+    if (!item.quoteKey?.startsWith('listing:') || !fromLiveWatch(item)) continue;
     const listing = listingOf(item.quoteKey);
     const token = listing && item.priceEur != null ? `${listing}:${Math.round(item.priceEur)}` : item.id;
     if (buckets.has(token)) continue;
@@ -299,7 +314,7 @@ export function OfferNotice({ focused = null, onFocusedClose }: { focused?: AppN
     unique.push(item);
   }
   unique.sort((a, b) => (a.priceEur ?? Number.POSITIVE_INFINITY) - (b.priceEur ?? Number.POSITIVE_INFINITY) || a.createdAt.localeCompare(b.createdAt));
-  const picked = focused?.quoteKey?.startsWith('listing:') ? focused : null;
+  const picked = focused?.quoteKey?.startsWith('listing:') && fromLiveWatch(focused) ? focused : null;
   const deck = unique.filter((item) => !dismissed(item, skip, passed)).slice(0, OFFER_LIMIT);
   if (picked && listingStillUp(picked.url) && !deck.some((item) => item.id === picked.id)) {
     deck.unshift(picked);

@@ -816,7 +816,10 @@ function AlertDesk({ items, catalog, hashes, market, onChanged }: { items: Marke
 
   const remove = (item: MarketSignal) => {
     const path = item.kind === 'compra' ? `/api/market/watch/${item.id}` : `/api/market/listen/${item.id}`;
-    void api(path, { method: 'DELETE' }).then(onChanged);
+    void api(path, { method: 'DELETE' }).then(() => {
+      window.dispatchEvent(new Event('pat-alerts'));
+      onChanged();
+    });
   };
 
   const pickKind = (kind: CreateKind) => {

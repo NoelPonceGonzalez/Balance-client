@@ -468,9 +468,10 @@ function accountSides(parts: AccountPart[], name: string, balance = 0): Side[] {
   const sides: Side[] = [];
   const cash = parts.filter((part) => (part.group || 'other') === 'cash');
   if (cash.length) sides.push(makeSide('cash', products.cash?.title || 'Líquido', cash));
-  else if (products.cash) {
-    sides.push(makeSide('cash', products.cash.title, [{
-      label: products.cash.title,
+  else if (products.cash || skins) {
+    const title = products.cash?.title || 'Efectivo';
+    sides.push(makeSide('cash', title, [{
+      label: title,
       eur: Math.round(balance * 100) / 100,
       group: 'cash',
       costEur: null,

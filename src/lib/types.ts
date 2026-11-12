@@ -396,6 +396,7 @@ export interface PlanBuy {
   manual?: boolean;
   movementIds?: string[];
   spent?: number;
+  quantity?: number;
 }
 
 export interface PlanWatch {

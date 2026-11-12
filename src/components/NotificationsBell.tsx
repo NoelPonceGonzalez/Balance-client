@@ -52,10 +52,18 @@ export function NotificationsBell({ align = 'left', onDue, onPlan, onOffer, onLi
         const newest = data.notifications.reduce((max, item) => Math.max(max, new Date(item.createdAt).getTime()), 0);
         if (announced.current == null) {
           announced.current = newest;
-        } else if (permission === 'granted') {
+        } else if (permission === 'granted' && !navigator.serviceWorker?.controller) {
           for (const item of data.notifications) {
             const at = new Date(item.createdAt).getTime();
-            if (at > announced.current) new Notification(item.title, { body: item.body });
+            if (at > announced.current) {
+              new Notification(item.title, {
+                body: item.body,
+                lang: 'es',
+                icon: item.image || '/icons/icon-192.png',
+                badge: '/icons/badge-96.png',
+                tag: item.quoteKey || item.id,
+              });
+            }
           }
           announced.current = Math.max(announced.current, newest);
         } else {
@@ -176,15 +184,17 @@ export function NotificationsBell({ align = 'left', onDue, onPlan, onOffer, onLi
           );
           if (planId && onPlan) {
             return (
-              <button key={item.id} type="button" onClick={() => { setOpen(false); onPlan(planId); }} className={cn('block w-full rounded-2xl px-3 py-2 text-left', item.read ? 'bg-transparent' : 'bg-slate-50 dark:bg-slate-900')}>
-                {body}
+              <button key={item.id} type="button" onClick={() => { setOpen(false); onPlan(planId); }} className={cn('flex w-full items-center gap-3 rounded-2xl px-3 py-2 text-left', item.read ? 'bg-transparent' : 'bg-slate-50 dark:bg-slate-900')}>
+                {item.image && <img src={item.image} alt="" referrerPolicy="no-referrer" className="h-10 w-14 shrink-0 rounded-lg object-cover" />}
+                <span className="min-w-0">{body}</span>
               </button>
             );
           }
           if (openDue) {
             return (
-              <button key={item.id} type="button" onClick={() => { setOpen(false); onDue(item.quoteKey as string); }} className={cn('block w-full rounded-2xl px-3 py-2 text-left', item.read ? 'bg-transparent' : 'bg-slate-50 dark:bg-slate-900')}>
-                {body}
+              <button key={item.id} type="button" onClick={() => { setOpen(false); onDue(item.quoteKey as string); }} className={cn('flex w-full items-center gap-3 rounded-2xl px-3 py-2 text-left', item.read ? 'bg-transparent' : 'bg-slate-50 dark:bg-slate-900')}>
+                {item.image && <img src={item.image} alt="" referrerPolicy="no-referrer" className="h-10 w-14 shrink-0 rounded-lg object-cover" />}
+                <span className="min-w-0">{body}</span>
               </button>
             );
           }
@@ -214,8 +224,9 @@ export function NotificationsBell({ align = 'left', onDue, onPlan, onOffer, onLi
             );
           }
           return (
-            <article key={item.id} className={cn('rounded-2xl px-3 py-2', item.read ? 'bg-transparent' : 'bg-slate-50 dark:bg-slate-900')}>
-              {body}
+            <article key={item.id} className={cn('flex items-center gap-3 rounded-2xl px-3 py-2', item.read ? 'bg-transparent' : 'bg-slate-50 dark:bg-slate-900')}>
+              {item.image && <img src={item.image} alt="" referrerPolicy="no-referrer" className="h-10 w-14 shrink-0 rounded-lg object-cover" />}
+              <span className="min-w-0">{body}</span>
             </article>
           );
         })}

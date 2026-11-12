@@ -91,6 +91,7 @@ function cleanName(value: string): string {
     .replace(/[€$]/g, ' ')
     .replace(/[+\-−]?\s*\d+[.,]\d+\s*%/g, ' ')
     .replace(/[^0-9A-Za-zÁÉÍÓÚÜÑáéíóúüñ&.'()/-]+/g, ' ')
+    .replace(/(^|\s)[-/.]+(?=\s|$)/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
   if (!/[0-9A-Za-zÁÉÍÓÚÜÑáéíóúüñ]/.test(name)) return '';
@@ -211,8 +212,11 @@ function moneyHits(chunk: string): { value: number; signed: boolean; euro: boole
   return hits;
 }
 
+/** Subtítulo de una operación en la lista del bróker: «Compra · 12 nov», «Orden de venta», «Plan de inversión ejecutado». */
+const TRADE_NOTE = /^(compra|venta|orden de (compra|venta)|plan de (inversi[oó]n|ahorro)|ahorro programado)\b/i;
+
 function isMoveList(text: string): boolean {
-  return /\b(enviad|rechazad|completad|inter[eé]s)\b/i.test(text);
+  return /\b(enviad|rechazad|completad|inter[eé]s)\b/i.test(text) || text.split(/\n/).some((line) => TRADE_NOTE.test(cleanName(line)));
 }
 
 function squash(value: string): string {
@@ -378,6 +382,7 @@ export function readWalletText(text: string, accounts: PhotoAccount[]): PhotoRea
     }
     if (name && !valueHit && !gainHit) {
       if (!/[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]/.test(name)) continue;
+      if (pending && TRADE_NOTE.test(name)) continue;
       if (!walletName || fold(name) !== fold(walletName)) pending = name;
       skipped = false;
       continue;

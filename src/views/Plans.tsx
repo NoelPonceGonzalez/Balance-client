@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { bindHold, HoldMenu, holdItemClass, placeMenu } from '@/components/HoldMenu';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'motion/react';
-import { Check, ChevronLeft, ChevronRight, Copy, GripVertical, ImageIcon, MoreHorizontal, Pencil, Plus, Trash2 } from 'lucide-react';
+import { Check, ChevronDown, ChevronLeft, ChevronRight, Copy, GripVertical, ImageIcon, MoreHorizontal, Pencil, Plus, Trash2 } from 'lucide-react';
 import { ModalClose, modalPanelClass, Overlay } from '@/components/Modal';
 import { OriginGlyph, OriginPicker } from '@/components/OriginMark';
 import { PlatformLogo } from '@/components/PlatformLogo';
@@ -17,10 +17,22 @@ import { accountProducts } from '@/lib/products';
 import { cn, docId } from '@/lib/utils';
 import type { AccountRow, PlanForecast, PlanInvest, PlanMonthLine, PlanMonthView, PlanRow, TripSplit } from '@/lib/types';
 import { TripFace, TripPlan } from '@/views/TripPlan';
-import { assetLabel, buyLeft, coinMoments, investResult, InvestPlan, INVEST_ASSETS, localInvest, MOMENT_LABEL, MOMENT_TONE, usePlanCoins, type CoinMoment } from '@/components/InvestPlan';
+import { assetLabel, buyLeft, CoinMark, coinMoments, fillPlan, InvestPlan, INVEST_ASSETS, localInvest, MOMENT_LABEL, MOMENT_TONE, planOutcome, usePlanCoins, wholeEur, type CoinMoment, type PlanOutcome } from '@/components/InvestPlan';
 
 type Kind = 'patrimonio' | 'liquidez' | 'inversion' | 'gastos';
 type PlanItem = { plan: PlanRow; forecast: PlanForecast; split?: TripSplit; invest?: PlanInvest };
+type PlanFilter = 'live' | 'over' | 'all';
+
+const FILTERS: { id: PlanFilter; label: string }[] = [
+  { id: 'live', label: 'En marcha' },
+  { id: 'over', label: 'Terminados' },
+  { id: 'all', label: 'Todos' },
+];
+
+function todayIso(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+}
 type DraftBuy = { id?: string; asset: string; amount: string; date: string; done: boolean; doneAt?: string; priceEur?: number | null };
 type DraftWatch = { dropPct: string; risePct: string; ratioAbove: string; zones: { asset: string; belowEur: string }[] };
 
@@ -348,6 +360,33 @@ function PlanCorner({ balance, target, delta, beat }: { balance: number; target:
   if (delta != null && Math.abs(delta) > 0.5) {
     frames.push({ text: formatSignedEur(delta), className: delta > 0 ? 'text-[#16c784]' : 'text-[#ea3943]' });
   }
+  return <TurnCorner frames={frames} beat={beat} />;
+}
+
+/** Lo que vale lo metido en el plan frente a lo puesto: 110 % y luego +523 €, por turnos. */
+function OutcomeCorner({ outcome, beat }: { outcome: PlanOutcome | null; beat: number }) {
+  if (!outcome || !(outcome.invested > 0)) return null;
+  const up = outcome.result >= 0;
+  const className = up ? 'text-[#16c784]' : 'text-[#ea3943]';
+  const share = `${new Intl.NumberFormat('es-ES', { maximumFractionDigits: 1 }).format(outcome.share)} %`;
+  const money = `${up ? '+' : '−'}${wholeEur(Math.abs(outcome.result))}`;
+  return <TurnCorner frames={[{ text: share, className }, { text: money, className }]} beat={beat} />;
+}
+
+function OutcomeBar({ outcome, className }: { outcome: PlanOutcome | null; className?: string }) {
+  const invested = outcome?.invested ?? 0;
+  const up = (outcome?.result ?? 0) >= 0;
+  return (
+    <span className={cn('block h-1 overflow-hidden rounded-full bg-slate-900/10 dark:bg-white/15', className)}>
+      <span
+        className={cn('block h-full rounded-full transition-[width] duration-700 ease-out', up ? 'bg-[#16c784]' : 'bg-[#ea3943]')}
+        style={{ width: `${invested > 0 && outcome ? Math.max(0, Math.min(100, outcome.share)) : 0}%` }}
+      />
+    </span>
+  );
+}
+
+function TurnCorner({ frames, beat }: { frames: { text: string; className: string }[]; beat: number }) {
   const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const frame = frames[beat % frames.length];
   if (still) return <span className={cn('shrink-0 text-xs font-black tabular-nums', frame.className)}>{frame.text}</span>;
@@ -574,11 +613,34 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
   const linked = accounts.filter((account) => (plan?.linkedAccountIds || []).map(String).includes(String(account._id)) && !account.archived);
   const payday = accounts.find((account) => String(account._id) === String(plan?.salaryAccountId) && !account.archived) || (linked.length === 1 ? linked[0] : undefined);
   const spends = plan ? spendNotes(plan) : [];
-  const tandas = plan && isTandas(plan) ? plan : null;
-  const coins = usePlanCoins(tandas);
+  const coins = usePlanCoins(items.map((item) => item.plan).filter((row) => isTandas(row)), books);
+  const shownPlan = (item: PlanItem): PlanRow => (isTandas(item.plan) && !item.invest ? fillPlan(item.plan, coins.holdings, coins.movements) : item.plan);
+  const tandas = current && isTandas(current.plan) ? shownPlan(current) : null;
   const tandasInvest = tandas ? current?.invest ?? localInvest(tandas, coins.holdings) : undefined;
+  const tandasOutcome = tandas ? planOutcome(tandas, coins.holdings) : null;
+  const rows = items.map((item) => {
+    const opening = item.forecast.months?.[0]?.lines[0]?.balance ?? item.plan.openingBalance ?? 0;
+    const done = item.forecast.today ? completion(item.forecast.months || [], item.forecast.today, opening, item.plan.targetAmount) : null;
+    const shown = shownPlan(item);
+    const over = item.plan.kind === 'gastos'
+      ? item.plan.tripStatus === 'done'
+      : isTandas(item.plan)
+        ? (shown.buys || []).length > 0 && (shown.buys || []).every((buy) => buyLeft(buy) === 0)
+        : Boolean(done) || (item.forecast.today || todayIso()) > item.plan.targetDate.slice(0, 10);
+    return { item, opening, done, shown, over };
+  });
+  const [filter, setFilter] = useState<PlanFilter>(() => {
+    const stored = localStorage.getItem('pat_plan_filter');
+    return stored === 'over' || stored === 'all' ? stored : 'live';
+  });
+  const pickFilter = (next: PlanFilter) => {
+    setFilter(next);
+    localStorage.setItem('pat_plan_filter', next);
+  };
+  const listed = rows.filter((row) => filter === 'all' || (filter === 'over') === row.over);
   const moments = tandas ? coinMoments(tandas, tandasInvest, coins.holdings) : [];
   const [tandaFocus, setTandaFocus] = useState<{ id: string; at: number } | null>(null);
+  const [coinsOpen, setCoinsOpen] = useState(false);
 
   const beginEdit = (line: PlanMonthLine) => {
     if (!plan || !line.markKey) return;
@@ -897,38 +959,88 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
         <div className="sticky -top-2 z-30 -mt-2 mx-[calc(50%-50vw)] bg-[var(--app-bg)] px-3 pb-4 pt-4 sm:px-4 md:px-8">
           <div aria-hidden className="pointer-events-none absolute inset-x-0 top-full h-8 bg-gradient-to-b from-[var(--app-bg)] to-transparent" />
           <div className="relative mx-auto max-w-3xl">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <button type="button" onClick={() => setSelected(null)} className="inline-flex items-center gap-0.5 text-sm font-semibold text-slate-500" aria-label="Todos los planes"><ChevronLeft size={16} /> Planes</button>
-              <span className="text-xs font-medium text-slate-400">{tandas ? `${(plan.buys || []).filter((buy) => buy.done).length} de ${(plan.buys || []).length} tandas` : formatEur(plan.targetAmount)}</span>
+            <div className="mb-3 grid grid-cols-[2rem_1fr_auto] items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setSelected(null)}
+                className="grid h-8 w-8 place-items-center rounded-full bg-slate-900/[0.05] text-slate-600 transition-transform active:scale-95 dark:bg-white/10 dark:text-slate-200"
+                aria-label="Todos los planes"
+              >
+                <ChevronLeft size={17} />
+              </button>
+              <div className="min-w-0 text-center">
+                <p className="truncate text-[15px] font-semibold tracking-tight">{plan.name}</p>
+                <p className="truncate text-[11px] font-semibold text-slate-400">{kindLabel(plan)}{linked[0] ? ` · ${linked[0].name}` : ''}</p>
+              </div>
+              <span className="justify-self-end rounded-full bg-slate-900/[0.05] px-2.5 py-1 text-[11px] font-semibold tabular-nums text-slate-500 dark:bg-white/10 dark:text-slate-300">
+                {tandas ? `${(tandas.buys || []).filter((buy) => buy.done).length}/${(tandas.buys || []).length}` : wholeEur(plan.targetAmount)}
+              </span>
             </div>
             {tandas ? (
-              <TandasHeader plan={tandas} invest={tandasInvest} moments={moments} onPick={(id) => setTandaFocus({ id, at: Date.now() })} />
+              <TandasHeader
+                plan={tandas}
+                outcome={tandasOutcome}
+                loading={!coins.holdings.length}
+                beat={beat}
+                moments={moments}
+                open={coinsOpen}
+                onToggle={() => setCoinsOpen((value) => !value)}
+                onPick={(id) => setTandaFocus({ id, at: Date.now() })}
+              />
             ) : (
-              <>
-                <p className="text-[2rem] font-semibold leading-none tabular-nums tracking-tight text-slate-900 dark:text-white"><SoftEur value={shownBalance} /></p>
-                {jointLine(forecast, linked[0]) && <p className="mt-2 text-[13px] font-medium leading-snug text-slate-400">{jointLine(forecast, linked[0])}</p>}
-                <div className="mt-4 h-0.5 w-full overflow-hidden rounded-full bg-slate-900/10 dark:bg-white/15">
-                  <div className="h-full rounded-full bg-slate-900 transition-[width] duration-700 ease-out dark:bg-white" style={{ width: `${barWidth(shownBalance, plan.targetAmount)}%` }} />
+              <HeroCard>
+                <div className="flex items-end justify-between gap-3">
+                  <p className="text-[2rem] font-semibold leading-none tabular-nums tracking-[-0.03em] text-slate-900 dark:text-white"><SoftEur value={shownBalance} /></p>
+                  {finished ? (
+                    <span className="inline-flex items-center gap-1 text-[12px] font-bold text-[#16c784]"><Check size={13} strokeWidth={3} /> Completado</span>
+                  ) : (
+                    <PlanCorner balance={shownBalance} target={plan.targetAmount} delta={null} beat={beat} />
+                  )}
                 </div>
-              </>
+                <HeroBar share={barWidth(shownBalance, plan.targetAmount)} tone={finished ? 'up' : 'flat'} />
+                <div className="mt-2.5 flex items-baseline justify-between gap-3 text-[12px] font-medium tabular-nums text-slate-400">
+                  <span className="min-w-0 truncate">
+                    {finished ? `Completado el ${shortDay(finished.day)}` : arrival ? <span className={arrival.className}>{arrival.text}</span> : jointLine(forecast, linked[0]) || `Meta ${wholeEur(plan.targetAmount)}`}
+                  </span>
+                  <span className="shrink-0">de {wholeEur(plan.targetAmount)}</span>
+                </div>
+              </HeroCard>
             )}
-            {tandas ? null : finished ? (
-              <p className="mt-3 text-[13px] font-medium text-[#16c784]">Completado el {shortDay(finished.day)}</p>
-            ) : arrival ? (
-              <p className={cn('mt-3 text-[13px] font-medium leading-snug', arrival.className)}>{arrival.text}</p>
-            ) : null}
           </div>
         </div>
       )}
       {error && <p className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">{error}</p>}
       {!ready && !plan && <QuietLoad />}
+      {ready && !selected && rows.length > 0 && (
+        <div className="flex gap-1.5 overflow-x-auto" role="tablist" aria-label="Filtrar planes">
+          {FILTERS.map((option) => {
+            const count = option.id === 'all' ? rows.length : rows.filter((row) => (option.id === 'over') === row.over).length;
+            return (
+              <button
+                key={option.id}
+                type="button"
+                role="tab"
+                aria-selected={filter === option.id}
+                onClick={() => pickFilter(option.id)}
+                className={cn(
+                  'shrink-0 rounded-full px-3.5 py-1.5 text-[13px] font-semibold transition-colors',
+                  filter === option.id ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900' : 'bg-slate-900/[0.05] text-slate-500 dark:bg-white/10 dark:text-slate-300',
+                )}
+              >
+                {option.label} <span className="tabular-nums opacity-60">{count}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
       {ready && !selected && (
         <div className="grid grid-cols-1 gap-3 min-[480px]:grid-cols-2">
-          {items.map((item) => {
-            const opening = item.forecast.months?.[0]?.lines[0]?.balance ?? item.plan.openingBalance ?? 0;
-            const done = item.forecast.today ? completion(item.forecast.months || [], item.forecast.today, opening, item.plan.targetAmount) : null;
-            return { item, opening, done };
-          }).sort((a, b) => Number(Boolean(a.done)) - Number(Boolean(b.done))).map(({ item, opening, done }) => {
+          {listed.length === 0 && rows.length > 0 && (
+            <p className="col-span-full px-1 py-2 text-sm font-medium text-slate-400">
+              {filter === 'over' ? 'Todavía no hay planes terminados.' : 'No hay planes en marcha.'}
+            </p>
+          )}
+          {[...listed].sort((a, b) => Number(a.over) - Number(b.over) || Number(Boolean(a.done)) - Number(Boolean(b.done))).map(({ item, opening, done, shown }) => {
             const id = docId(item.plan);
             if (item.plan.kind === 'gastos') {
               return (
@@ -964,6 +1076,56 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
             const site = accounts.find((account) => (item.plan.linkedAccountIds || []).map(String).includes(String(account._id)) && !account.archived);
             const pace = surprisePace(item.plan);
             const delta = item.plan.kind === 'inversion' ? pace.ahead - pace.behind : null;
+            const outcome = isTandas(item.plan) ? planOutcome(shown, coins.holdings) : null;
+            if (isTandas(item.plan)) {
+              return (
+                <div
+                  key={id}
+                  onPointerDown={(event) => {
+                    if ((event.target as HTMLElement).closest('[data-menu]')) return;
+                    holdCard(id, event);
+                  }}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    setCardMenu({ id, ...placeMenu(event.clientX, event.clientY), confirm: false });
+                  }}
+                  onClick={() => {
+                    if (suppressCard.current) {
+                      suppressCard.current = false;
+                      return;
+                    }
+                    setSelected(id);
+                  }}
+                  className="hold-target plan-rise cursor-pointer rounded-[28px] bg-white p-4 text-left ring-1 ring-slate-200/70 dark:bg-slate-900 dark:ring-white/10"
+                >
+                  <span className="flex items-start justify-between gap-2">
+                    <span className="flex min-w-0 items-center gap-2">
+                      {site && <PlatformLogo name={site.platform || site.name} size={22} />}
+                      <span className="min-w-0 truncate text-sm font-semibold">{item.plan.name}</span>
+                      <button
+                        type="button"
+                        data-menu
+                        aria-label="Editar o eliminar"
+                        onPointerDown={(event) => event.stopPropagation()}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          const rect = event.currentTarget.getBoundingClientRect();
+                          setCardMenu({ id, ...placeMenu(rect.left + rect.width / 2, rect.top), confirm: false });
+                        }}
+                        className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-slate-400"
+                      >
+                        <MoreHorizontal size={15} />
+                      </button>
+                    </span>
+                    <OutcomeCorner outcome={outcome} beat={beat} />
+                  </span>
+                  <span className="mt-2 block text-[11px] font-semibold text-slate-400">{kindLabel(item.plan)}</span>
+                  <span className="mt-3 block whitespace-nowrap text-[1.65rem] font-semibold leading-none tabular-nums tracking-tight">{outcome ? <SoftEur value={outcome.value} whole /> : '—'}</span>
+                  <OutcomeBar outcome={outcome} className="mt-4" />
+                  <span className="mt-2 block text-[13px] font-medium text-slate-400">{tandasLine(shown, outcome)}</span>
+                </div>
+              );
+            }
             return (
               <div
                 key={id}
@@ -1007,7 +1169,7 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
                     <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[#16c784]/12 px-2 py-0.5 text-[11px] font-black text-[#16c784]">
                       <Check size={12} strokeWidth={3} /> Completado
                     </span>
-                  ) : isTandas(item.plan) ? null : (
+                  ) : (
                     <PlanCorner balance={balance} target={item.plan.targetAmount} delta={delta} beat={beat} />
                   )}
                 </span>
@@ -1015,9 +1177,9 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
                 <span className="mt-3 block whitespace-nowrap text-[1.65rem] font-semibold leading-none tabular-nums tracking-tight"><SoftEur value={balance} /></span>
                 {jointLine(item.forecast, site) && <span className="mt-2 block text-[12px] font-medium leading-snug text-slate-400">{jointLine(item.forecast, site)}</span>}
                 <span className="mt-4 block h-0.5 overflow-hidden rounded-full bg-slate-200/80 dark:bg-white/10">
-                  <span className={cn('block h-full rounded-full transition-[width] duration-700', done ? 'bg-[#16c784]' : 'bg-slate-900 dark:bg-white')} style={{ width: `${isTandas(item.plan) ? tandasShare(item.plan) : barWidth(balance, item.plan.targetAmount)}%` }} />
+                  <span className={cn('block h-full rounded-full transition-[width] duration-700', done ? 'bg-[#16c784]' : 'bg-slate-900 dark:bg-white')} style={{ width: `${barWidth(balance, item.plan.targetAmount)}%` }} />
                 </span>
-                <span className="mt-2 block text-[13px] font-medium text-slate-400">{isTandas(item.plan) ? tandasLine(item.plan) : done ? `Llegó el ${shortDay(done.day)}` : `Objetivo ${formatEur(item.plan.targetAmount)}`}</span>
+                <span className="mt-2 block text-[13px] font-medium text-slate-400">{done ? `Llegó el ${shortDay(done.day)}` : `Objetivo ${formatEur(item.plan.targetAmount)}`}</span>
               </div>
             );
           })}
@@ -1089,8 +1251,8 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
           )}
         </HoldMenu>
       )}
-      {plan && isTandas(plan) && (
-        <InvestPlan plan={plan} invest={tandasInvest} serverReady={Boolean(current?.invest)} coins={coins} focus={tandaFocus} onChanged={load} />
+      {tandas && (
+        <InvestPlan plan={tandas} invest={tandasInvest} serverReady={Boolean(current?.invest)} coins={coins} focus={tandaFocus} showCoins={coinsOpen} onChanged={load} />
       )}
       {plan && forecast && !isTandas(plan) && (
         <article className="rounded-[28px] bg-white p-4 ring-1 ring-slate-200/70 dark:bg-slate-900 dark:ring-white/10 sm:p-5">
@@ -1564,7 +1726,7 @@ function PlanDraft({
           </div>
         )}
         {step === 'nombre' && (
-          <Input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder={draft.kind === 'gastos' ? 'Cena' : draft.kind === 'patrimonio' ? 'Guantes' : draft.tandas ? 'Bajar medias' : 'Plan 10k'} autoFocus />
+          <Input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder={draft.kind === 'gastos' ? 'Cena' : draft.kind === 'patrimonio' ? 'Guantes' : draft.tandas ? 'Inversión cripto' : 'Plan 10k'} autoFocus />
         )}
         {step === 'compras' && (
           <div className="grid max-h-72 gap-2 overflow-y-auto">
@@ -1802,77 +1964,112 @@ function spendNotes(plan: {
   return rows.sort((a, b) => a.sort.localeCompare(b.sort)).map((row) => row.text);
 }
 
-function tandasShare(plan: PlanRow): number {
-  const buys = plan.buys || [];
-  const total = buys.reduce((sum, buy) => sum + buy.amount, 0);
-  const left = buys.reduce((sum, buy) => sum + buyLeft(buy), 0);
-  return total > 0 ? ((total - left) / total) * 100 : 0;
-}
-
-function tandasLine(plan: PlanRow): string {
+function tandasLine(plan: PlanRow, outcome: PlanOutcome | null): string {
   const left = (plan.buys || []).reduce((sum, buy) => sum + buyLeft(buy), 0);
-  return left > 0 ? `Lo que valen hoy · quedan ${formatEur(left)} en tandas` : 'Lo que valen hoy · tandas hechas';
+  const invested = outcome?.invested ?? 0;
+  const head = invested > 0 ? `Metido ${wholeEur(invested)}` : 'Aún sin compras';
+  return left > 0 ? `${head} · quedan ${wholeEur(left)}` : `${head} · tandas hechas`;
 }
 
 function MomentTags({ moments, onPick }: { moments: CoinMoment[]; onPick: (buyId: string) => void }) {
   if (!moments.length) return null;
-  const good = moments.filter((item) => item.level === 'good');
-  const bad = moments.filter((item) => item.level === 'bad');
-  const headline = good.length
-    ? `Buen momento para meter en ${good.map((item) => item.name).join(' y ')}`
-    : bad.length === moments.length
-      ? 'Mal momento: mejor esperar'
-      : 'Momento normal: puedes seguir el calendario';
   return (
-    <div className="mb-4">
-      <p className="text-[13px] font-semibold text-slate-700 dark:text-slate-200">{headline}</p>
-      <div className="-mx-1 mt-2 flex gap-2 overflow-x-auto px-1 pb-1">
-        {moments.map((item) => (
-          <button
-            key={item.asset}
-            type="button"
-            disabled={!item.buy?._id}
-            onClick={() => item.buy?._id && onPick(item.buy._id)}
-            className={cn('min-w-[9.5rem] max-w-[15rem] shrink-0 rounded-2xl px-3 py-2 text-left', MOMENT_TONE[item.level])}
-          >
-            <span className="flex items-center gap-1.5 text-[13px] font-bold">
-              <span className="h-2 w-2 shrink-0 rounded-full bg-current" />
-              {item.name} · {MOMENT_LABEL[item.level]}
-            </span>
-            <span className="mt-0.5 block text-[11px] font-medium leading-snug opacity-80">{item.reasons[0]}</span>
-          </button>
-        ))}
-      </div>
+    <div className="flex shrink-0 gap-1">
+      {moments.map((item) => (
+        <button
+          key={item.asset}
+          type="button"
+          disabled={!item.buy?._id}
+          title={`${item.name}: ${MOMENT_LABEL[item.level]}. ${item.reasons.join(', ')}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            if (item.buy?._id) onPick(item.buy._id);
+          }}
+          className={cn('inline-flex items-center gap-1 rounded-full py-0.5 pl-0.5 pr-2 text-[11px] font-semibold', MOMENT_TONE[item.level])}
+        >
+          <CoinMark asset={item.asset} size={18} />
+          {MOMENT_LABEL[item.level]}
+        </button>
+      ))}
     </div>
   );
 }
 
-function TandasHeader({ plan, invest, moments, onPick }: { plan: PlanRow; invest?: PlanInvest; moments: CoinMoment[]; onPick: (buyId: string) => void }) {
-  const now = investResult(invest);
+function TandasHeader({ plan, outcome, loading, beat, moments, open, onToggle, onPick }: {
+  plan: PlanRow;
+  outcome: PlanOutcome | null;
+  loading: boolean;
+  beat: number;
+  moments: CoinMoment[];
+  open: boolean;
+  onToggle: () => void;
+  onPick: (buyId: string) => void;
+}) {
   const buys = plan.buys || [];
-  const total = buys.reduce((sum, buy) => sum + buy.amount, 0);
   const left = buys.reduce((sum, buy) => sum + buyLeft(buy), 0);
-  const next = buys.filter((buy) => buyLeft(buy) > 0 && buy.date).sort((a, b) => a.date.localeCompare(b.date))[0];
-  const tone = now ? (now.result >= 0 ? 'text-[#16c784]' : 'text-[#ea3943]') : 'text-slate-900 dark:text-white';
+  const invested = outcome?.invested ?? 0;
+  const tone: HeroTone = invested > 0 && outcome ? (outcome.result >= 0 ? 'up' : 'down') : 'flat';
   return (
-    <>
-      <MomentTags moments={moments} onPick={onPick} />
-      <p className={cn('text-[2rem] font-semibold leading-none tabular-nums tracking-tight', tone)}>
-        {now ? <SoftEur value={now.result} signed /> : '—'}
-      </p>
-      <p className="mt-2 text-[13px] font-medium leading-snug text-slate-400">
-        {now
-          ? <>Tus criptos valen {formatEur(now.value)} y has metido {formatEur(now.cost)} · {now.result >= 0 ? 'ganas' : 'pierdes'} un {new Intl.NumberFormat('es-ES', { maximumFractionDigits: 1 }).format(Math.abs(now.pct))} %</>
-          : 'Leyendo tus criptos…'}
-      </p>
-      <div className="mt-4 h-0.5 w-full overflow-hidden rounded-full bg-slate-900/10 dark:bg-white/15">
-        <div className="h-full rounded-full bg-slate-900 transition-[width] duration-700 ease-out dark:bg-white" style={{ width: `${total > 0 ? ((total - left) / total) * 100 : 0}%` }} />
+    <HeroCard open={open} onToggle={onToggle}>
+      <div className="flex items-end justify-between gap-3">
+        <p className="text-[2rem] font-semibold leading-none tabular-nums tracking-[-0.03em] text-slate-900 dark:text-white">
+          {outcome ? <SoftEur value={outcome.value} whole /> : '—'}
+        </p>
+        {invested > 0 ? <OutcomeCorner outcome={outcome} beat={beat} /> : <MomentTags moments={moments} onPick={onPick} />}
       </div>
-      <p className="mt-3 text-[13px] font-medium leading-snug text-slate-400">
-        {left > 0 ? `${formatEur(total - left)} de ${formatEur(total)} metidos en tandas` : 'Todas las tandas hechas'}
-        {next && <> · Próxima el {shortDay(next.date)}: {formatEur(buyLeft(next))} de {assetLabel(next.asset)}</>}
-      </p>
-    </>
+      <HeroBar share={invested > 0 && outcome ? outcome.share : 0} tone={tone} />
+      <div className="mt-2.5 flex items-center justify-between gap-3 text-[12px] font-medium text-slate-400">
+        <span className="min-w-0 truncate">
+          {loading
+            ? 'Leyendo tus compras…'
+            : !outcome
+              ? 'Falta el precio de hoy de alguna moneda'
+              : invested > 0
+                ? <>Metido <span className="text-slate-700 dark:text-slate-200">{wholeEur(invested)}</span> · quedan {wholeEur(left)}</>
+                : <>Aún sin compras · <span className="text-slate-700 dark:text-slate-200">{wholeEur(left)}</span> por meter</>}
+        </span>
+        <span className="inline-flex shrink-0 items-center gap-0.5 font-semibold text-slate-500 dark:text-slate-300">
+          {open ? 'Ocultar' : 'Monedas'}
+          <ChevronDown size={14} className={cn('transition-transform duration-300', open && 'rotate-180')} />
+        </span>
+      </div>
+      {invested > 0 && moments.length > 0 && (
+        <div className="mt-3"><MomentTags moments={moments} onPick={onPick} /></div>
+      )}
+    </HeroCard>
+  );
+}
+
+type HeroTone = 'up' | 'down' | 'flat';
+
+/** Cabecera común a todos los planes. Si se puede tocar, despliega el detalle debajo. */
+function HeroCard({ children, onToggle, open }: { tone?: HeroTone; children: ReactNode; onToggle?: () => void; open?: boolean }) {
+  if (!onToggle) return <section>{children}</section>;
+  return (
+    <section
+      role="button"
+      tabIndex={0}
+      aria-expanded={open}
+      onClick={onToggle}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onToggle();
+        }
+      }}
+      className="-mx-2 cursor-pointer rounded-3xl px-2 py-1 transition-colors active:bg-slate-900/[0.03] dark:active:bg-white/5"
+    >
+      {children}
+    </section>
+  );
+}
+
+function HeroBar({ share, tone }: { share: number; tone: HeroTone }) {
+  const fill = tone === 'up' ? 'from-[#16c784] to-[#3ee0a1]' : tone === 'down' ? 'from-[#ea3943] to-[#ff7a82]' : 'from-slate-800 to-slate-500 dark:from-white dark:to-slate-300';
+  return (
+    <div className="mt-3.5 h-1 overflow-hidden rounded-full bg-slate-900/[0.07] dark:bg-white/10">
+      <div className={cn('h-full rounded-full bg-gradient-to-r transition-[width] duration-700 ease-out', fill)} style={{ width: `${Math.max(0, Math.min(100, share))}%` }} />
+    </div>
   );
 }
 
@@ -1882,7 +2079,7 @@ function shortDay(iso: string): string {
   return `${Number(iso.slice(8, 10))} ${names[month - 1] || ''}`.trim();
 }
 
-function SoftEur({ value, signed = false }: { value: number; signed?: boolean }) {
+function SoftEur({ value, signed = false, whole = false }: { value: number; signed?: boolean; whole?: boolean }) {
   const [shown, setShown] = useState(value);
   const from = useRef(value);
   useEffect(() => {
@@ -1906,6 +2103,7 @@ function SoftEur({ value, signed = false }: { value: number; signed?: boolean })
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
   }, [value]);
+  if (whole) return <>{shown === 0 ? '0 €' : wholeEur(shown)}</>;
   return <>{signed ? formatSignedEur(shown) : formatEur(shown)}</>;
 }
 
