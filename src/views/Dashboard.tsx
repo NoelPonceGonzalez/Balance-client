@@ -1612,9 +1612,9 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
           </motion.p>
         )}
         {!inAccount && (
-          <div className="no-scrollbar mt-2 flex w-full snap-x snap-proximity gap-1.5 overflow-x-auto overscroll-x-contain empty:hidden">
+          <div className="no-scrollbar mt-2 flex w-full min-w-0 snap-x snap-proximity gap-1.5 overflow-x-auto overflow-y-hidden overscroll-x-contain scroll-pe-5 pe-1 empty:hidden max-md:[mask-image:linear-gradient(to_right,#000_0,#000_calc(100%-1.75rem),transparent)]">
             {offerLine && (
-              <button type="button" onClick={() => openOffer(offerLine)} className="inline-flex shrink-0 snap-start items-center gap-1.5 whitespace-nowrap rounded-full bg-white py-1 pl-1 pr-3 text-[13px] font-semibold text-slate-700 ring-1 ring-slate-200/80 dark:bg-slate-900 dark:text-slate-200 dark:ring-white/10">
+              <button type="button" onClick={() => openOffer(offerLine)} className="inline-flex shrink-0 snap-start items-center gap-1.5 whitespace-nowrap rounded-full bg-white py-1 pl-1 pr-3 text-[13px] font-semibold text-slate-700 ring-1 ring-slate-200/80 transition active:scale-[0.97] dark:bg-slate-900 dark:text-slate-200 dark:ring-white/10">
                 <span className="inline-flex items-center gap-1 rounded-full bg-slate-950 px-2 py-0.5 text-[12px] font-bold tabular-nums text-white dark:bg-white dark:text-slate-950">
                   <Tag size={12} strokeWidth={2.4} />
                   {hidden ? null : offerCount}
@@ -1623,7 +1623,7 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
               </button>
             )}
             {followCount > 0 && (
-              <button type="button" onClick={() => { setFollowDrop(null); setFollowOpen(true); }} className="inline-flex shrink-0 snap-start items-center gap-1.5 whitespace-nowrap rounded-full bg-white py-1 pl-1 pr-3 text-[13px] font-semibold text-slate-700 ring-1 ring-slate-200/80 dark:bg-slate-900 dark:text-slate-200 dark:ring-white/10">
+              <button type="button" onClick={() => { setFollowDrop(null); setFollowOpen(true); }} className="inline-flex shrink-0 snap-start items-center gap-1.5 whitespace-nowrap rounded-full bg-white py-1 pl-1 pr-3 text-[13px] font-semibold text-slate-700 ring-1 ring-slate-200/80 transition active:scale-[0.97] dark:bg-slate-900 dark:text-slate-200 dark:ring-white/10">
                 <span className="inline-flex items-center gap-1 rounded-full bg-slate-950 px-2 py-0.5 text-[12px] font-bold tabular-nums text-white dark:bg-white dark:text-slate-950">
                   <Star size={12} strokeWidth={2.4} />
                   {hidden ? null : followCount}
@@ -1632,17 +1632,17 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
               </button>
             )}
             {dueLine && (
-              <button type="button" onClick={() => window.dispatchEvent(new Event('pat-due'))} className="inline-flex shrink-0 snap-start items-center whitespace-nowrap rounded-full bg-white px-3 py-1 text-[13px] font-semibold text-slate-600 ring-1 ring-slate-200/80 dark:bg-slate-900 dark:text-slate-300 dark:ring-white/10">
+              <button type="button" onClick={() => window.dispatchEvent(new Event('pat-due'))} className="inline-flex shrink-0 snap-start items-center whitespace-nowrap rounded-full bg-white px-3 py-1 text-[13px] font-semibold text-slate-600 ring-1 ring-slate-200/80 transition active:scale-[0.97] dark:bg-slate-900 dark:text-slate-300 dark:ring-white/10">
                 <span>{dueLine.direction === 'in' ? 'Ha entrado' : 'Confirmar'} {dueLine.label}{hidden ? '' : ` ${formatEur(dueLine.amount)}`}</span>
               </button>
             )}
             {markLine && markLine.label !== dueLine?.label && (
-              <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('pat-plan', { detail: markLine.planId }))} className="inline-flex shrink-0 snap-start items-center whitespace-nowrap rounded-full bg-white px-3 py-1 text-[13px] font-semibold text-slate-600 ring-1 ring-slate-200/80 dark:bg-slate-900 dark:text-slate-300 dark:ring-white/10">
+              <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('pat-plan', { detail: markLine.planId }))} className="inline-flex shrink-0 snap-start items-center whitespace-nowrap rounded-full bg-white px-3 py-1 text-[13px] font-semibold text-slate-600 ring-1 ring-slate-200/80 transition active:scale-[0.97] dark:bg-slate-900 dark:text-slate-300 dark:ring-white/10">
                 <span>Hoy {markLine.label}{hidden ? '' : ` ${formatEur(markLine.amount)}`}</span>
               </button>
             )}
             {pendingMonth(data) > 0 && (
-              <p className="inline-flex shrink-0 snap-start items-center whitespace-nowrap rounded-full bg-white px-3 py-1 text-[13px] font-semibold text-slate-600 ring-1 ring-slate-200/80 dark:bg-slate-900 dark:text-slate-300 dark:ring-white/10">
+              <p className="inline-flex shrink-0 snap-start items-center whitespace-nowrap rounded-full bg-white px-3 py-1 text-[13px] font-semibold text-slate-600 ring-1 ring-slate-200/80 transition active:scale-[0.97] dark:bg-slate-900 dark:text-slate-300 dark:ring-white/10">
                 {hidden ? 'Por confirmar' : `Por confirmar ${formatEur(pendingMonth(data))}`}
               </p>
             )}
