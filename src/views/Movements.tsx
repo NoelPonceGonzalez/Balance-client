@@ -8,6 +8,7 @@ import { TaxReportPanel } from '@/components/TaxReportPanel';
 import { api, ApiError } from '@/lib/api';
 import { formatDay, formatEur } from '@/lib/format';
 import { TYPE_LABEL } from '@/lib/labels';
+import { moveFaces } from '@/lib/move-faces';
 import { verbFromType } from '@/lib/verbs';
 import { cn, docId } from '@/lib/utils';
 import type { AccountRow, HoldingRow, MovementRow } from '@/lib/types';
@@ -109,6 +110,11 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
     load().catch((err: Error) => setError(err.message)).finally(() => setReady(true));
   }, [filters.q, filters.type, filters.accountId, filters.from, filters.to]);
 
+  const faces = useMemo(() => moveFaces(rows), [rows]);
+  const titleOf = (row: MovementRow) => faces.get(docId(row))?.title || moveTitle(row);
+  const kindOf = (row: MovementRow) => faces.get(docId(row))?.kind || TYPE_LABEL[row.type] || row.type;
+  const toneOf = (row: MovementRow) => (faces.has(docId(row)) ? 'text-slate-500' : moveTone(row));
+
   const sorted = useMemo(() => {
     const copy = [...rows];
     const clock = (item: MovementRow) => (item.description.match(/(\d{2}:\d{2}:\d{2})/) || ['', ''])[1];
@@ -198,7 +204,7 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
 
   const exportCsv = () => {
     const header = ['fecha', 'tipo', 'importe', 'moneda', 'categoria', 'descripcion', 'cuenta', 'destino'];
-    const lines = sorted.map((row) => [row.date, TYPE_LABEL[row.type] || row.type, String(row.amount), row.currency, row.category, row.description, nameOf(row.accountId), nameOf(row.counterAccountId)].map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(';'));
+    const lines = sorted.map((row) => [row.date, kindOf(row), String(row.amount), row.currency, row.category, faces.get(docId(row))?.title || row.description, nameOf(row.accountId), nameOf(row.counterAccountId)].map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(';'));
     const blob = new Blob([[header.join(';'), ...lines].join('\n')], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -299,12 +305,12 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
                     <button type="button" onClick={() => { if (many) setOpenGroup(open ? null : group.id); else openEdit(row); }} className="flex w-full items-center gap-3 px-4 py-3 text-left">
                       <PlatformLogo name={accountOf(row.accountId)?.platform || nameOf(row.accountId)} size={36} />
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[15px] font-semibold">{moveTitle(row)}</span>
+                        <span className="block truncate text-[15px] font-semibold">{titleOf(row)}</span>
                         <span className="mt-0.5 block truncate text-[12px] font-medium text-slate-400">
-                          {many ? `${group.rows.length} apuntes · ${nameOf(row.accountId)}` : `${nameOf(row.accountId)} · ${TYPE_LABEL[row.type] || row.type}`}
+                          {many ? `${group.rows.length} apuntes · ${nameOf(row.accountId)}` : `${nameOf(row.accountId)} · ${kindOf(row)}`}
                         </span>
                       </span>
-                      <span className={cn('shrink-0 text-right text-[15px] font-semibold tabular-nums', moveTone(row))}>
+                      <span className={cn('shrink-0 text-right text-[15px] font-semibold tabular-nums', toneOf(row))}>
                         {total > 0 ? '+' : total < 0 ? '−' : ''}{formatMove(total, row.currency)}
                       </span>
                     </button>
@@ -314,7 +320,7 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
                           <li key={docId(item)} className="border-t border-slate-100 first:border-t-0 dark:border-white/10">
                             <button type="button" onClick={() => openEdit(item)} className="flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left">
                               <span className="text-[13px] font-medium text-slate-500">{formatDay(item.date)} · {(item.description.split('·')[1] || '').trim()}</span>
-                              <span className={cn('text-xs font-semibold tabular-nums', moveTone(item))}>{moveSign(item) < 0 ? '−' : '+'}{formatMove(item.amount, item.currency)}</span>
+                              <span className={cn('text-xs font-semibold tabular-nums', toneOf(item))}>{moveSign(item) < 0 ? '−' : '+'}{formatMove(item.amount, item.currency)}</span>
                             </button>
                           </li>
                         ))}

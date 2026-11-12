@@ -3,6 +3,7 @@ import { bindHold, HoldMenu, holdItemClass, placeMenu } from '@/components/HoldM
 import { AnimatePresence, motion } from 'motion/react';
 import { ArrowUpDown, ChevronLeft, ChevronRight, Eye, EyeOff, Pencil, Plus, Search, Star, Tag, Trash2 } from 'lucide-react';
 import { PlatformLogo } from '@/components/PlatformLogo';
+import { HomeGlance } from '@/components/HomeGlance';
 import { QuietLoad } from '@/components/QuietLoad';
 import { QuickSplit } from '@/components/QuickSplit';
 import { Modal } from '@/components/Modal';
@@ -1557,7 +1558,7 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
     });
   };
   const pin = (
-    <div className="sticky top-0 z-30 -mx-4 flex flex-col gap-2 bg-[var(--app-bg)] px-4 py-2 md:-mx-8 md:px-8">
+    <div className="sticky top-0 z-30 -mx-4 flex min-w-0 flex-col gap-2 bg-[var(--app-bg)] px-4 py-2 md:-mx-8 md:px-8">
       <div className="order-2 min-w-0">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <div className="flex shrink-0 items-center gap-2">
@@ -1611,9 +1612,9 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
           </motion.p>
         )}
         {!inAccount && (
-          <div className="mt-2 flex gap-1.5 overflow-x-auto empty:hidden [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className="no-scrollbar mt-2 flex w-full snap-x snap-proximity gap-1.5 overflow-x-auto overscroll-x-contain empty:hidden">
             {offerLine && (
-              <button type="button" onClick={() => openOffer(offerLine)} className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-white py-1 pl-1 pr-3 text-[13px] font-semibold text-slate-700 ring-1 ring-slate-200/80 dark:bg-slate-900 dark:text-slate-200 dark:ring-white/10">
+              <button type="button" onClick={() => openOffer(offerLine)} className="inline-flex shrink-0 snap-start items-center gap-1.5 whitespace-nowrap rounded-full bg-white py-1 pl-1 pr-3 text-[13px] font-semibold text-slate-700 ring-1 ring-slate-200/80 dark:bg-slate-900 dark:text-slate-200 dark:ring-white/10">
                 <span className="inline-flex items-center gap-1 rounded-full bg-slate-950 px-2 py-0.5 text-[12px] font-bold tabular-nums text-white dark:bg-white dark:text-slate-950">
                   <Tag size={12} strokeWidth={2.4} />
                   {hidden ? null : offerCount}
@@ -1622,7 +1623,7 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
               </button>
             )}
             {followCount > 0 && (
-              <button type="button" onClick={() => { setFollowDrop(null); setFollowOpen(true); }} className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-white py-1 pl-1 pr-3 text-[13px] font-semibold text-slate-700 ring-1 ring-slate-200/80 dark:bg-slate-900 dark:text-slate-200 dark:ring-white/10">
+              <button type="button" onClick={() => { setFollowDrop(null); setFollowOpen(true); }} className="inline-flex shrink-0 snap-start items-center gap-1.5 whitespace-nowrap rounded-full bg-white py-1 pl-1 pr-3 text-[13px] font-semibold text-slate-700 ring-1 ring-slate-200/80 dark:bg-slate-900 dark:text-slate-200 dark:ring-white/10">
                 <span className="inline-flex items-center gap-1 rounded-full bg-slate-950 px-2 py-0.5 text-[12px] font-bold tabular-nums text-white dark:bg-white dark:text-slate-950">
                   <Star size={12} strokeWidth={2.4} />
                   {hidden ? null : followCount}
@@ -1631,22 +1632,22 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
               </button>
             )}
             {dueLine && (
-              <button type="button" onClick={() => window.dispatchEvent(new Event('pat-due'))} className="inline-flex max-w-[220px] shrink-0 items-center rounded-full bg-white px-3 py-1 text-[13px] font-semibold text-slate-600 ring-1 ring-slate-200/80 dark:bg-slate-900 dark:text-slate-300 dark:ring-white/10">
-                <span className="truncate">{dueLine.direction === 'in' ? 'Ha entrado' : 'Confirmar'} {dueLine.label}{hidden ? '' : ` ${formatEur(dueLine.amount)}`}</span>
+              <button type="button" onClick={() => window.dispatchEvent(new Event('pat-due'))} className="inline-flex shrink-0 snap-start items-center whitespace-nowrap rounded-full bg-white px-3 py-1 text-[13px] font-semibold text-slate-600 ring-1 ring-slate-200/80 dark:bg-slate-900 dark:text-slate-300 dark:ring-white/10">
+                <span>{dueLine.direction === 'in' ? 'Ha entrado' : 'Confirmar'} {dueLine.label}{hidden ? '' : ` ${formatEur(dueLine.amount)}`}</span>
               </button>
             )}
             {markLine && markLine.label !== dueLine?.label && (
-              <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('pat-plan', { detail: markLine.planId }))} className="inline-flex max-w-[220px] shrink-0 items-center rounded-full bg-white px-3 py-1 text-[13px] font-semibold text-slate-600 ring-1 ring-slate-200/80 dark:bg-slate-900 dark:text-slate-300 dark:ring-white/10">
-                <span className="truncate">Hoy {markLine.label}{hidden ? '' : ` ${formatEur(markLine.amount)}`}</span>
+              <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('pat-plan', { detail: markLine.planId }))} className="inline-flex shrink-0 snap-start items-center whitespace-nowrap rounded-full bg-white px-3 py-1 text-[13px] font-semibold text-slate-600 ring-1 ring-slate-200/80 dark:bg-slate-900 dark:text-slate-300 dark:ring-white/10">
+                <span>Hoy {markLine.label}{hidden ? '' : ` ${formatEur(markLine.amount)}`}</span>
               </button>
             )}
             {pendingMonth(data) > 0 && (
-              <p className="inline-flex shrink-0 items-center rounded-full bg-white px-3 py-1 text-[13px] font-semibold text-slate-600 ring-1 ring-slate-200/80 dark:bg-slate-900 dark:text-slate-300 dark:ring-white/10">
+              <p className="inline-flex shrink-0 snap-start items-center whitespace-nowrap rounded-full bg-white px-3 py-1 text-[13px] font-semibold text-slate-600 ring-1 ring-slate-200/80 dark:bg-slate-900 dark:text-slate-300 dark:ring-white/10">
                 {hidden ? 'Por confirmar' : `Por confirmar ${formatEur(pendingMonth(data))}`}
               </p>
             )}
             {data?.variation.available && data.variation.amount != null && data.contributions.complete && (
-              <p className="inline-flex shrink-0 items-center rounded-full bg-white px-3 py-1 text-[13px] font-semibold text-slate-500 ring-1 ring-slate-200/80 dark:bg-slate-900 dark:text-slate-400 dark:ring-white/10">
+              <p className="inline-flex shrink-0 snap-start items-center whitespace-nowrap rounded-full bg-white px-3 py-1 text-[13px] font-semibold text-slate-500 ring-1 ring-slate-200/80 dark:bg-slate-900 dark:text-slate-400 dark:ring-white/10">
                 {hidden ? 'Aportado' : `Aportado ${formatSignedEur(data.contributions.eur)}`}
               </p>
             )}
@@ -1939,6 +1940,8 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
       ) : (
         <p className="text-center text-[13px] font-medium text-slate-400">El reparto aparece cuando haya saldo en algún sitio.</p>
       )}
+
+      <HomeGlance data={data} hidden={hidden} notes={offerNotes} />
 
       <section className="space-y-3">
         {ordered.length > 0 && (
