@@ -6,7 +6,8 @@ import { Modal } from '@/components/Modal';
 import { Input } from '@/components/ui/Input';
 import { CashChart, type LinePoint } from '@/views/Wallets';
 import { api, ApiError } from '@/lib/api';
-import { formatAgo, formatDay, formatEur } from '@/lib/format';
+import { formatAgo, formatDay } from '@/lib/format';
+import { marketMark, marketMoney, marketReady, marketToEur, useRescaleAmounts } from '@/lib/marketCurrency';
 import { quickOut, softSpring } from '@/lib/motion';
 import { cn } from '@/lib/utils';
 
@@ -191,11 +192,11 @@ function ListingSheet({ id, onBack, onChanged }: { id: string; onBack: () => voi
             <p className="text-[11px] font-bold uppercase text-slate-400">
               {[listing.wear, listing.phase, listing.stattrak ? 'StatTrak' : '', listing.souvenir ? 'Souvenir' : ''].filter(Boolean).join(' · ')}
             </p>
-            <p className="mt-2 text-3xl font-black tabular-nums">{formatEur(listing.priceEur)}</p>
+            <p className="mt-2 text-3xl font-black tabular-nums">{marketMoney(listing.priceEur)}</p>
             {listing.state !== 'listed' && <p className="text-sm font-bold text-[#ea3943]">{listing.state === 'sold' ? `Vendido${listing.soldAt ? ` ${formatAgo(listing.soldAt)}` : ''}` : 'Ya no está a la venta'}</p>}
             {listing.referenceEur != null && (
               <p className={cn('text-sm font-bold', gap != null && gap <= 0 ? 'text-[#16c784]' : 'text-slate-500')}>
-                CSFloat lo valora en {formatEur(listing.referenceEur)}{gap == null ? '' : ` · ${gap > 0 ? '+' : ''}${gap.toLocaleString('es-ES')} %`}
+                CSFloat lo valora en {marketMoney(listing.referenceEur)}{gap == null ? '' : ` · ${gap > 0 ? '+' : ''}${gap.toLocaleString('es-ES')} %`}
               </p>
             )}
           </div>
@@ -218,14 +219,14 @@ function ListingSheet({ id, onBack, onChanged }: { id: string; onBack: () => voi
             ) : (
               <>
                 <p className="mt-1 text-sm font-bold">
-                  Mediana {detail.sales.medianEur == null ? '—' : formatEur(detail.sales.medianEur)} en {detail.sales.count} ventas
-                  {detail.sales.nearMedianEur != null && ` · con float parecido ${formatEur(detail.sales.nearMedianEur)} (${detail.sales.nearCount})`}
+                  Mediana {detail.sales.medianEur == null ? '—' : marketMoney(detail.sales.medianEur)} en {detail.sales.count} ventas
+                  {detail.sales.nearMedianEur != null && ` · con float parecido ${marketMoney(detail.sales.nearMedianEur)} (${detail.sales.nearCount})`}
                 </p>
                 <div className="mt-2 divide-y divide-slate-200/70 dark:divide-white/10">
                   {detail.sales.last.map((sale, index) => (
                     <p key={`${sale.at}-${index}`} className="flex justify-between gap-3 py-1.5 text-xs font-medium text-slate-500">
                       <span>{formatAgo(sale.at)} · float {float(sale.floatValue)}</span>
-                      <span className="font-black tabular-nums text-slate-700 dark:text-slate-200">{formatEur(sale.eur)}</span>
+                      <span className="font-black tabular-nums text-slate-700 dark:text-slate-200">{marketMoney(sale.eur)}</span>
                     </p>
                   ))}
                 </div>
@@ -293,7 +294,7 @@ function ListingCard({ listing, onOpen, index, showWear, showName }: { listing: 
       </span>
       <span className="block px-2.5 pb-2.5 pt-2">
         <span className="flex items-baseline justify-between gap-1">
-          <span className="text-[15px] font-black tabular-nums">{formatEur(listing.priceEur)}</span>
+          <span className="text-[15px] font-black tabular-nums">{marketMoney(listing.priceEur)}</span>
           {gap != null && <span className={cn('text-[11px] font-black tabular-nums', gap <= 0 ? 'text-[#16c784]' : 'text-[#ea3943]')}>{gap > 0 ? '+' : ''}{gap.toLocaleString('es-ES')} %</span>}
         </span>
         <FloatBar value={listing.floatValue} />
@@ -624,6 +625,7 @@ export function CsfloatFinder({ focusId }: { focusId?: string | null }) {
   const [listings, setListings] = useState<Listing[] | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  useRescaleAmounts(setMaxEur);
 
   const loadTracked = () => {
     api<{ tracked: Tracked[] }>('/api/market/tracked')
@@ -668,9 +670,13 @@ export function CsfloatFinder({ focusId }: { focusId?: string | null }) {
     const high = shown(maxFloat);
     const cap = shown(maxEur);
     const pattern = shown(seed);
+    if (cap != null && !marketReady()) {
+      setError('El cambio del dólar no ha llegado. Espera un momento.');
+      return;
+    }
     if (low != null) params.set('minFloat', String(low));
     if (high != null) params.set('maxFloat', String(high));
-    if (cap != null) params.set('maxEur', String(cap));
+    if (cap != null) params.set('maxEur', String(marketToEur(cap)));
     if (pattern != null) params.set('seed', String(Math.round(pattern)));
     setLoading(true);
     setError('');
@@ -709,14 +715,14 @@ export function CsfloatFinder({ focusId }: { focusId?: string | null }) {
             {tracked.map((row) => {
               const moved = row.priceEur != null && row.firstPriceEur != null ? row.priceEur - row.firstPriceEur : 0;
               const state = STATE_LABEL[row.state];
-              const change = Math.abs(moved) >= 0.01 ? ` · ${moved < 0 ? 'ha bajado' : 'ha subido'} ${formatEur(Math.abs(moved))}` : '';
+              const change = Math.abs(moved) >= 0.01 ? ` · ${moved < 0 ? 'ha bajado' : 'ha subido'} ${marketMoney(Math.abs(moved))}` : '';
               return (
                 <ListingRow
                   key={row.id}
                   image={row.image}
                   title={row.label}
                   sub={`${state} · float ${float(row.floatValue)}${change}`}
-                  price={row.priceEur == null ? '—' : formatEur(row.priceEur)}
+                  price={row.priceEur == null ? '—' : marketMoney(row.priceEur)}
                   starred
                   onOpen={() => setOpenId(row.id)}
                 />
@@ -752,7 +758,7 @@ export function CsfloatFinder({ focusId }: { focusId?: string | null }) {
               <div className="flex flex-wrap gap-2">
                 {skin.wears.map((option) => (
                   <button key={option.wear} type="button" onClick={() => { setWear(option.wear); setSort('best_deal'); }} className={cn('rounded-full border px-3 py-1 text-xs font-bold', wear === option.wear ? 'border-slate-900 text-slate-900 dark:border-white dark:text-white' : 'border-slate-200 text-slate-400 dark:border-white/10')}>
-                    {WEAR_SHORT[option.wear] || option.wear}{option.refEur != null ? ` · ${formatEur(option.refEur)}` : ''}
+                    {WEAR_SHORT[option.wear] || option.wear}{option.refEur != null ? ` · ${marketMoney(option.refEur)}` : ''}
                   </button>
                 ))}
               </div>
@@ -766,7 +772,7 @@ export function CsfloatFinder({ focusId }: { focusId?: string | null }) {
             {wear && <div className="grid grid-cols-2 gap-2">
               <Input label="Float desde" inputMode="decimal" value={minFloat} onChange={(event) => setMinFloat(event.target.value)} placeholder="0,15" />
               <Input label="Float hasta" inputMode="decimal" value={maxFloat} onChange={(event) => setMaxFloat(event.target.value)} placeholder="0,25" />
-              <Input label="Hasta (€)" inputMode="decimal" value={maxEur} onChange={(event) => setMaxEur(event.target.value)} placeholder="Opcional" />
+              <Input label={`Hasta (${marketMark()})`} inputMode="decimal" value={maxEur} onChange={(event) => setMaxEur(event.target.value)} placeholder="Opcional" />
               <Input label="Patrón" inputMode="numeric" value={seed} onChange={(event) => setSeed(event.target.value)} placeholder="Opcional" />
             </div>}
             {wear && <button type="button" onClick={() => void browse()} className="w-full rounded-2xl bg-slate-900 px-4 py-2.5 text-sm font-black text-white dark:bg-white dark:text-slate-900">{loading ? 'Buscando…' : 'Buscar anuncios'}</button>}

@@ -68,6 +68,17 @@
   touch-action: pan-y;
 }
 
+/* Se desplaza con el dedo o la rueda, sin barra visible. */
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
 .dock-glass {
   background: color-mix(in srgb, white 18%, transparent);
   -webkit-backdrop-filter: blur(28px) saturate(1.7);

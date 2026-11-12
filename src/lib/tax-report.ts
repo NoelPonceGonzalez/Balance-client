@@ -51,6 +51,19 @@ export interface Acquisition {
   priced: boolean;
 }
 
+/** Cambio entre dos formas del mismo activo (ETH en staking como WBETH, BTC envuelto…). */
+export interface Rewrap {
+  date: string;
+  time: string;
+  from: string;
+  fromQuantity: number;
+  to: string;
+  toQuantity: number;
+  /** Coste de adquisición que pasa intacto a lo recibido. */
+  cost: number;
+  platform: string;
+}
+
 export interface LedgerLine {
   date: string;
   time: string;
@@ -70,6 +83,7 @@ export interface TaxReport {
   disposals: Disposal[];
   incomes: Income[];
   acquisitions: Acquisition[];
+  rewraps: Rewrap[];
   lines: LedgerLine[];
   warnings: string[];
 }
@@ -139,7 +153,21 @@ export const EFFECT = {
   cash: 'Euros de una operación',
   own: 'Traspaso entre cuentas propias',
   euros: 'Movimiento en euros',
+  rewrap: 'Mismo activo en otro formato · no tributa',
 };
+
+/** Tokens de staking o envueltos que representan la misma moneda de base. */
+const SAME_AS: Record<string, string> = {
+  WBETH: 'ETH', BETH: 'ETH', WETH: 'ETH', STETH: 'ETH', WSTETH: 'ETH', CBETH: 'ETH', RETH: 'ETH',
+  WBTC: 'BTC', BTCB: 'BTC', CBBTC: 'BTC',
+  BNSOL: 'SOL', JITOSOL: 'SOL', MSOL: 'SOL', JUPSOL: 'SOL',
+  WBNB: 'BNB',
+};
+
+export function baseAsset(asset: string): string {
+  const code = asset.toUpperCase();
+  return SAME_AS[code] ?? code;
+}
 
 function clockOf(row: MovementRow): string {
   return (row.description.match(/(\d{2}:\d{2}:\d{2})/) || ['', ''])[1];
@@ -177,6 +205,10 @@ function incomeKind(row: MovementRow): IncomeKind {
 function round(value: number, digits = 2): number {
   const factor = 10 ** digits;
   return Math.round(value * factor) / factor;
+}
+
+function sum<T>(items: T[], pick: (item: T) => number): number {
+  return items.reduce((acc, item) => acc + pick(item), 0);
 }
 
 function units(value: number): string {
@@ -349,17 +381,51 @@ export async function buildTaxReport(
     let cost = 0;
     let first = '';
     let last = '';
+    const pieces: Lot[] = [];
     while (left > DUST && list.length) {
       const lot = list[0];
       const used = Math.min(lot.quantity, left);
       cost += used * lot.unitCost;
+      pieces.push({ date: lot.date, quantity: used, unitCost: lot.unitCost });
       if (!first) first = lot.date;
       last = lot.date;
       lot.quantity -= used;
       left -= used;
       if (lot.quantity <= DUST) list.shift();
     }
-    return { cost, first, last, uncovered: left > DUST ? left : 0 };
+    return { cost, first, last, pieces, uncovered: left > DUST ? left : 0 };
+  };
+
+  const rewraps: Rewrap[] = [];
+  const rewrap = (trade: Trade, outs: Leg[], ins: Leg[]) => {
+    const pieces: Lot[] = [];
+    let uncovered = 0;
+    for (const leg of outs) {
+      const taken = takeLots(leg.asset, leg.units);
+      pieces.push(...taken.pieces);
+      uncovered += taken.uncovered;
+    }
+    const given = sum(outs, (leg) => leg.units);
+    const got = sum(ins, (leg) => leg.units);
+    const ratio = given > 0 ? got / given : 0;
+    const cost = pieces.reduce((acc, piece) => acc + piece.quantity * piece.unitCost, 0);
+    for (const leg of ins) {
+      const share = got > 0 ? leg.units / got : 0;
+      for (const piece of pieces) addLot(leg.asset, piece.date, piece.quantity * ratio * share, piece.quantity * piece.unitCost * share);
+      addLot(leg.asset, trade.date, uncovered * ratio * share, 0);
+    }
+    for (const leg of [...outs, ...ins]) effects.set(String(leg.row._id), EFFECT.rewrap);
+    if (!inYear(trade.date)) return;
+    rewraps.push({
+      date: trade.date,
+      time: trade.time,
+      from: outs.map((leg) => leg.asset).join(' + '),
+      fromQuantity: given,
+      to: ins.map((leg) => leg.asset).join(' + '),
+      toQuantity: got,
+      cost: round(cost),
+      platform: trade.platform,
+    });
   };
 
   const dispose = (trade: Trade, leg: Leg, proceeds: number, kind: Disposal['kind'], received: string, priced: boolean) => {
@@ -437,6 +503,16 @@ export async function buildTaxReport(
     const fees = trade.legs.filter((leg) => leg.kind === 'fee');
     const eurIn = trade.legs.filter((leg) => leg.kind === 'eurIn').reduce((sum, leg) => sum + leg.units, 0);
     const eurOut = trade.legs.filter((leg) => leg.kind === 'eurOut').reduce((sum, leg) => sum + leg.units, 0);
+    const family = ins[0] ? baseAsset(ins[0].asset) : '';
+    if (ins.length && outs.length && eurIn === 0 && eurOut === 0 && [...ins, ...outs].every((leg) => leg.crypto && baseAsset(leg.asset) === family)) {
+      rewrap(trade, outs, ins);
+      for (const leg of fees) {
+        const value = legValue(leg, trade);
+        if (value == null) unpriced.add(leg.asset);
+        dispose(trade, leg, value ?? 0, 'Comisión', 'Pago de la comisión', value != null);
+      }
+      continue;
+    }
     const inValues = ins.map((leg) => legValue(leg, trade));
     const outValues = outs.map((leg) => legValue(leg, trade));
     const got = inValues.every((value) => value != null) ? eurIn + inValues.reduce<number>((sum, value) => sum + (value ?? 0), 0) : null;
@@ -505,6 +581,7 @@ export async function buildTaxReport(
     disposals,
     incomes: [...incomeMap.values()].map((item) => ({ ...item, eur: round(item.eur) })).sort((a, b) => a.month.localeCompare(b.month) || a.kind.localeCompare(b.kind) || a.asset.localeCompare(b.asset)),
     acquisitions,
+    rewraps,
     lines,
     warnings,
   };

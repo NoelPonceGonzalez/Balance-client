@@ -25,6 +25,8 @@ function prefersStill() {
 
 function noticeKind(item: AppNotification): string {
   const key = item.quoteKey || '';
+  if (key.startsWith('event:')) return 'Bolsa';
+  if (key.startsWith('move:')) return 'Activo';
   if (key.startsWith('skin:')) return 'Skin';
   if (key.startsWith('tracked:')) return 'Anuncio';
   if (key.startsWith('plan-due:') || key.startsWith('plan-auto:') || key.startsWith('plan-inv:')) return 'Plan';
@@ -165,7 +167,7 @@ export function NotificationsBell({ align = 'left', onDue, onPlan, onOffer, onLi
       )}
       {phone && <p className="mb-2 px-1 text-xs font-medium text-slate-500">{phone}</p>}
       <div className="max-h-80 space-y-2 overflow-y-auto">
-        {items.length === 0 && <p className="px-1 py-3 text-sm font-medium text-slate-500">Cada aviso es de una cosa distinta: un plan, un precio, una skin destacada, un anuncio o una oferta.</p>}
+        {items.length === 0 && <p className="px-1 py-3 text-sm font-medium text-slate-500">Cada aviso es de una cosa distinta: un plan, un precio, una skin, una oferta o algo que puede mover lo que tienes.</p>}
         {items.map((item) => {
           const kind = noticeKind(item);
           const planId = item.quoteKey?.startsWith('reparto:')
@@ -177,7 +179,7 @@ export function NotificationsBell({ align = 'left', onDue, onPlan, onOffer, onLi
           const body = (
             <>
               <p className="text-[11px] font-semibold text-slate-400">{kind}</p>
-              <p className={cn('text-sm font-semibold', kind === 'Mercado' ? (item.direction === 'up' ? 'text-[#16c784]' : 'text-[#ea3943]') : 'text-slate-900 dark:text-white')}>{item.title}</p>
+              <p className={cn('text-sm font-semibold', kind === 'Mercado' || kind === 'Activo' ? (item.direction === 'up' ? 'text-[#16c784]' : 'text-[#ea3943]') : 'text-slate-900 dark:text-white')}>{item.title}</p>
               <p className="text-xs font-medium text-slate-500">{item.body}</p>
               <p className="mt-1 text-[11px] font-semibold text-slate-400">{formatAgo(item.createdAt)}</p>
             </>
