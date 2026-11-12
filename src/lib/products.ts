@@ -210,6 +210,7 @@ export function skinSection(label: string): string {
   if (has(text, ['sticker', 'patch', 'pegatina', 'parche', 'graffiti'])) return 'pegatinas';
   if (has(text, [' case', 'capsule', 'package', 'caja', 'cápsula'])) return 'cajas';
   if (has(text, ['agent', 'music kit', 'agente'])) return 'agentes';
+  if (/\|\s*(the professionals|nswc seal|seal frogman|gendarmerie nationale|guerrilla warfare|brazilian 1st battalion|usaf tacp|fbi sniper|fbi hrt|nzsas|sabre|ksk|tacps|swat|phoenix)\b/i.test(label)) return 'agentes';
   return 'armas';
 }
 

@@ -27,7 +27,7 @@ function noticeKind(item: AppNotification): string {
   const key = item.quoteKey || '';
   if (key.startsWith('skin:')) return 'Skin';
   if (key.startsWith('tracked:')) return 'Anuncio';
-  if (key.startsWith('plan-due:') || key.startsWith('plan-auto:')) return 'Plan';
+  if (key.startsWith('plan-due:') || key.startsWith('plan-auto:') || key.startsWith('plan-inv:')) return 'Plan';
   if (key.startsWith('listing:')) return 'Oferta';
   if (key.startsWith('reparto:') || key.startsWith('trip-remind:')) return 'Reparto';
   if (item.direction === 'due') return 'Plan';

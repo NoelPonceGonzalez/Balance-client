@@ -225,6 +225,7 @@ export interface MovementRow {
   date: string;
   amount: number;
   currency: string;
+  eurPerUnit?: number | null;
   category: string;
   description: string;
   accountId: string;
@@ -380,6 +381,48 @@ export interface PlanRow {
   plannedExpenses: PlanEvent[];
   incomes: PlanEvent[];
   scenarios: { name: string; monthlySavings: number }[];
+  buys?: PlanBuy[];
+  watch?: PlanWatch;
+}
+
+export interface PlanBuy {
+  _id?: string;
+  asset: string;
+  amount: number;
+  date: string;
+  done: boolean;
+  doneAt?: string;
+  priceEur?: number | null;
+  manual?: boolean;
+  movementIds?: string[];
+  spent?: number;
+}
+
+export interface PlanWatch {
+  dropPct: number;
+  risePct: number;
+  ratioAbove: number | null;
+  zones: { asset: string; belowEur: number }[];
+  refs: { asset: string; priceEur: number; at: string }[];
+}
+
+export interface PlanInvestAsset {
+  asset: string;
+  name: string;
+  priceEur: number | null;
+  quantity: number;
+  cost: number;
+  average: number | null;
+  pending: number;
+  averageAfter: number | null;
+  refEur: number | null;
+  changePct: number | null;
+  zoneEur: number | null;
+}
+
+export interface PlanInvest {
+  assets: PlanInvestAsset[];
+  ratio: number | null;
 }
 
 export interface PlanForecast {

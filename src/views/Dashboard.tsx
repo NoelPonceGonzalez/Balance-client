@@ -406,10 +406,21 @@ function foldDetail(detail?: string): string {
 
 function pieceMove(item: AccountPart): { text: string; className: string } | null {
   if (item.costEur == null || !(item.costEur > 0)) return null;
-  const gain = item.eur - item.costEur;
+  const gain = Math.round((item.eur - item.costEur) * 100) / 100;
+  if (gain === 0) return null;
   const pct = (gain / item.costEur) * 100;
-  if (Math.abs(pct) < 0.05) return null;
-  return { text: formatPct(pct), className: toneClass(gain) };
+  return { text: `${formatSignedEur(gain)} · ${formatPct(pct)}`, className: toneClass(gain) };
+}
+
+/** Media de compra y, si está por debajo, cuánto tiene que subir el precio para quedar en positivo. */
+function pieceAverage(item: AccountPart): string {
+  const group = item.group || 'other';
+  if (!['crypto', 'etf', 'stock'].includes(group) || item.costEur == null || !(item.costEur > 0) || !item.quantity || !(item.quantity > 0)) return '';
+  const average = item.costEur / item.quantity;
+  const price = item.eur / item.quantity;
+  const shown = `Media ${formatPrice(average)}`;
+  if (price >= average) return shown;
+  return `${shown} · tiene que subir un ${formatNumber((average / price - 1) * 100, 1)} %`;
 }
 
 function FoldShare({ sides, color }: { sides: Side[]; color: string }) {
@@ -2029,7 +2040,12 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
                           <li key={side.group} className="border-t border-slate-200/80 first:border-t-0 dark:border-white/10">
                             {side.group !== 'cash' && side.items.length > 1 && (
                               <div className="flex items-baseline justify-between gap-3 pt-3.5">
-                                <span className="text-xs font-semibold text-slate-400">{side.title}</span>
+                                <span className="text-xs font-semibold text-slate-400">
+                                  {side.title}
+                                  {side.gain != null && Math.round(side.gain * 100) !== 0 && (
+                                    <span className={toneClass(side.gain)}> · {mask(formatSignedEur(side.gain))}</span>
+                                  )}
+                                </span>
                                 <span className="text-xs font-semibold tabular-nums text-slate-500">
                                   <RisingAmount value={side.total} hidden={hidden} />
                                 </span>
@@ -2046,6 +2062,7 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
                             {side.group !== 'cash' && side.items.map((item) => {
                               const move = pieceMove(item);
                               const detail = foldDetail(item.detail);
+                              const average = hidden ? '' : pieceAverage(item);
                               return (
                                 <button
                                   key={item.id || item.label}
@@ -2056,6 +2073,7 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
                                   <span className="min-w-0 flex-1">
                                     <span className="block truncate text-[15px] font-bold leading-tight">{item.label}</span>
                                     {detail && <span className="mt-0.5 block truncate text-xs font-medium text-slate-400">{detail}</span>}
+                                    {average && <span className="mt-0.5 block text-xs font-medium leading-snug text-slate-400">{average}</span>}
                                   </span>
                                   <span className="shrink-0 text-right">
                                     <span className="block text-[15px] font-semibold tabular-nums">
@@ -2071,6 +2089,7 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
                       }
                       const move = pieceMove(alone);
                       const caption = [side.title, foldDetail(alone.detail)].filter(Boolean).join(' · ');
+                      const average = hidden ? '' : pieceAverage(alone);
                       return (
                         <li key={side.group} className="border-t border-slate-200/80 first:border-t-0 dark:border-white/10">
                           <button
@@ -2081,6 +2100,7 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
                             <span className="min-w-0 flex-1">
                               <span className="block truncate text-[15px] font-bold leading-tight">{alone.label}</span>
                               <span className="mt-0.5 block truncate text-xs font-medium text-slate-400">{caption}</span>
+                              {average && <span className="mt-0.5 block text-xs font-medium leading-snug text-slate-400">{average}</span>}
                             </span>
                             <span className="shrink-0 text-right">
                               <span className="block text-[15px] font-semibold tabular-nums">

@@ -3,7 +3,9 @@ import { PlatformLogo } from '@/components/PlatformLogo';
 import { QuietLoad } from '@/components/QuietLoad';
 import { Field, Input, fieldClass } from '@/components/ui/Input';
 import { EntrySheet } from '@/components/EntrySheet';
+import { Modal } from '@/components/Modal';
 import { api, ApiError } from '@/lib/api';
+import type { TaxHolding } from '@/lib/tax-report';
 import { formatDay, formatEur } from '@/lib/format';
 import { TYPE_LABEL } from '@/lib/labels';
 import { verbFromType } from '@/lib/verbs';
@@ -86,6 +88,11 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
   const [error, setError] = useState('');
   const [ready, setReady] = useState(false);
   const [openGroup, setOpenGroup] = useState<string | null>(null);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [taxYear, setTaxYear] = useState(initialYear);
+  const [taxBusy, setTaxBusy] = useState(false);
+  const [taxNote, setTaxNote] = useState('');
+  const [taxError, setTaxError] = useState('');
 
   const load = async () => {
     const params = new URLSearchParams();
@@ -203,6 +210,37 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
     URL.revokeObjectURL(url);
   };
 
+  const downloadTax = async () => {
+    setTaxBusy(true);
+    setTaxError('');
+    setTaxNote('Leyendo tus movimientos…');
+    try {
+      const [me, movementData, accountData, holdingData, { buildTaxReport }, { downloadTaxWorkbook }] = await Promise.all([
+        api<{ user: { name: string } }>('/api/auth/me'),
+        api<{ movements: MovementRow[] }>(`/api/movements?to=${taxYear}-12-31`),
+        api<{ accounts: AccountRow[] }>('/api/accounts'),
+        api<{ holdings: TaxHolding[] }>('/api/holdings'),
+        import('@/lib/tax-report'),
+        import('@/lib/tax-sheet'),
+      ]);
+      setTaxNote('Buscando precios históricos…');
+      const report = await buildTaxReport(
+        { movements: movementData.movements, accounts: accountData.accounts, holdings: holdingData.holdings },
+        Number(taxYear),
+        (done, total) => setTaxNote(`Buscando precios históricos · ${done} de ${total}`),
+      );
+      if (movementData.movements.length >= 5000) report.warnings.push('El informe usa los 5000 movimientos más recientes; los anteriores quedan fuera del cálculo FIFO.');
+      setTaxNote('Preparando el Excel…');
+      await downloadTaxWorkbook(report, me.user.name);
+      setTaxNote(`Listo: ${report.disposals.length} transmisiones, ${report.incomes.reduce((sum, item) => sum + item.count, 0)} rendimientos y ${report.lines.length} movimientos de ${taxYear}.`);
+    } catch (err) {
+      setTaxNote('');
+      setTaxError(err instanceof Error ? err.message : 'No se ha podido preparar el informe.');
+    } finally {
+      setTaxBusy(false);
+    }
+  };
+
   const accountHoldings = holdings.filter((item) => String(item.accountId) === draft?.accountId);
   const simpleMove = draft?.type === 'expense' || draft?.type === 'income';
   const pickAccount = (accountId: string) => {
@@ -216,7 +254,7 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
       <div className={embedded ? 'flex items-center justify-between gap-3' : 'sticky top-0 z-20 -mx-4 flex items-center justify-between gap-3 bg-[var(--app-bg)] px-4 py-2 md:-mx-8 md:px-8'}>
         <h2 className={embedded ? 'text-lg font-semibold tracking-tight' : 'text-2xl font-semibold tracking-tight'}>Movimientos</h2>
         <div className="flex items-center gap-3">
-          <button type="button" onClick={exportCsv} className="text-sm font-semibold text-slate-500">Exportar</button>
+          <button type="button" onClick={() => { setTaxYear(year || initialYear); setTaxNote(''); setTaxError(''); setExportOpen(true); }} className="text-sm font-semibold text-slate-500">Descargar</button>
           <button type="button" onClick={() => { setEditing(null); setDuplicate(false); setFormMore(false); setDraft(emptyDraft(accounts[0] ? docId(accounts[0]) : '')); }} className="rounded-full bg-slate-950 px-4 py-2 text-sm font-semibold text-white dark:bg-white dark:text-slate-950">Nuevo</button>
         </div>
       </div>
@@ -322,6 +360,42 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
           </section>
         ))}
       </div>
+      {exportOpen && (
+        <Modal title="Descargar movimientos" onClose={() => { if (!taxBusy) setExportOpen(false); }}>
+          <div className="space-y-5">
+            <section className="rounded-[22px] bg-slate-50 p-4 dark:bg-white/5">
+              <h3 className="text-[15px] font-semibold">Informe para la Renta</h3>
+              <p className="mt-1 text-[13px] leading-snug text-slate-500 dark:text-slate-400">
+                Un Excel con el resumen fiscal, las ganancias y pérdidas con coste FIFO, intereses y recompensas, tus compras y todos los movimientos del año valorados en euros.
+              </p>
+              <div className="mt-4 flex items-center gap-2">
+                <select className={cn(fieldClass, 'w-28 shrink-0')} aria-label="Año del informe" value={taxYear} disabled={taxBusy} onChange={(event) => setTaxYear(event.target.value)}>
+                  {Array.from({ length: 8 }, (_, index) => now.getFullYear() - index).map((value) => (
+                    <option key={value} value={String(value)}>{value}</option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  disabled={taxBusy}
+                  onClick={() => void downloadTax()}
+                  className="min-w-0 flex-1 rounded-full bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60 dark:bg-white dark:text-slate-950"
+                >
+                  {taxBusy ? 'Preparando…' : `Descargar Excel de ${taxYear}`}
+                </button>
+              </div>
+              {taxNote && <p className="mt-3 text-[13px] font-medium text-slate-500 dark:text-slate-400">{taxNote}</p>}
+              {taxError && <p className="mt-3 rounded-2xl bg-rose-50 px-3 py-2 text-[13px] font-medium text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">{taxError}</p>}
+            </section>
+            <section className="flex items-center justify-between gap-3 px-1">
+              <span className="min-w-0">
+                <span className="block text-[15px] font-semibold">Lista de esta pantalla</span>
+                <span className="block text-[13px] text-slate-500 dark:text-slate-400">CSV con los {sorted.length} movimientos que ves ahora</span>
+              </span>
+              <button type="button" onClick={exportCsv} className="shrink-0 rounded-full px-4 py-2 text-sm font-semibold text-slate-700 ring-1 ring-slate-200 dark:text-slate-200 dark:ring-white/15">CSV</button>
+            </section>
+          </div>
+        </Modal>
+      )}
       {draft && (
         <EntrySheet
           accounts={accounts.filter((account) => !account.archived).map((account) => ({ id: docId(account), name: account.name, kind: account.kind, tracking: account.tracking, currency: account.currency, balance: account.balance }))}

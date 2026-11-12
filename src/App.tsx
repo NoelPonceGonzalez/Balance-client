@@ -4,6 +4,7 @@ import { Shell, type Section } from '@/components/Shell';
 import { api, ApiError } from '@/lib/api';
 import { forgetWallets, loadWallets } from '@/lib/wallet-accounts';
 import { glide } from '@/lib/motion';
+import { disablePhonePush } from '@/lib/push';
 import type { User } from '@/lib/types';
 import { Dashboard } from '@/views/Dashboard';
 import { LoginView } from '@/views/Login';
@@ -80,6 +81,7 @@ export default function App() {
   const restoreSession = () => {
     const token = localStorage.getItem('pat_token');
     if (!token) {
+      void disablePhonePush().catch(() => undefined);
       setUser(null);
       setOffline(false);
       setReady(true);
@@ -94,6 +96,7 @@ export default function App() {
       .catch((err: unknown) => {
         const status = err instanceof ApiError ? err.status : 0;
         if (status === 401 || status === 403) {
+          void disablePhonePush().catch(() => undefined);
           localStorage.removeItem('pat_token');
           setUser(null);
           setOffline(false);
@@ -139,8 +142,10 @@ export default function App() {
   };
 
   const logout = () => {
-    localStorage.removeItem('pat_token');
-    setUser(null);
+    void disablePhonePush().catch(() => undefined).finally(() => {
+      localStorage.removeItem('pat_token');
+      setUser(null);
+    });
   };
 
   useEffect(() => {
