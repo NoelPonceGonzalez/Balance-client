@@ -1,6 +1,7 @@
 import type { Cell, Row, Sheet } from 'write-excel-file/browser';
 import { EFFECT, type IncomeKind, type TaxReport } from './tax-report';
 import { brandMarkPng } from './brand-mark';
+import { ABROAD_LIMIT, KEY_LABEL, taxCriteria, taxDuties } from './tax-guide';
 
 const EUR = '#,##0.00 "€"';
 const EUR_SIGNED = '+#,##0.00 "€";-#,##0.00 "€";0.00 "€"';
@@ -15,10 +16,10 @@ const LOSS = '#B91C1C';
 const WARN = '#92400E';
 
 const PLACE: Record<IncomeKind, string> = {
-  Intereses: 'Rendimientos del capital mobiliario',
-  Staking: 'Rendimientos del capital mobiliario',
-  Dividendos: 'Rendimientos del capital mobiliario',
-  Recompensas: 'Ganancia patrimonial sin transmisión (base general)',
+  Intereses: 'Capital mobiliario · casilla 0027',
+  Staking: 'Capital mobiliario · casilla 0027',
+  Dividendos: 'Capital mobiliario · casilla 0029 (bruto)',
+  Recompensas: 'Ganancia sin transmisión · base general · casilla 0304',
 };
 
 function day(value: string): Cell {
@@ -121,7 +122,7 @@ function summarySheet(report: TaxReport, owner: string, mark: Blob | null): Shee
   const countOf = (kinds: IncomeKind[]) => sum(report.incomes.filter((item) => kinds.includes(item.kind)), (item) => item.count);
   const capitalKinds: IncomeKind[] = ['Intereses', 'Staking', 'Dividendos'];
   const result = sum(report.disposals, (item) => item.gain);
-  const coins = [...new Set(crypto.map((item) => item.asset))].sort();
+  const groups = [...new Set(crypto.map((item) => `${item.asset}|${item.key}`))].sort();
   const made = new Intl.DateTimeFormat('es-ES', { dateStyle: 'long' }).format(new Date());
   const fill = (cells: Cell[]): Row => [...cells, ...Array(Math.max(0, span - cells.length)).fill(null)];
   const black = { backgroundColor: INK, indent: 1 } as const;
@@ -167,40 +168,63 @@ function summarySheet(report: TaxReport, owner: string, mark: Blob | null): Shee
     [],
     [],
     sectionTitle('Dónde va cada importe en Renta Web', span),
-    note('Cada bloque corresponde a un apartado de la declaración. Tu asesor confirma la casilla exacta del ejercicio.', span),
-    quietHeader(['Apartado', 'Qué incluye', null, null, 'Importe'], [4], { 1: 3 }),
-    line([text('Ganancias y pérdidas patrimoniales · Monedas virtuales', { wrap: true }), text('Ventas, cambios entre criptos distintas y comisiones pagadas en cripto. Una línea por moneda.', { wrap: true, columnSpan: 3, textColor: MUTED }), null, null, money(sum(crypto, (item) => item.gain), true, true)], 34),
-    ...(others.length ? [line([text('Ganancias y pérdidas patrimoniales · Acciones y fondos cotizados', { wrap: true }), text('Ventas de acciones, ETF y otros valores.', { wrap: true, columnSpan: 3, textColor: MUTED }), null, null, money(sum(others, (item) => item.gain), true, true)], 34)] : []),
-    line([text('Rendimientos del capital mobiliario', { wrap: true }), text('Intereses de Earn y cuentas remuneradas, staking y dividendos.', { wrap: true, columnSpan: 3, textColor: MUTED }), null, null, money(incomeOf(capitalKinds), true)], 34),
-    line([text('Ganancias patrimoniales que no derivan de transmisión', { wrap: true }), text('Recompensas y airdrops recibidos. Van a la base general.', { wrap: true, columnSpan: 3, textColor: MUTED }), null, null, money(incomeOf(['Recompensas']), true)], 34),
-    [],
-    [],
-    sectionTitle('1. Ganancias y pérdidas por transmisión', span),
-    note('Base del ahorro. Renta Web pide cada moneda virtual por separado con su valor de transmisión y su valor de adquisición.', span),
-    quietHeader(['Moneda o activo', 'Valor de transmisión', 'Valor de adquisición', 'Operaciones', 'Resultado'], [1, 2, 3, 4]),
+    note('Cada bloque corresponde a un apartado de la declaración. Casillas de la Renta 2025; Hacienda suele mantenerlas de un año a otro.', span),
+    quietHeader(['Apartado', 'Casilla', 'Qué incluye', null, 'Importe'], [4], { 2: 2 }),
   ];
+  const place = (label: string, box: string, what: string, amount: Cell) => line([text(label, { wrap: true }), text(box), text(what, { wrap: true, columnSpan: 2, textColor: MUTED }), null, amount], 34);
+  const dividends = incomeOf(['Dividendos']);
+  data.push(place('Monedas virtuales', '1800 a 1814', 'Ventas, cambios entre criptos y comisiones en cripto. Una fila por moneda y clave.', money(sum(crypto, (item) => item.gain), true, true)));
+  if (others.length) data.push(place('Acciones y ETF', '0328 y 0331', 'Ventas de acciones y fondos cotizados.', money(sum(others, (item) => item.gain), true, true)));
+  data.push(place('Intereses y staking', '0027', 'Earn, cuentas remuneradas y staking.', money(incomeOf(capitalKinds) - dividends, true)));
+  if (dividends > 0) data.push(place('Dividendos', '0029', 'Importe bruto. La retención extranjera va a la 0588.', money(dividends, true)));
+  data.push(place('Otras ganancias sin transmisión', '0304', 'Recompensas y airdrops. Base general.', money(incomeOf(['Recompensas']), true)));
+  data.push([], []);
 
-  for (const coin of coins) {
-    const rows = crypto.filter((item) => item.asset === coin);
-    data.push(line([text(coin), money(sum(rows, (item) => item.proceeds)), money(sum(rows, (item) => item.cost)), rows.length, money(sum(rows, (item) => item.gain), false, true)]));
+  const comp = report.compensation;
+  const deferredTotal = sum(report.disposals, (item) => item.deferred);
+  data.push(sectionTitle('Base del ahorro y cuota estimada', span));
+  data.push(note('Compensación de pérdidas como la hace Renta Web (art. 49 LIRPF) y escala del ahorro del 19 % al 30 % (arts. 66 y 76 LIRPF).', span));
+  data.push(quietHeader(['Concepto', 'Detalle', null, null, 'Importe'], [4], { 1: 3 }));
+  const baseLine = (label: string, detail: string, amount: Cell) => line([text(label), text(detail, { columnSpan: 3, textColor: MUTED }), null, null, amount]);
+  data.push(baseLine('Ganancias y pérdidas del año', 'Ventas y cambios que tributan', money(comp.gains, false, true)));
+  if (deferredTotal > 0) data.push(baseLine('Pérdida que se aplaza', 'Regla de los dos meses: ya descontada de la línea de arriba', money(deferredTotal)));
+  data.push(baseLine('Rendimientos del capital mobiliario', 'Intereses, staking y dividendos', money(comp.capital)));
+  if (comp.cross > 0) data.push(baseLine('Pérdida del año contra rendimientos', 'Hasta el 25 % de los rendimientos', money(-comp.cross, false, true)));
+  for (const item of comp.prior) data.push(baseLine(`Pérdidas de ${item.year}`, item.against === 'ganancias' ? 'Restadas de las ganancias del año' : 'Restadas de los rendimientos, dentro del 25 %', money(-item.amount, false, true)));
+  data.push(totalRow([text('Base imponible del ahorro'), null, null, null, money(comp.base, true)]));
+  data.push(line([text('Cuota estimada', { fontWeight: 'bold' }), text('Antes de retenciones y deducciones', { columnSpan: 3, textColor: MUTED }), null, null, money(comp.tax, true)]));
+  if (comp.pending.length) {
+    data.push([]);
+    data.push(quietHeader(['Pérdidas para los próximos años', 'Pendiente', 'Último año', null, null], [1, 2]));
+    for (const item of comp.pending) data.push(line([text(String(item.year)), money(item.amount), { value: item.until, type: Number, align: 'right' }, null, null]));
   }
-  if (others.length) data.push(line([text('Acciones, ETF y otros'), money(sum(others, (item) => item.proceeds)), money(sum(others, (item) => item.cost)), others.length, money(sum(others, (item) => item.gain), false, true)]));
+  data.push([], []);
+
+  data.push(sectionTitle('1. Ganancias y pérdidas por transmisión', span));
+  data.push(note('Base del ahorro. En Renta Web, una fila por moneda (1802) y por lo recibido a cambio (1803): F euros, N otra cripto, B bienes o servicios.', span));
+  data.push(quietHeader(['Moneda · 1802', 'Recibido · 1803', 'Transmisión · 1804', 'Adquisición · 1806', 'Resultado'], [2, 3, 4]));
+  for (const group of groups) {
+    const [coin, key] = group.split('|') as [string, keyof typeof KEY_LABEL];
+    const rows = crypto.filter((item) => item.asset === coin && item.key === key);
+    data.push(line([text(coin), text(KEY_LABEL[key]), money(sum(rows, (item) => item.proceeds)), money(sum(rows, (item) => item.cost)), money(sum(rows, (item) => item.gain), false, true)]));
+  }
+  if (others.length) data.push(line([text('Acciones y ETF'), text('0328 · 0331'), money(sum(others, (item) => item.proceeds)), money(sum(others, (item) => item.cost)), money(sum(others, (item) => item.gain), false, true)]));
   if (!report.disposals.length) data.push(line([text('Nada este año.', { textColor: MUTED, fontStyle: 'italic' }), null, null, null, null]));
-  data.push(totalRow([text('Total'), money(sum(report.disposals, (item) => item.proceeds)), money(sum(report.disposals, (item) => item.cost)), { value: report.disposals.length, type: Number }, money(result, true, true)]));
+  data.push(totalRow([text('Total'), null, money(sum(report.disposals, (item) => item.proceeds)), money(sum(report.disposals, (item) => item.cost)), money(result, true, true)]));
   data.push([], []);
 
   data.push(sectionTitle('2. Rendimientos del capital mobiliario', span));
   data.push(note('Base del ahorro. Valorados en euros el día en que los recibiste.', span));
-  data.push(quietHeader(['Concepto', null, null, 'Apuntes', 'Importe'], [3, 4]));
-  for (const [kind, label] of [['Intereses', 'Intereses de Earn y cuentas remuneradas'], ['Staking', 'Staking'], ['Dividendos', 'Dividendos']] as const) {
+  data.push(quietHeader(['Concepto', 'Casilla', null, 'Apuntes', 'Importe'], [3, 4]));
+  for (const [kind, label, box] of [['Intereses', 'Intereses de Earn y cuentas remuneradas', '0027'], ['Staking', 'Staking', '0027'], ['Dividendos', 'Dividendos (bruto)', '0029']] as const) {
     if (kind !== 'Intereses' && !countOf([kind])) continue;
-    data.push(line([text(label), null, null, countOf([kind]), money(incomeOf([kind]))]));
+    data.push(line([text(label), text(box), null, countOf([kind]), money(incomeOf([kind]))]));
   }
   data.push(totalRow([text('Total'), null, null, { value: countOf(capitalKinds), type: Number }, money(incomeOf(capitalKinds), true)]));
   data.push([], []);
 
   data.push(sectionTitle('3. Ganancias patrimoniales sin transmisión', span));
-  data.push(note('Base general. Recompensas y airdrops, valorados el día en que entraron.', span));
+  data.push(note('Base general, casilla 0304. Recompensas y airdrops, valorados el día en que entraron.', span));
   data.push(quietHeader(['Concepto', null, null, 'Apuntes', 'Importe'], [3, 4]));
   data.push(totalRow([text('Recompensas y airdrops'), null, null, { value: countOf(['Recompensas']), type: Number }, money(incomeOf(['Recompensas']), true)]));
   data.push([], []);
@@ -218,6 +242,27 @@ function summarySheet(report: TaxReport, owner: string, mark: Blob | null): Shee
   for (const [label, why, n] of outside) data.push(line([text(label), text(why, { columnSpan: 3, textColor: MUTED, wrap: true }), null, null, n], 30));
   data.push([], []);
 
+  const yearEnd = report.yearEnd;
+  if (yearEnd.coins.length) {
+    data.push(sectionTitle(yearEnd.live ? 'Tu cripto a día de hoy' : `Tu cripto a 31 de diciembre de ${report.year}`, span));
+    data.push(note(`Lo que mide el modelo 721: cripto que guarda por ti un exchange extranjero. Detalle en la hoja «Cripto a 31-12».${yearEnd.live ? ' El año aún no ha cerrado; la foto que vale es la del 31 de diciembre.' : ''}`, span));
+    data.push(quietHeader(['Dónde', null, null, null, 'Valor'], [4], { 0: 4 }));
+    const foreign = yearEnd.coins.filter((coin) => coin.custodian && !coin.spanish);
+    const rest = yearEnd.coins.filter((coin) => !(coin.custodian && !coin.spanish));
+    data.push(line([text('En exchanges extranjeros · cuenta para el 721', { columnSpan: 4 }), null, null, null, money(sum(foreign, (coin) => coin.eur ?? 0), true)]));
+    if (rest.length) data.push(line([text('En monederos propios o entidades españolas · no cuenta', { columnSpan: 4, textColor: MUTED }), null, null, null, money(sum(rest, (coin) => coin.eur ?? 0))]));
+    data.push(note(yearEnd.abroad > ABROAD_LIMIT ? 'Pasa de 50.000 €: toca presentar el modelo 721.' : `No llega a 50.000 €: el modelo 721 no te toca.`, span, yearEnd.abroad > ABROAD_LIMIT ? WARN : MUTED));
+    data.push([], []);
+  }
+
+  data.push(sectionTitle('Obligaciones y plazos', span));
+  data.push(note('Lo que Hacienda puede pedirte por este ejercicio y si te toca según tus datos en Balance.', span));
+  data.push(quietHeader(['Qué', 'Cuándo', null, 'Tu caso', null], [], { 1: 2, 3: 2 }));
+  for (const [what, when, mine] of taxDuties(report, (value) => new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(value))) {
+    data.push(line([text(what, { wrap: true }), text(when, { wrap: true, columnSpan: 2, textColor: MUTED }), null, text(mine, { wrap: true, columnSpan: 2 }), null], Math.max(34, Math.ceil(mine.length / 42) * 15)));
+  }
+  data.push([], []);
+
   if (report.warnings.length) {
     data.push(sectionTitle('Para revisar con tu asesor', span));
     for (const warning of report.warnings) data.push(note(`• ${warning}`, span, WARN));
@@ -225,15 +270,7 @@ function summarySheet(report: TaxReport, owner: string, mark: Blob | null): Shee
   }
 
   data.push(sectionTitle('Criterios del cálculo', span));
-  for (const item of [
-    'Coste de adquisición por FIFO: salen primero las unidades compradas antes, sumando todas tus cuentas, como pide Hacienda para valores homogéneos.',
-    'Cambiar una cripto por otra distinta es una permuta y tributa, también al comprar con USDC u otra stablecoin: el valor de transmisión es el mayor entre lo entregado y lo recibido.',
-    ...(report.rewraps.length ? ['Pasar ETH a staking y recibir WBETH, o volver a ETH, es el mismo activo en otro formato: no es una venta y el coste original pasa intacto. Si tu asesor prefiere tratarlo como permuta, la hoja «Sin efecto fiscal» trae cada cambio con su fecha y su coste.'] : []),
-    'Precios: cuando la operación lleva euros, se usan esos euros. En el resto, el cierre de la hora de la operación en Binance (UTC) pasado a euros; para intereses y recompensas, el cierre del día.',
-    'Los traspasos entre tus cuentas y el paso a Earn no tributan: las monedas siguen siendo tuyas.',
-    'Las comisiones pagadas en cripto aparecen como una transmisión pequeña de esa moneda.',
-    'Con más de 50.000 € en cripto en plataformas extranjeras a 31 de diciembre, toca presentar también el modelo 721.',
-  ]) data.push(note(`• ${item}`, span));
+  for (const item of taxCriteria(report)) data.push(note(`• ${item}`, span));
 
   return {
     sheet: 'Resumen',
@@ -267,25 +304,45 @@ function rewrapSheet(report: TaxReport): Sheet<Blob> {
 function gainsSheet(report: TaxReport): Sheet<Blob> {
   const rows = report.disposals;
   const data: Row[] = [
-    header(['Fecha', 'Hora', 'Activo', 'Operación', 'Cantidad', 'Valor de transmisión', 'Valor de adquisición', 'Ganancia o pérdida', 'Comprado desde', 'Comprado hasta', 'Recibido', 'Plataforma', 'Nota'], [4, 5, 6, 7]),
+    header(['Fecha', 'Hora', 'Activo', 'Operación', 'Clave 1803', 'Cantidad', 'Valor de transmisión', 'Valor de adquisición', 'Ganancia o pérdida', 'Pérdida aplazada', 'Comprado desde', 'Comprado hasta', 'Recibido', 'Plataforma', 'Nota'], [5, 6, 7, 8, 9]),
     ...rows.map((item) => line([
       day(item.date),
       text(item.time),
       text(item.asset === item.name ? item.asset : `${item.name} (${item.asset})`),
       text(item.kind),
+      text(item.crypto ? item.key : '—', { align: 'center' }),
       qty(item.quantity),
       money(item.proceeds),
       money(item.cost),
       money(item.gain, false, true),
+      item.deferred > 0 ? money(item.deferred) : null,
       day(item.firstBuy),
       day(item.lastBuy),
       text(item.received),
       text(item.platform),
       text([item.uncovered > 0 ? `${new Intl.NumberFormat('es-ES', { maximumSignificantDigits: 4 }).format(item.uncovered)} ${item.asset} sin compra apuntada (coste 0 €)` : '', item.priced ? '' : 'Precio a completar'].filter(Boolean).join(' · '), { textColor: MUTED }),
     ])),
-    totalRow([text('Total'), null, null, null, null, money(sum(rows, (item) => item.proceeds)), money(sum(rows, (item) => item.cost)), money(sum(rows, (item) => item.gain), true, true), null, null, null, null, null]),
+    totalRow([text('Total'), null, null, null, null, null, money(sum(rows, (item) => item.proceeds)), money(sum(rows, (item) => item.cost)), money(sum(rows, (item) => item.gain), true, true), money(sum(rows, (item) => item.deferred)), null, null, null, null, null]),
   ];
-  return { sheet: 'Ganancias y pérdidas', data, stickyRowsCount: 1, columns: [{ width: 12 }, { width: 10 }, { width: 18 }, { width: 11 }, { width: 16 }, { width: 18 }, { width: 18 }, { width: 18 }, { width: 14 }, { width: 14 }, { width: 26 }, { width: 16 }, { width: 34 }] };
+  return { sheet: 'Ganancias y pérdidas', data, stickyRowsCount: 1, columns: [{ width: 12 }, { width: 10 }, { width: 18 }, { width: 11 }, { width: 11 }, { width: 16 }, { width: 18 }, { width: 18 }, { width: 18 }, { width: 16 }, { width: 14 }, { width: 14 }, { width: 26 }, { width: 16 }, { width: 34 }] };
+}
+
+function yearEndSheet(report: TaxReport): Sheet<Blob> {
+  const { coins, live } = report.yearEnd;
+  const data: Row[] = [
+    header(['Plataforma', 'Moneda', 'Cantidad', live ? 'Valor hoy' : `Valor a 31/12/${report.year}`, 'Custodia', 'Modelo 721'], [2, 3]),
+    ...coins.map((coin) => line([
+      text(coin.platform),
+      text(coin.asset),
+      qty(coin.quantity),
+      money(coin.eur),
+      text(coin.custodian ? (coin.spanish ? 'Entidad española' : 'Exchange extranjero') : 'Monedero propio', { textColor: MUTED }),
+      text(coin.custodian && !coin.spanish ? 'Cuenta' : 'No cuenta', { textColor: coin.custodian && !coin.spanish ? INK : MUTED }),
+    ])),
+    totalRow([text('En exchanges extranjeros'), null, null, money(report.yearEnd.abroad, true), null, text(report.yearEnd.abroad > ABROAD_LIMIT ? 'Toca presentarlo' : 'No llega a 50.000 €')]),
+  ];
+  if (!coins.length) data.splice(1, 0, [text('Sin cripto en esa fecha.', { textColor: MUTED, fontStyle: 'italic' })]);
+  return { sheet: 'Cripto a 31-12', data, stickyRowsCount: 1, columns: [{ width: 18 }, { width: 12 }, { width: 18 }, { width: 18 }, { width: 20 }, { width: 18 }] };
 }
 
 function incomeSheet(report: TaxReport): Sheet<Blob> {
@@ -348,7 +405,7 @@ function movesSheet(report: TaxReport): Sheet<Blob> {
 }
 
 export function taxWorkbookSheets(report: TaxReport, owner: string, mark: Blob | null = null): Sheet<Blob>[] {
-  return [summarySheet(report, owner, mark), gainsSheet(report), incomeSheet(report), rewrapSheet(report), buysSheet(report), movesSheet(report)].map((sheet) => ({ showGridLines: false, ...sheet }));
+  return [summarySheet(report, owner, mark), gainsSheet(report), incomeSheet(report), yearEndSheet(report), rewrapSheet(report), buysSheet(report), movesSheet(report)].map((sheet) => ({ showGridLines: false, ...sheet }));
 }
 
 export async function downloadTaxWorkbook(report: TaxReport, owner: string): Promise<void> {

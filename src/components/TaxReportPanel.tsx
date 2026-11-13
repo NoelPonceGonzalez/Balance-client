@@ -60,7 +60,7 @@ export function TaxReportPanel({ years, initialYear, onBusy }: { years: number[]
     try {
       const [me, movementData, accountData, holdingData, { buildTaxReport }] = await Promise.all([
         api<{ user: { name: string } }>('/api/auth/me'),
-        api<{ movements: MovementRow[] }>(`/api/movements?to=${year}-12-31`),
+        api<{ movements: MovementRow[] }>(`/api/movements?to=${Number(year) + 1}-02-${(Number(year) + 1) % 4 === 0 ? '29' : '28'}`),
         api<{ accounts: AccountRow[] }>('/api/accounts'),
         api<{ holdings: TaxHolding[] }>('/api/holdings'),
         import('@/lib/tax-report'),
@@ -309,6 +309,26 @@ function ReadyView({ ready, year, saving, saved, error, onDownload, onReset }: {
         </div>
       </motion.div>
 
+      <motion.div
+        className="mt-3 grid grid-cols-2 gap-2"
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ ...softSpring, delay: 0.24 }}
+      >
+        <div className="rounded-[18px] bg-white px-3.5 py-3 ring-1 ring-slate-200 dark:bg-white/5 dark:ring-white/10">
+          <div className="text-[11px] font-semibold text-slate-400">Cuota estimada</div>
+          <div className="mt-0.5 text-[17px] font-semibold tabular-nums tracking-tight">{formatEur(report.compensation.tax)}</div>
+          <div className="text-[11.5px] text-slate-400">Base del ahorro {formatEur(report.compensation.base)}</div>
+        </div>
+        <div className="rounded-[18px] bg-white px-3.5 py-3 ring-1 ring-slate-200 dark:bg-white/5 dark:ring-white/10">
+          <div className="text-[11px] font-semibold text-slate-400">Para otros años</div>
+          <div className="mt-0.5 text-[17px] font-semibold tabular-nums tracking-tight">{formatEur(report.compensation.pending.reduce((sum, item) => sum + item.amount, 0))}</div>
+          <div className="truncate text-[11.5px] text-slate-400">
+            {report.compensation.pending.length ? `Pérdidas hasta ${Math.max(...report.compensation.pending.map((item) => item.until))}` : 'Sin pérdidas pendientes'}
+          </div>
+        </div>
+      </motion.div>
+
       {!entries && (
         <p className="mt-3 text-[12.5px] leading-snug text-slate-500 dark:text-slate-400">
           Nada de {year} va a la declaración. Puedes descargar el informe igualmente para guardarlo o enseñárselo a tu asesor.
@@ -372,7 +392,7 @@ function ReadyView({ ready, year, saving, saved, error, onDownload, onReset }: {
       <ol className="mt-2.5 space-y-2.5">
         {[
           'Envía el PDF a tu asesor, o ábrelo al lado de Renta Web si la haces tú.',
-          'La primera tabla, «Dónde va cada importe», dice en qué apartado va cada cifra.',
+          'La primera tabla dice la casilla de Renta Web de cada cifra, y al final tienes los plazos y las normas que aplica.',
           'Guarda el Excel: es tu respaldo si Hacienda pide el detalle de una operación.',
         ].map((text, index) => (
           <motion.li key={text} className="flex gap-3 text-[13px] leading-snug text-slate-600 dark:text-slate-300" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ ...softSpring, delay: 0.35 + index * 0.06 }}>

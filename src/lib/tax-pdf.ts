@@ -1,5 +1,6 @@
 import type { jsPDF as JsPdf } from 'jspdf';
 import type { CellInput } from 'jspdf-autotable';
+import { ABROAD_LIMIT, KEY_LABEL, taxCriteria, taxDuties } from './tax-guide';
 import { EFFECT, type IncomeKind, type TaxReport } from './tax-report';
 
 type Rgb = [number, number, number];
@@ -229,41 +230,62 @@ export async function buildTaxPdf(report: TaxReport, owner: string): Promise<JsP
     y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 30;
   };
 
-  heading('Dónde va cada importe en Renta Web', 'Cada bloque de este informe corresponde a un apartado de la declaración. Tu asesor confirma la casilla exacta del ejercicio.');
+  const bold = (value: number): CellInput => ({ content: money(value), styles: { fontStyle: 'bold', textColor: INK } });
+  const dividends = incomeOf(['Dividendos']);
+  heading('Dónde va cada importe en Renta Web', 'Cada bloque corresponde a un apartado de la declaración. Casillas de la Renta 2025; Hacienda suele mantenerlas de un año a otro.');
   const places: CellInput[][] = [
-    ['Ganancias y pérdidas patrimoniales · Monedas virtuales', 'Ventas, cambios entre criptos distintas y comisiones pagadas en cripto. Una línea por moneda (tabla 1).', toned(cryptoResult, true)],
-    ...(others.length ? [['Ganancias y pérdidas patrimoniales · Acciones y fondos cotizados', 'Ventas de acciones, ETF y otros valores (tabla 1).', toned(othersResult, true)] as CellInput[]] : []),
-    ['Rendimientos del capital mobiliario', 'Intereses de Earn y cuentas remuneradas, staking y dividendos (tabla 2).', { content: money(capital), styles: { fontStyle: 'bold', textColor: INK } }],
-    ['Ganancias patrimoniales que no derivan de transmisión', 'Recompensas y airdrops recibidos. Van a la base general (tabla 3).', { content: money(rewards), styles: { fontStyle: 'bold', textColor: INK } }],
+    ['Monedas virtuales', '1800 a 1814', 'Ventas, cambios entre criptos distintas y comisiones pagadas en cripto. Una fila por moneda y clave (tabla 1).', toned(cryptoResult, true)],
+    ...(others.length ? [['Acciones y ETF', '0328 y 0331', 'Ventas de acciones y fondos cotizados: valor de transmisión y de adquisición (tabla 1).', toned(othersResult, true)] as CellInput[]] : []),
+    ['Intereses y staking', '0027', 'Intereses de Earn y cuentas remuneradas, y rendimientos de staking (tabla 2).', bold(capital - dividends)],
+    ...(dividends > 0 ? [['Dividendos', '0029', 'Importe bruto. La retención en el extranjero se deduce en la 0588.', bold(dividends)] as CellInput[]] : []),
+    ['Otras ganancias sin transmisión', '0304', 'Recompensas y airdrops. Van a la base general (tabla 3).', bold(rewards)],
   ];
-  table(['Apartado', 'Qué incluye', 'Importe'], places, undefined, [2], { 0: 170, 2: 84 });
+  table(['Apartado', 'Casilla', 'Qué incluye', 'Importe'], places, undefined, [3], { 0: 110, 1: 62, 3: 80 });
 
-  const coins = [...new Set(crypto.map((item) => item.asset))].sort();
-  heading('1. Ganancias y pérdidas por transmisión', 'Base del ahorro. Renta Web pide cada moneda virtual por separado con su valor de transmisión y su valor de adquisición.');
+  const comp = report.compensation;
+  heading('Base del ahorro y cuota estimada', 'Compensación de pérdidas como la hace Renta Web (art. 49 LIRPF) y escala del ahorro del 19 % al 30 % (arts. 66 y 76 LIRPF).');
+  const baseRows: CellInput[][] = [
+    ['Ganancias y pérdidas del año', 'Ventas y cambios que tributan', toned(comp.gains)],
+    ...(sum(report.disposals, (item) => item.deferred) > 0 ? [['Pérdida que se aplaza', 'Regla de los dos meses: ya descontada de la línea de arriba', money(sum(report.disposals, (item) => item.deferred))] as CellInput[]] : []),
+    ['Rendimientos del capital mobiliario', 'Intereses, staking y dividendos', money(comp.capital)],
+    ...(comp.cross > 0 ? [['Pérdida del año contra rendimientos', 'Hasta el 25 % de los rendimientos', toned(-comp.cross)] as CellInput[]] : []),
+    ...comp.prior.map((item) => [`Pérdidas de ${item.year}`, item.against === 'ganancias' ? 'Restadas de las ganancias del año' : 'Restadas de los rendimientos, dentro del 25 %', toned(-item.amount)] as CellInput[]),
+    [{ content: 'Base imponible del ahorro', styles: { fontStyle: 'bold', textColor: INK } }, '', bold(comp.base)],
+    [{ content: 'Cuota estimada', styles: { fontStyle: 'bold', textColor: INK } }, 'Antes de retenciones y deducciones', bold(comp.tax)],
+  ];
+  table(['Concepto', 'Detalle', 'Importe'], baseRows, undefined, [2], { 0: 190, 2: 90 });
+  if (comp.pending.length) {
+    heading('Pérdidas para los próximos años', 'Se compensan en los cuatro años siguientes. Renta Web las pide en el apartado de partidas pendientes.');
+    table(['Año de la pérdida', 'Pendiente', 'Último año para usarla'], comp.pending.map((item) => [String(item.year), money(item.amount), String(item.until)]), undefined, [1, 2]);
+  }
+
+  const groups = [...new Set(crypto.map((item) => `${item.asset}|${item.key}`))].sort();
+  heading('1. Ganancias y pérdidas por transmisión', 'Base del ahorro. En Renta Web, una fila por moneda (1802) y por lo recibido a cambio (1803): F euros, N otra cripto, B bienes o servicios.');
   table(
-    ['Moneda o activo', 'Valor de transmisión', 'Valor de adquisición', 'Operaciones', 'Resultado'],
+    ['Moneda · 1802', 'Recibido · 1803', 'Transmisión · 1804', 'Adquisición · 1806', 'Resultado'],
     [
-      ...coins.map((coin) => {
-        const rows = crypto.filter((item) => item.asset === coin);
-        return [coin, money(sum(rows, (item) => item.proceeds)), money(sum(rows, (item) => item.cost)), String(rows.length), toned(sum(rows, (item) => item.gain))];
+      ...groups.map((group) => {
+        const [coin, key] = group.split('|') as [string, keyof typeof KEY_LABEL];
+        const rows = crypto.filter((item) => item.asset === coin && item.key === key);
+        return [coin, KEY_LABEL[key], money(sum(rows, (item) => item.proceeds)), money(sum(rows, (item) => item.cost)), toned(sum(rows, (item) => item.gain))];
       }),
-      ...(others.length ? [['Acciones, ETF y otros', money(sum(others, (item) => item.proceeds)), money(sum(others, (item) => item.cost)), String(others.length), toned(othersResult)] as CellInput[]] : []),
+      ...(others.length ? [['Acciones y ETF', '0328 · 0331', money(sum(others, (item) => item.proceeds)), money(sum(others, (item) => item.cost)), toned(othersResult)] as CellInput[]] : []),
     ],
-    ['Total', money(sum(report.disposals, (item) => item.proceeds)), money(sum(report.disposals, (item) => item.cost)), String(report.disposals.length), toned(result, true)],
-    [1, 2, 3, 4],
+    ['Total', '', money(sum(report.disposals, (item) => item.proceeds)), money(sum(report.disposals, (item) => item.cost)), toned(result, true)],
+    [2, 3, 4],
   );
 
   heading('2. Rendimientos del capital mobiliario', 'Base del ahorro. Valorados en euros el día en que los recibiste.');
   table(
-    ['Concepto', 'Apuntes', 'Importe'],
-    ([['Intereses', 'Intereses de Earn y cuentas remuneradas'], ['Staking', 'Staking'], ['Dividendos', 'Dividendos']] as const)
+    ['Concepto', 'Casilla', 'Apuntes', 'Importe'],
+    ([['Intereses', 'Intereses de Earn y cuentas remuneradas', '0027'], ['Staking', 'Staking', '0027'], ['Dividendos', 'Dividendos (bruto)', '0029']] as const)
       .filter(([kind]) => countOf([kind]) > 0)
-      .map(([kind, label]) => [label, String(countOf([kind])), money(incomeOf([kind]))]),
-    ['Total', String(countOf(capitalKinds)), money(capital)],
-    [1, 2],
+      .map(([kind, label, box]) => [label, box, String(countOf([kind])), money(incomeOf([kind]))]),
+    ['Total', '', String(countOf(capitalKinds)), money(capital)],
+    [2, 3],
   );
 
-  heading('3. Ganancias patrimoniales sin transmisión', 'Base general. Recompensas y airdrops, valorados el día en que entraron.');
+  heading('3. Ganancias patrimoniales sin transmisión', 'Base general, casilla 0304. Recompensas y airdrops, valorados el día en que entraron.');
   table(
     ['Mes', 'Activo', 'Plataforma', 'Importe'],
     report.incomes.filter((item) => item.kind === 'Recompensas').map((item) => [monthName(item.month), item.asset, item.platform, money(item.eur)]),
@@ -300,6 +322,32 @@ export async function buildTaxPdf(report: TaxReport, owner: string): Promise<JsP
     [3, 4, 5, 6],
   );
 
+  const deferred = report.disposals.filter((item) => item.deferred > 0);
+  if (deferred.length) {
+    heading('Pérdidas aplazadas por recompra', 'Compraste el mismo valor en los dos meses anteriores o posteriores (art. 33.5.f LIRPF). Esa parte se aplica cuando vendas lo recomprado.');
+    table(
+      ['Fecha', 'Valor', 'Pérdida', 'Aplazada', 'Se aplica ahora'],
+      deferred.map((item) => [day(item.date), item.asset, toned(item.gain), money(item.deferred), toned(item.gain + item.deferred)]),
+      undefined,
+      [2, 3, 4],
+    );
+  }
+
+  const end = report.yearEnd;
+  if (end.coins.length) {
+    const when = end.live ? 'hoy' : `31/12/${report.year}`;
+    heading(end.live ? 'Tu cripto a día de hoy' : `Tu cripto a 31 de diciembre de ${report.year}`, `Lo que mide el modelo 721: cripto que guarda por ti un exchange extranjero. Tus monederos propios y las entidades españolas no cuentan.${end.live ? ' El año aún no ha cerrado; la foto que vale es la del 31 de diciembre.' : ''}`);
+    table(
+      ['Plataforma', 'Moneda', 'Cantidad', `Valor ${when}`, 'Modelo 721'],
+      end.coins.map((coin) => [coin.platform, coin.asset, qty(coin.quantity), coin.eur == null ? '-' : money(coin.eur), !coin.custodian ? 'No: monedero propio' : coin.spanish ? 'No: entidad española' : 'Cuenta']),
+      ['En exchanges extranjeros', '', '', money(end.abroad), end.abroad > ABROAD_LIMIT ? 'Toca presentarlo' : 'No llega a 50.000 €'],
+      [2, 3],
+    );
+  }
+
+  heading('Obligaciones y plazos', 'Lo que Hacienda puede pedirte por este ejercicio y si te toca según tus datos en Balance.');
+  table(['Qué', 'Cuándo', 'Tu caso'], taxDuties(report, money), undefined, [], { 0: 130, 1: 120 });
+
   if (report.warnings.length) {
     const lines = report.warnings.flatMap((warning) => doc.splitTextToSize(warning, inner - 32) as string[]);
     const boxHeight = 34 + lines.length * 11 + (report.warnings.length - 1) * 4;
@@ -323,15 +371,7 @@ export async function buildTaxPdf(report: TaxReport, owner: string): Promise<JsP
 
   heading('Criterios del cálculo', '', 90);
   y += 6;
-  const notes = [
-    'Coste por FIFO: salen primero las unidades compradas antes, sumando todas tus cuentas.',
-    'Cambiar una cripto por otra distinta es una permuta y tributa, también al comprar con USDC u otra stablecoin.',
-    ...(report.rewraps.length ? ['Pasar ETH a staking y recibir WBETH, o volver a ETH, es el mismo activo en otro formato: no es una venta y el coste original pasa intacto. Si tu asesor prefiere tratarlo como permuta, el Excel trae cada cambio con su fecha y su coste.'] : []),
-    'Los traspasos entre tus cuentas y el paso a Earn no tributan: las monedas siguen siendo tuyas.',
-    'Las comisiones pagadas en cripto cuentan como una transmisión pequeña de esa moneda.',
-    'Precios: los euros de la propia operación cuando los hay; si no, el cierre en Binance de esa hora pasado a euros.',
-    'Con más de 50.000 € en cripto en plataformas extranjeras a 31 de diciembre, toca presentar también el modelo 721.',
-  ];
+  const notes = taxCriteria(report);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8.5);
   for (const note of notes) {
