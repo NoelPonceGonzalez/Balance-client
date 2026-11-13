@@ -1558,7 +1558,7 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
     });
   };
   const pin = (
-    <div className="sticky top-0 z-30 -mx-4 flex min-w-0 flex-col gap-2 bg-[var(--app-bg)] px-4 py-2 md:-mx-8 md:px-8">
+    <div className="sticky -top-2 z-30 -mx-4 flex min-w-0 flex-col gap-2 bg-[var(--app-bg)] px-4 py-2 md:-mx-8 md:px-8">
       <div className="order-2 min-w-0">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <div className="flex shrink-0 items-center gap-2">
