@@ -38,6 +38,8 @@ function forward(edge: string, name: string): Plugin {
   // A veces el primer intento se queda sin abrir conexión hasta que Windows corta a los 21 s; el siguiente entra al momento.
   const CONNECT_MS = 4000;
   const TRIES = 3;
+  const HARD_MS = 15000;
+  const sockets = new https.Agent({ keepAlive: false, maxSockets: 8 });
   const send = (req: IncomingMessage, res: ServerResponse) => new Promise<void>((resolve) => {
     let settled = false;
     const done = () => {
@@ -51,22 +53,38 @@ function forward(edge: string, name: string): Plugin {
       res.end();
       done();
     };
+    const hard = setTimeout(() => fail(504), HARD_MS);
+    res.on('close', () => {
+      clearTimeout(hard);
+      done();
+    });
     void readBody(req).then((body) => {
+      if (settled) return;
+      const headers = { ...req.headers };
+      delete headers.connection;
+      delete headers['proxy-connection'];
+      delete headers['transfer-encoding'];
+      headers.host = name;
+      headers['content-length'] = String(body.length);
       const attempt = (left: number) => {
+        if (settled) return;
         let connected = false;
+        let dropped = false;
         const upstream = https.request({
           host: edge,
           servername: name,
+          agent: sockets,
           method: req.method,
           path: req.url,
-          headers: { ...req.headers, host: name, 'content-length': String(body.length) },
-          timeout: 60000,
+          headers,
+          timeout: HARD_MS,
         }, (up) => {
-          const headers = { ...up.headers };
-          delete headers['transfer-encoding'];
-          delete headers.connection;
+          clearTimeout(hard);
+          const reply = { ...up.headers };
+          delete reply['transfer-encoding'];
+          delete reply.connection;
           try {
-            res.writeHead(up.statusCode || 502, headers);
+            res.writeHead(up.statusCode || 502, reply);
             up.pipe(res);
           } catch {
             if (!res.headersSent) res.writeHead(502);
@@ -75,21 +93,21 @@ function forward(edge: string, name: string): Plugin {
           up.on('end', done);
           up.on('error', done);
           up.on('close', done);
-          res.on('close', done);
         });
-        let dropped = false;
         const connectTimer = setTimeout(() => {
-          if (connected) return;
+          if (connected || settled) return;
           dropped = true;
           upstream.destroy();
           if (left > 1) attempt(left - 1);
           else fail(504);
         }, CONNECT_MS);
         upstream.on('socket', (socket) => {
-          socket.once('secureConnect', () => {
+          const mark = () => {
             connected = true;
             clearTimeout(connectTimer);
-          });
+          };
+          if (socket.authorized || socket.encrypted) mark();
+          else socket.once('secureConnect', mark);
         });
         upstream.on('timeout', () => {
           dropped = true;
@@ -98,7 +116,7 @@ function forward(edge: string, name: string): Plugin {
         });
         upstream.on('error', () => {
           clearTimeout(connectTimer);
-          if (dropped) return;
+          if (dropped || settled) return;
           if (!connected && left > 1) attempt(left - 1);
           else fail(502);
         });

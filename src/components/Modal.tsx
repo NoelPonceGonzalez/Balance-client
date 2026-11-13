@@ -8,7 +8,7 @@ export const modalOverlayClass =
   'fixed inset-0 z-50 flex items-end justify-center bg-black/25 p-3 sm:items-center dark:bg-black/50';
 
 export const modalPanelClass =
-  'max-h-[92dvh] w-full overflow-y-auto rounded-[28px] bg-white p-5 text-slate-900 ring-1 ring-slate-200/70 dark:bg-slate-900 dark:text-white dark:ring-white/10';
+  'no-scrollbar max-h-[92dvh] w-full overflow-y-auto overscroll-contain rounded-[28px] bg-white p-5 text-slate-900 ring-1 ring-slate-200/70 dark:bg-slate-900 dark:text-white dark:ring-white/10';
 
 export function ModalClose({ onClose }: { onClose: () => void }) {
   return (

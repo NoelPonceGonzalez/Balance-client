@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { bindHold, HoldMenu, holdItemClass, placeMenu } from '@/components/HoldMenu';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'motion/react';
-import { Check, ChevronLeft, ChevronRight, Copy, GripVertical, ImageIcon, MoreHorizontal, Pencil, Plus, Trash2 } from 'lucide-react';
+import { Check, ChevronDown, ChevronLeft, ChevronRight, Copy, GripVertical, ImageIcon, MoreHorizontal, Pencil, Plus, Trash2 } from 'lucide-react';
 import { ModalClose, modalPanelClass, Overlay } from '@/components/Modal';
 import { OriginGlyph, OriginPicker } from '@/components/OriginMark';
 import { PlatformLogo } from '@/components/PlatformLogo';
@@ -15,11 +15,26 @@ import { formatDay, formatEur, formatSignedEur } from '@/lib/format';
 import { planImageFileName, renderPlanPng } from '@/lib/plan-image';
 import { accountProducts } from '@/lib/products';
 import { cn, docId } from '@/lib/utils';
-import type { AccountRow, PlanForecast, PlanMonthLine, PlanMonthView, PlanRow, TripSplit } from '@/lib/types';
+import type { AccountRow, PlanForecast, PlanInvest, PlanMonthLine, PlanMonthView, PlanRow, TripSplit } from '@/lib/types';
 import { TripFace, TripPlan } from '@/views/TripPlan';
+import { assetLabel, buyLeft, CoinMark, coinMoments, fillPlan, InvestPlan, INVEST_ASSETS, localInvest, MOMENT_LABEL, MOMENT_TONE, planOutcome, usePlanCoins, wholeEur, type CoinMoment, type PlanOutcome } from '@/components/InvestPlan';
 
 type Kind = 'patrimonio' | 'liquidez' | 'inversion' | 'gastos';
-type PlanItem = { plan: PlanRow; forecast: PlanForecast; split?: TripSplit };
+type PlanItem = { plan: PlanRow; forecast: PlanForecast; split?: TripSplit; invest?: PlanInvest };
+type PlanFilter = 'live' | 'over' | 'all';
+
+const FILTERS: { id: PlanFilter; label: string }[] = [
+  { id: 'live', label: 'En marcha' },
+  { id: 'over', label: 'Terminados' },
+  { id: 'all', label: 'Todos' },
+];
+
+function todayIso(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+}
+type DraftBuy = { id?: string; asset: string; amount: string; date: string; done: boolean; doneAt?: string; priceEur?: number | null };
+type DraftWatch = { dropPct: string; risePct: string; ratioAbove: string; zones: { asset: string; belowEur: string }[] };
 
 interface Draft {
   name: string;
@@ -41,7 +56,12 @@ interface Draft {
   plannedExpenses: { id?: string; name: string; amount: string; date: string; paid: boolean; surprise?: boolean; automatic?: boolean; image?: string }[];
   incomes: { id?: string; name: string; amount: string; date: string; status: 'expected' | 'confirmed'; paid: boolean; surprise?: boolean; automatic?: boolean; image?: string }[];
   scenarios: { name: string; monthlySavings: string }[];
+  tandas: boolean;
+  buys: DraftBuy[];
+  watch: DraftWatch;
 }
+
+const blankWatch = (): DraftWatch => ({ dropPct: '5', risePct: '8', ratioAbove: '', zones: [] });
 
 const blank = (): Draft => ({
   name: '',
@@ -63,7 +83,19 @@ const blank = (): Draft => ({
   plannedExpenses: [],
   incomes: [],
   scenarios: [],
+  tandas: false,
+  buys: [],
+  watch: blankWatch(),
 });
+
+function isTandas(plan: { kind?: string; buys?: unknown[] }): boolean {
+  return plan.kind === 'inversion' && Array.isArray(plan.buys) && plan.buys.length > 0;
+}
+
+function yearAfter(day: string): string {
+  const [year, month, date] = day.split('-').map(Number);
+  return new Date(Date.UTC(year + 1, month - 1, date)).toISOString().slice(0, 10);
+}
 
 function isPurchase(plan: { kind?: string; linkedAccountIds?: unknown[] }): boolean {
   return (plan.kind || 'patrimonio') === 'patrimonio' && !(plan.linkedAccountIds || []).length;
@@ -72,6 +104,7 @@ function isPurchase(plan: { kind?: string; linkedAccountIds?: unknown[] }): bool
 function planTitle(plan: PlanRow): string {
   const goal = formatEur(plan.targetAmount);
   if (plan.kind === 'liquidez') return `Plan de liquidez hasta los ${goal}`;
+  if (isTandas(plan)) return `Compras de ${plan.field?.trim() || 'Cripto'} hasta volver a positivo`;
   if (plan.kind === 'inversion') {
     const field = plan.field?.trim();
     return field ? `Plan de inversión en ${field} hasta los ${goal}` : `Plan de inversión hasta los ${goal}`;
@@ -139,6 +172,31 @@ function toBody(draft: Draft) {
       name: item.name,
       monthlySavings: Number(item.monthlySavings || 0),
     })),
+    ...(draft.kind === 'inversion' && draft.tandas ? tandasBody(draft) : {}),
+  };
+}
+
+function tandasBody(draft: Draft) {
+  return {
+    field: 'Cripto',
+    monthlySavings: 0,
+    targetAmount: 0,
+    targetDate: draft.targetDate || yearAfter(draft.startDate),
+    buys: draft.buys.filter((item) => Number(item.amount) > 0).map((item) => ({
+      ...(item.id ? { id: item.id } : {}),
+      asset: item.asset,
+      amount: Number(item.amount),
+      date: item.date || '',
+      done: item.done,
+      doneAt: item.doneAt || '',
+      priceEur: item.priceEur ?? null,
+    })),
+    watch: {
+      dropPct: Number(draft.watch.dropPct || 0),
+      risePct: Number(draft.watch.risePct || 0),
+      ratioAbove: draft.watch.ratioAbove === '' ? null : Number(draft.watch.ratioAbove.replace(',', '.')),
+      zones: draft.watch.zones.filter((zone) => Number(zone.belowEur) > 0).map((zone) => ({ asset: zone.asset, belowEur: Number(zone.belowEur) })),
+    },
   };
 }
 
@@ -163,6 +221,16 @@ function fromPlan(plan: PlanRow): Draft {
     plannedExpenses: (plan.plannedExpenses || []).map((item) => ({ id: item._id, name: item.name, amount: String(item.amount), date: item.date.slice(0, 10), paid: item.paid === true, surprise: item.surprise === true, automatic: item.automatic === true || /^entrenador$/i.test(item.name), image: item.image || '' })),
     incomes: (plan.incomes || []).map((item) => ({ id: item._id, name: item.name, amount: String(item.amount), date: item.date.slice(0, 10), status: item.status || 'confirmed', paid: item.paid === true, surprise: item.surprise === true, automatic: item.automatic === true, image: item.image || '' })),
     scenarios: (plan.scenarios || []).map((item) => ({ name: item.name, monthlySavings: String(item.monthlySavings) })),
+    tandas: isTandas(plan),
+    buys: (plan.buys || []).map((item) => ({ id: item._id, asset: item.asset, amount: String(item.amount), date: item.date || '', done: item.done === true, doneAt: item.doneAt || '', priceEur: item.priceEur ?? null })),
+    watch: plan.watch
+      ? {
+        dropPct: String(plan.watch.dropPct ?? ''),
+        risePct: String(plan.watch.risePct ?? ''),
+        ratioAbove: plan.watch.ratioAbove == null ? '' : String(plan.watch.ratioAbove),
+        zones: (plan.watch.zones || []).map((zone) => ({ asset: zone.asset, belowEur: String(zone.belowEur) })),
+      }
+      : blankWatch(),
   };
 }
 
@@ -192,7 +260,7 @@ function jointLine(forecast: PlanForecast | undefined, account?: AccountRow): st
 function kindLabel(plan: { kind?: string; linkedAccountIds?: unknown[] }): string {
   if (plan.kind === 'gastos') return 'Reparto';
   if (plan.kind === 'liquidez') return 'Liquidez';
-  if (plan.kind === 'inversion') return 'Inversión';
+  if (plan.kind === 'inversion') return isTandas(plan as { kind?: string; buys?: unknown[] }) ? 'Compras por tandas' : 'Inversión';
   if (isPurchase(plan)) return 'Compra';
   return 'Patrimonio';
 }
@@ -292,6 +360,33 @@ function PlanCorner({ balance, target, delta, beat }: { balance: number; target:
   if (delta != null && Math.abs(delta) > 0.5) {
     frames.push({ text: formatSignedEur(delta), className: delta > 0 ? 'text-[#16c784]' : 'text-[#ea3943]' });
   }
+  return <TurnCorner frames={frames} beat={beat} />;
+}
+
+/** Lo que vale lo metido en el plan frente a lo puesto: 110 % y luego +523 €, por turnos. */
+function OutcomeCorner({ outcome, beat }: { outcome: PlanOutcome | null; beat: number }) {
+  if (!outcome || !(outcome.invested > 0)) return null;
+  const up = outcome.result >= 0;
+  const className = up ? 'text-[#16c784]' : 'text-[#ea3943]';
+  const share = `${new Intl.NumberFormat('es-ES', { maximumFractionDigits: 1 }).format(outcome.share)} %`;
+  const money = `${up ? '+' : '−'}${wholeEur(Math.abs(outcome.result))}`;
+  return <TurnCorner frames={[{ text: share, className }, { text: money, className }]} beat={beat} />;
+}
+
+function OutcomeBar({ outcome, className }: { outcome: PlanOutcome | null; className?: string }) {
+  const invested = outcome?.invested ?? 0;
+  const up = (outcome?.result ?? 0) >= 0;
+  return (
+    <span className={cn('block h-1 overflow-hidden rounded-full bg-slate-900/10 dark:bg-white/15', className)}>
+      <span
+        className={cn('block h-full rounded-full transition-[width] duration-700 ease-out', up ? 'bg-[#16c784]' : 'bg-[#ea3943]')}
+        style={{ width: `${invested > 0 && outcome ? Math.max(0, Math.min(100, outcome.share)) : 0}%` }}
+      />
+    </span>
+  );
+}
+
+function TurnCorner({ frames, beat }: { frames: { text: string; className: string }[]; beat: number }) {
   const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const frame = frames[beat % frames.length];
   if (still) return <span className={cn('shrink-0 text-xs font-black tabular-nums', frame.className)}>{frame.text}</span>;
@@ -488,7 +583,7 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
         return;
       }
       const body = toBody(draft);
-      if (!(body.targetAmount > 0)) throw new Error('El objetivo tiene que ser mayor que cero.');
+      if (!(body.targetAmount > 0) && !(draft.kind === 'inversion' && draft.tandas)) throw new Error('El objetivo tiene que ser mayor que cero.');
       if (!body.targetDate || !body.startDate) throw new Error('Faltan las fechas del plan.');
       const saved = editing
         ? await api<{ plan: PlanRow }>(`/api/plans/${editing}`, { method: 'PATCH', body: JSON.stringify(body) })
@@ -518,6 +613,34 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
   const linked = accounts.filter((account) => (plan?.linkedAccountIds || []).map(String).includes(String(account._id)) && !account.archived);
   const payday = accounts.find((account) => String(account._id) === String(plan?.salaryAccountId) && !account.archived) || (linked.length === 1 ? linked[0] : undefined);
   const spends = plan ? spendNotes(plan) : [];
+  const coins = usePlanCoins(items.map((item) => item.plan).filter((row) => isTandas(row)), books);
+  const shownPlan = (item: PlanItem): PlanRow => (isTandas(item.plan) && !item.invest ? fillPlan(item.plan, coins.holdings, coins.movements) : item.plan);
+  const tandas = current && isTandas(current.plan) ? shownPlan(current) : null;
+  const tandasInvest = tandas ? current?.invest ?? localInvest(tandas, coins.holdings) : undefined;
+  const tandasOutcome = tandas ? planOutcome(tandas, coins.holdings) : null;
+  const rows = items.map((item) => {
+    const opening = item.forecast.months?.[0]?.lines[0]?.balance ?? item.plan.openingBalance ?? 0;
+    const done = item.forecast.today ? completion(item.forecast.months || [], item.forecast.today, opening, item.plan.targetAmount) : null;
+    const shown = shownPlan(item);
+    const over = item.plan.kind === 'gastos'
+      ? item.plan.tripStatus === 'done'
+      : isTandas(item.plan)
+        ? (shown.buys || []).length > 0 && (shown.buys || []).every((buy) => buyLeft(buy) === 0)
+        : Boolean(done) || (item.forecast.today || todayIso()) > item.plan.targetDate.slice(0, 10);
+    return { item, opening, done, shown, over };
+  });
+  const [filter, setFilter] = useState<PlanFilter>(() => {
+    const stored = localStorage.getItem('pat_plan_filter');
+    return stored === 'over' || stored === 'all' ? stored : 'live';
+  });
+  const pickFilter = (next: PlanFilter) => {
+    setFilter(next);
+    localStorage.setItem('pat_plan_filter', next);
+  };
+  const listed = rows.filter((row) => filter === 'all' || (filter === 'over') === row.over);
+  const moments = tandas ? coinMoments(tandas, tandasInvest, coins.holdings) : [];
+  const [tandaFocus, setTandaFocus] = useState<{ id: string; at: number } | null>(null);
+  const [coinsOpen, setCoinsOpen] = useState(false);
 
   const beginEdit = (line: PlanMonthLine) => {
     if (!plan || !line.markKey) return;
@@ -836,32 +959,88 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
         <div className="sticky -top-2 z-30 -mt-2 mx-[calc(50%-50vw)] bg-[var(--app-bg)] px-3 pb-4 pt-4 sm:px-4 md:px-8">
           <div aria-hidden className="pointer-events-none absolute inset-x-0 top-full h-8 bg-gradient-to-b from-[var(--app-bg)] to-transparent" />
           <div className="relative mx-auto max-w-3xl">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <button type="button" onClick={() => setSelected(null)} className="inline-flex items-center gap-0.5 text-sm font-semibold text-slate-500" aria-label="Todos los planes"><ChevronLeft size={16} /> Planes</button>
-              <span className="text-xs font-medium text-slate-400">{formatEur(plan.targetAmount)}</span>
+            <div className="mb-3 grid grid-cols-[2rem_1fr_auto] items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setSelected(null)}
+                className="grid h-8 w-8 place-items-center rounded-full bg-slate-900/[0.05] text-slate-600 transition-transform active:scale-95 dark:bg-white/10 dark:text-slate-200"
+                aria-label="Todos los planes"
+              >
+                <ChevronLeft size={17} />
+              </button>
+              <div className="min-w-0 text-center">
+                <p className="truncate text-[15px] font-semibold tracking-tight">{plan.name}</p>
+                <p className="truncate text-[11px] font-semibold text-slate-400">{kindLabel(plan)}{linked[0] ? ` · ${linked[0].name}` : ''}</p>
+              </div>
+              <span className="justify-self-end rounded-full bg-slate-900/[0.05] px-2.5 py-1 text-[11px] font-semibold tabular-nums text-slate-500 dark:bg-white/10 dark:text-slate-300">
+                {tandas ? `${(tandas.buys || []).filter((buy) => buy.done).length}/${(tandas.buys || []).length}` : wholeEur(plan.targetAmount)}
+              </span>
             </div>
-            <p className="text-[2rem] font-semibold leading-none tabular-nums tracking-tight text-slate-900 dark:text-white"><SoftEur value={shownBalance} /></p>
-            {jointLine(forecast, linked[0]) && <p className="mt-2 text-[13px] font-medium leading-snug text-slate-400">{jointLine(forecast, linked[0])}</p>}
-            <div className="mt-4 h-0.5 w-full overflow-hidden rounded-full bg-slate-900/10 dark:bg-white/15">
-              <div className="h-full rounded-full bg-slate-900 transition-[width] duration-700 ease-out dark:bg-white" style={{ width: `${barWidth(shownBalance, plan.targetAmount)}%` }} />
-            </div>
-            {finished ? (
-              <p className="mt-3 text-[13px] font-medium text-[#16c784]">Completado el {shortDay(finished.day)}</p>
-            ) : arrival ? (
-              <p className={cn('mt-3 text-[13px] font-medium leading-snug', arrival.className)}>{arrival.text}</p>
-            ) : null}
+            {tandas ? (
+              <TandasHeader
+                plan={tandas}
+                outcome={tandasOutcome}
+                loading={!coins.holdings.length}
+                beat={beat}
+                moments={moments}
+                open={coinsOpen}
+                onToggle={() => setCoinsOpen((value) => !value)}
+                onPick={(id) => setTandaFocus({ id, at: Date.now() })}
+              />
+            ) : (
+              <HeroCard>
+                <div className="flex items-end justify-between gap-3">
+                  <p className="text-[2rem] font-semibold leading-none tabular-nums tracking-[-0.03em] text-slate-900 dark:text-white"><SoftEur value={shownBalance} /></p>
+                  {finished ? (
+                    <span className="inline-flex items-center gap-1 text-[12px] font-bold text-[#16c784]"><Check size={13} strokeWidth={3} /> Completado</span>
+                  ) : (
+                    <PlanCorner balance={shownBalance} target={plan.targetAmount} delta={null} beat={beat} />
+                  )}
+                </div>
+                <HeroBar share={barWidth(shownBalance, plan.targetAmount)} tone={finished ? 'up' : 'flat'} />
+                <div className="mt-2.5 flex items-baseline justify-between gap-3 text-[12px] font-medium tabular-nums text-slate-400">
+                  <span className="min-w-0 truncate">
+                    {finished ? `Completado el ${shortDay(finished.day)}` : arrival ? <span className={arrival.className}>{arrival.text}</span> : jointLine(forecast, linked[0]) || `Meta ${wholeEur(plan.targetAmount)}`}
+                  </span>
+                  <span className="shrink-0">de {wholeEur(plan.targetAmount)}</span>
+                </div>
+              </HeroCard>
+            )}
           </div>
         </div>
       )}
       {error && <p className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">{error}</p>}
       {!ready && !plan && <QuietLoad />}
+      {ready && !selected && rows.length > 0 && (
+        <div className="flex gap-1.5 overflow-x-auto" role="tablist" aria-label="Filtrar planes">
+          {FILTERS.map((option) => {
+            const count = option.id === 'all' ? rows.length : rows.filter((row) => (option.id === 'over') === row.over).length;
+            return (
+              <button
+                key={option.id}
+                type="button"
+                role="tab"
+                aria-selected={filter === option.id}
+                onClick={() => pickFilter(option.id)}
+                className={cn(
+                  'shrink-0 rounded-full px-3.5 py-1.5 text-[13px] font-semibold transition-colors',
+                  filter === option.id ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900' : 'bg-slate-900/[0.05] text-slate-500 dark:bg-white/10 dark:text-slate-300',
+                )}
+              >
+                {option.label} <span className="tabular-nums opacity-60">{count}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
       {ready && !selected && (
         <div className="grid grid-cols-1 gap-3 min-[480px]:grid-cols-2">
-          {items.map((item) => {
-            const opening = item.forecast.months?.[0]?.lines[0]?.balance ?? item.plan.openingBalance ?? 0;
-            const done = item.forecast.today ? completion(item.forecast.months || [], item.forecast.today, opening, item.plan.targetAmount) : null;
-            return { item, opening, done };
-          }).sort((a, b) => Number(Boolean(a.done)) - Number(Boolean(b.done))).map(({ item, opening, done }) => {
+          {listed.length === 0 && rows.length > 0 && (
+            <p className="col-span-full px-1 py-2 text-sm font-medium text-slate-400">
+              {filter === 'over' ? 'Todavía no hay planes terminados.' : 'No hay planes en marcha.'}
+            </p>
+          )}
+          {[...listed].sort((a, b) => Number(a.over) - Number(b.over) || Number(Boolean(a.done)) - Number(Boolean(b.done))).map(({ item, opening, done, shown }) => {
             const id = docId(item.plan);
             if (item.plan.kind === 'gastos') {
               return (
@@ -897,6 +1076,56 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
             const site = accounts.find((account) => (item.plan.linkedAccountIds || []).map(String).includes(String(account._id)) && !account.archived);
             const pace = surprisePace(item.plan);
             const delta = item.plan.kind === 'inversion' ? pace.ahead - pace.behind : null;
+            const outcome = isTandas(item.plan) ? planOutcome(shown, coins.holdings) : null;
+            if (isTandas(item.plan)) {
+              return (
+                <div
+                  key={id}
+                  onPointerDown={(event) => {
+                    if ((event.target as HTMLElement).closest('[data-menu]')) return;
+                    holdCard(id, event);
+                  }}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    setCardMenu({ id, ...placeMenu(event.clientX, event.clientY), confirm: false });
+                  }}
+                  onClick={() => {
+                    if (suppressCard.current) {
+                      suppressCard.current = false;
+                      return;
+                    }
+                    setSelected(id);
+                  }}
+                  className="hold-target plan-rise cursor-pointer rounded-[28px] bg-white p-4 text-left ring-1 ring-slate-200/70 dark:bg-slate-900 dark:ring-white/10"
+                >
+                  <span className="flex items-start justify-between gap-2">
+                    <span className="flex min-w-0 items-center gap-2">
+                      {site && <PlatformLogo name={site.platform || site.name} size={22} />}
+                      <span className="min-w-0 truncate text-sm font-semibold">{item.plan.name}</span>
+                      <button
+                        type="button"
+                        data-menu
+                        aria-label="Editar o eliminar"
+                        onPointerDown={(event) => event.stopPropagation()}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          const rect = event.currentTarget.getBoundingClientRect();
+                          setCardMenu({ id, ...placeMenu(rect.left + rect.width / 2, rect.top), confirm: false });
+                        }}
+                        className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-slate-400"
+                      >
+                        <MoreHorizontal size={15} />
+                      </button>
+                    </span>
+                    <OutcomeCorner outcome={outcome} beat={beat} />
+                  </span>
+                  <span className="mt-2 block text-[11px] font-semibold text-slate-400">{kindLabel(item.plan)}</span>
+                  <span className="mt-3 block whitespace-nowrap text-[1.65rem] font-semibold leading-none tabular-nums tracking-tight">{outcome ? <SoftEur value={outcome.value} whole /> : '—'}</span>
+                  <OutcomeBar outcome={outcome} className="mt-4" />
+                  <span className="mt-2 block text-[13px] font-medium text-slate-400">{tandasLine(shown, outcome)}</span>
+                </div>
+              );
+            }
             return (
               <div
                 key={id}
@@ -1022,7 +1251,10 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
           )}
         </HoldMenu>
       )}
-      {plan && forecast && (
+      {tandas && (
+        <InvestPlan plan={tandas} invest={tandasInvest} serverReady={Boolean(current?.invest)} coins={coins} focus={tandaFocus} showCoins={coinsOpen} onChanged={load} />
+      )}
+      {plan && forecast && !isTandas(plan) && (
         <article className="rounded-[28px] bg-white p-4 ring-1 ring-slate-200/70 dark:bg-slate-900 dark:ring-white/10 sm:p-5">
           <div>
             <h3 className="text-base font-semibold tracking-tight">{planTitle(plan)}</h3>
@@ -1268,16 +1500,18 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
   );
 }
 
-type PlanStep = 'tipo' | 'campo' | 'nombre' | 'cuenta' | 'partida' | 'nomina' | 'aportado' | 'ritmo' | 'meta' | 'fechas' | 'apuntes';
+type PlanStep = 'tipo' | 'campo' | 'nombre' | 'cuenta' | 'partida' | 'nomina' | 'aportado' | 'ritmo' | 'meta' | 'fechas' | 'apuntes' | 'compras' | 'avisos';
 
-const PLAN_KINDS: { kind: Kind; title: string; hint: string }[] = [
+const PLAN_KINDS: { kind: Kind; title: string; hint: string; tandas?: boolean }[] = [
   { kind: 'liquidez', title: 'Llegar a un líquido', hint: 'Un colchón en una cuenta.' },
   { kind: 'inversion', title: 'Subir una inversión', hint: 'Cripto, ETF o acciones.' },
+  { kind: 'inversion', title: 'Comprar cripto por tandas', hint: 'Balance vigila el precio y te avisa cuándo comprar.', tandas: true },
   { kind: 'patrimonio', title: 'Comprar algo', hint: 'Un reloj o unos guantes.' },
   { kind: 'gastos', title: 'Repartir', hint: 'Entre varias personas.' },
 ];
 
-function planSteps(kind: Kind, linked: boolean): PlanStep[] {
+function planSteps(kind: Kind, linked: boolean, tandas = false): PlanStep[] {
+  if (kind === 'inversion' && tandas) return ['tipo', 'nombre', 'cuenta', 'compras', 'avisos'];
   const steps: PlanStep[] = ['tipo'];
   if (kind === 'inversion') steps.push('campo');
   steps.push('nombre');
@@ -1308,6 +1542,12 @@ function planStepBlock(step: PlanStep, draft: Draft, picked: boolean): string {
   if (step === 'aportado') {
     const contributed = Number(draft.contributed || 0);
     if (!Number.isFinite(contributed) || contributed < 0) return 'Lo aportado no puede ser negativo.';
+  }
+  if (step === 'cuenta' && draft.tandas && draft.linkedAccountIds.length === 0) return 'Elige la cuenta donde tienes la cripto.';
+  if (step === 'compras' && !draft.buys.some((item) => Number(item.amount) > 0)) return 'Añade al menos una tanda.';
+  if (step === 'avisos') {
+    const ratio = draft.watch.ratioAbove.replace(',', '.');
+    if (ratio && !(Number(ratio) > 0)) return 'La línea ETH/BTC tiene que ser un número.';
   }
   return '';
 }
@@ -1341,35 +1581,41 @@ function PlanDraft({
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const linked = draft.linkedAccountIds.length > 0;
-  const steps = picked ? planSteps(draft.kind, linked) : (['tipo'] as PlanStep[]);
+  const steps = picked ? planSteps(draft.kind, linked, draft.tandas) : (['tipo'] as PlanStep[]);
   const index = Math.max(0, steps.indexOf(stepId));
   const step = steps[index] || 'tipo';
   const last = picked && index === steps.length - 1;
 
   useEffect(() => {
     if (!picked) return;
-    const list = planSteps(draft.kind, draft.linkedAccountIds.length > 0);
+    const list = planSteps(draft.kind, draft.linkedAccountIds.length > 0, draft.tandas);
     if (!list.includes(stepId)) {
       const afterAccount = list.indexOf('cuenta');
       setStepId(list[afterAccount + 1] || list[list.length - 1]);
     }
-  }, [draft.kind, draft.linkedAccountIds.length, picked, stepId]);
+  }, [draft.kind, draft.linkedAccountIds.length, draft.tandas, picked, stepId]);
 
-  const chooseKind = (kind: Kind) => {
+  const chooseKind = (kind: Kind, tandas = false) => {
     setPicked(true);
     setNote('');
     setDraft({
       ...draft,
       kind,
-      field: kind === 'inversion' && ['Cripto', 'ETF', 'Acciones'].includes(draft.field) ? draft.field : kind === 'inversion' ? 'Cripto' : draft.field,
+      tandas,
+      field: tandas ? 'Cripto' : kind === 'inversion' && ['Cripto', 'ETF', 'Acciones'].includes(draft.field) ? draft.field : kind === 'inversion' ? 'Cripto' : draft.field,
       linkedAccountIds: kind === 'patrimonio' || kind === 'gastos' ? [] : draft.linkedAccountIds.slice(0, 1),
       salary: kind === 'liquidez' ? draft.salary : '',
+      buys: tandas && draft.buys.length === 0 ? [{ asset: 'bitcoin', amount: '', date: '', done: false }] : draft.buys,
     });
-    setStepId(kind === 'inversion' ? 'campo' : 'nombre');
+    setStepId(kind === 'inversion' && !tandas ? 'campo' : 'nombre');
   };
 
+  const setBuy = (row: number, patch: Partial<DraftBuy>) => setDraft({ ...draft, buys: draft.buys.map((item, at) => (at === row ? { ...item, ...patch } : item)) });
+  const setZone = (row: number, patch: Partial<DraftWatch['zones'][number]>) => setDraft({ ...draft, watch: { ...draft.watch, zones: draft.watch.zones.map((item, at) => (at === row ? { ...item, ...patch } : item)) } });
+  const watchAssets = [...new Set(draft.buys.map((item) => item.asset))];
+
   const go = (dir: 1 | -1) => {
-    const list = planSteps(draft.kind, draft.linkedAccountIds.length > 0);
+    const list = planSteps(draft.kind, draft.linkedAccountIds.length > 0, draft.tandas);
     const at = Math.max(0, list.indexOf(step));
     if (dir === 1) {
       const problem = planStepBlock(step, draft, picked);
@@ -1408,9 +1654,13 @@ function PlanDraft({
                 : step === 'ritmo' ? 'Cuánto apartas'
                   : step === 'meta' ? (draft.kind === 'patrimonio' ? 'Cuánto cuesta' : 'A cuánto quieres llegar')
                     : step === 'fechas' ? 'Cuándo'
-                      : 'Apuntes';
+                      : step === 'compras' ? 'Las tandas'
+                        : step === 'avisos' ? 'Cuándo te aviso'
+                          : 'Apuntes';
 
-  const hint = step === 'cuenta' ? 'Salen todas las cuentas. Elige una, o ninguna si el plan lleva su propio saldo.'
+  const hint = step === 'cuenta' ? (draft.tandas ? 'La cuenta donde tienes la cripto. De ahí salen tus medias.' : 'Salen todas las cuentas. Elige una, o ninguna si el plan lleva su propio saldo.')
+    : step === 'compras' ? 'Pon fecha a las que ya tienes claras. Sin fecha, esperan a que salte un aviso.'
+      : step === 'avisos' ? 'Balance mira el precio cada minuto y te avisa con estas reglas.'
     : step === 'partida' ? 'Lo que ya tienes, sin enlazar una cuenta.'
       : step === 'nomina' ? 'Si no entra, déjalo vacío.'
         : step === 'aportado' ? 'Si todavía nada, déjalo vacío.'
@@ -1446,9 +1696,9 @@ function PlanDraft({
           <div className="divide-y divide-slate-200/80 overflow-hidden rounded-2xl border border-slate-200/70 bg-white/80 dark:divide-white/10 dark:border-white/10 dark:bg-white/[0.04]">
             {PLAN_KINDS.map((item) => (
               <button
-                key={item.kind}
+                key={item.title}
                 type="button"
-                onClick={() => chooseKind(item.kind)}
+                onClick={() => chooseKind(item.kind, item.tandas === true)}
                 className="flex w-full items-center gap-3 px-3.5 py-3 text-left hover:bg-slate-50 dark:hover:bg-white/5"
               >
                 <span className="min-w-0 flex-1">
@@ -1476,7 +1726,47 @@ function PlanDraft({
           </div>
         )}
         {step === 'nombre' && (
-          <Input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder={draft.kind === 'gastos' ? 'Cena' : draft.kind === 'patrimonio' ? 'Guantes' : 'Plan 10k'} autoFocus />
+          <Input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder={draft.kind === 'gastos' ? 'Cena' : draft.kind === 'patrimonio' ? 'Guantes' : draft.tandas ? 'Inversión cripto' : 'Plan 10k'} autoFocus />
+        )}
+        {step === 'compras' && (
+          <div className="grid max-h-72 gap-2 overflow-y-auto">
+            {draft.buys.map((item, row) => (
+              <div key={item.id || `b-${row}`} className={cn('grid grid-cols-[1fr_5.5rem] gap-2 rounded-2xl border border-slate-200/70 p-2.5 dark:border-white/10', item.done && 'opacity-60')}>
+                <select value={item.asset} onChange={(event) => setBuy(row, { asset: event.target.value })} className="h-10 rounded-xl border border-slate-200 bg-white px-2.5 text-sm font-semibold dark:border-white/10 dark:bg-slate-900">
+                  {INVEST_ASSETS.map((asset) => <option key={asset.id} value={asset.id}>{asset.name}</option>)}
+                </select>
+                <Input type="number" min="0" step="any" value={item.amount} onChange={(event) => setBuy(row, { amount: event.target.value })} placeholder="€" />
+                <Input type="date" value={item.date} onChange={(event) => setBuy(row, { date: event.target.value })} />
+                <button type="button" onClick={() => setDraft({ ...draft, buys: draft.buys.filter((_, at) => at !== row) })} className="text-[12px] font-semibold text-slate-400">Quitar</button>
+                <p className="col-span-2 px-1 text-[11px] font-medium text-slate-400">{item.done ? 'Hecha' : item.date ? `El ${shortDay(item.date)}` : 'Cuando salte un aviso'}</p>
+              </div>
+            ))}
+            <button type="button" onClick={() => setDraft({ ...draft, buys: [...draft.buys, { asset: draft.buys[draft.buys.length - 1]?.asset || 'bitcoin', amount: '', date: '', done: false }] })} className="justify-self-start rounded-full border border-slate-200 px-2.5 py-1 text-[11px] font-semibold text-slate-500 dark:border-white/10">+ Tanda</button>
+          </div>
+        )}
+        {step === 'avisos' && (
+          <div className="grid max-h-72 gap-2 overflow-y-auto">
+            <div className="grid grid-cols-2 gap-2">
+              <Input label="Si baja (%)" type="number" min="0" step="any" value={draft.watch.dropPct} onChange={(event) => setDraft({ ...draft, watch: { ...draft.watch, dropPct: event.target.value } })} />
+              <Input label="Si sube (%)" type="number" min="0" step="any" value={draft.watch.risePct} onChange={(event) => setDraft({ ...draft, watch: { ...draft.watch, risePct: event.target.value } })} />
+            </div>
+            {draft.watch.zones.map((zone, row) => (
+              <div key={`z-${row}`} className="grid grid-cols-[1fr_6.5rem_auto] items-end gap-2">
+                <select value={zone.asset} onChange={(event) => setZone(row, { asset: event.target.value })} className="h-10 rounded-xl border border-slate-200 bg-white px-2.5 text-sm font-semibold dark:border-white/10 dark:bg-slate-900">
+                  {INVEST_ASSETS.map((asset) => <option key={asset.id} value={asset.id}>{asset.name}</option>)}
+                </select>
+                <Input type="number" min="0" step="any" value={zone.belowEur} onChange={(event) => setZone(row, { belowEur: event.target.value })} placeholder="Baja de €" />
+                <button type="button" onClick={() => setDraft({ ...draft, watch: { ...draft.watch, zones: draft.watch.zones.filter((_, at) => at !== row) } })} className="h-10 px-1 text-[12px] font-semibold text-slate-400">Quitar</button>
+              </div>
+            ))}
+            <button type="button" onClick={() => setDraft({ ...draft, watch: { ...draft.watch, zones: [...draft.watch.zones, { asset: watchAssets.find((asset) => !draft.watch.zones.some((zone) => zone.asset === asset)) || watchAssets[0] || 'bitcoin', belowEur: '' }] } })} className="justify-self-start rounded-full border border-slate-200 px-2.5 py-1 text-[11px] font-semibold text-slate-500 dark:border-white/10">+ Zona de compra</button>
+            {watchAssets.includes('bitcoin') && watchAssets.includes('ethereum') && (
+              <Input label="Avísame si ETH/BTC pasa de" inputMode="decimal" value={draft.watch.ratioAbove} onChange={(event) => setDraft({ ...draft, watch: { ...draft.watch, ratioAbove: event.target.value } })} placeholder="0,0298" />
+            )}
+            <p className="px-1 text-[12px] leading-snug text-slate-400">
+              El porcentaje se mide desde tu referencia: el precio de hoy, y el de cada compra que marques. También te aviso el día antes y el día de cada tanda.
+            </p>
+          </div>
         )}
         {step === 'cuenta' && (
           <div className="max-h-64 divide-y divide-slate-200/80 overflow-y-auto rounded-2xl border border-slate-200/70 bg-white/80 dark:divide-white/10 dark:border-white/10 dark:bg-white/[0.04]">
@@ -1497,14 +1787,16 @@ function PlanDraft({
                 </button>
               );
             })}
-            <button
-              type="button"
-              onClick={() => setDraft({ ...draft, linkedAccountIds: [] })}
-              className={cn('flex w-full items-center gap-3 px-3.5 py-3 text-left', draft.linkedAccountIds.length === 0 && 'bg-slate-100 dark:bg-white/10')}
-            >
-              <span className={cn('min-w-0 flex-1 text-sm font-semibold', draft.linkedAccountIds.length === 0 ? 'text-slate-950 dark:text-white' : 'text-slate-500')}>Sin cuenta</span>
-              {draft.linkedAccountIds.length === 0 && <Check size={15} className="shrink-0 text-slate-950 dark:text-white" />}
-            </button>
+            {!draft.tandas && (
+              <button
+                type="button"
+                onClick={() => setDraft({ ...draft, linkedAccountIds: [] })}
+                className={cn('flex w-full items-center gap-3 px-3.5 py-3 text-left', draft.linkedAccountIds.length === 0 && 'bg-slate-100 dark:bg-white/10')}
+              >
+                <span className={cn('min-w-0 flex-1 text-sm font-semibold', draft.linkedAccountIds.length === 0 ? 'text-slate-950 dark:text-white' : 'text-slate-500')}>Sin cuenta</span>
+                {draft.linkedAccountIds.length === 0 && <Check size={15} className="shrink-0 text-slate-950 dark:text-white" />}
+              </button>
+            )}
           </div>
         )}
         {step === 'partida' && (
@@ -1672,13 +1964,122 @@ function spendNotes(plan: {
   return rows.sort((a, b) => a.sort.localeCompare(b.sort)).map((row) => row.text);
 }
 
+function tandasLine(plan: PlanRow, outcome: PlanOutcome | null): string {
+  const left = (plan.buys || []).reduce((sum, buy) => sum + buyLeft(buy), 0);
+  const invested = outcome?.invested ?? 0;
+  const head = invested > 0 ? `Metido ${wholeEur(invested)}` : 'Aún sin compras';
+  return left > 0 ? `${head} · quedan ${wholeEur(left)}` : `${head} · tandas hechas`;
+}
+
+function MomentTags({ moments, onPick }: { moments: CoinMoment[]; onPick: (buyId: string) => void }) {
+  if (!moments.length) return null;
+  return (
+    <div className="flex shrink-0 gap-1">
+      {moments.map((item) => (
+        <button
+          key={item.asset}
+          type="button"
+          disabled={!item.buy?._id}
+          title={`${item.name}: ${MOMENT_LABEL[item.level]}. ${item.reasons.join(', ')}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            if (item.buy?._id) onPick(item.buy._id);
+          }}
+          className={cn('inline-flex items-center gap-1 rounded-full py-0.5 pl-0.5 pr-2 text-[11px] font-semibold', MOMENT_TONE[item.level])}
+        >
+          <CoinMark asset={item.asset} size={18} />
+          {MOMENT_LABEL[item.level]}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function TandasHeader({ plan, outcome, loading, beat, moments, open, onToggle, onPick }: {
+  plan: PlanRow;
+  outcome: PlanOutcome | null;
+  loading: boolean;
+  beat: number;
+  moments: CoinMoment[];
+  open: boolean;
+  onToggle: () => void;
+  onPick: (buyId: string) => void;
+}) {
+  const buys = plan.buys || [];
+  const left = buys.reduce((sum, buy) => sum + buyLeft(buy), 0);
+  const invested = outcome?.invested ?? 0;
+  const tone: HeroTone = invested > 0 && outcome ? (outcome.result >= 0 ? 'up' : 'down') : 'flat';
+  return (
+    <HeroCard open={open} onToggle={onToggle}>
+      <div className="flex items-end justify-between gap-3">
+        <p className="text-[2rem] font-semibold leading-none tabular-nums tracking-[-0.03em] text-slate-900 dark:text-white">
+          {outcome ? <SoftEur value={outcome.value} whole /> : '—'}
+        </p>
+        {invested > 0 ? <OutcomeCorner outcome={outcome} beat={beat} /> : <MomentTags moments={moments} onPick={onPick} />}
+      </div>
+      <HeroBar share={invested > 0 && outcome ? outcome.share : 0} tone={tone} />
+      <div className="mt-2.5 flex items-center justify-between gap-3 text-[12px] font-medium text-slate-400">
+        <span className="min-w-0 truncate">
+          {loading
+            ? 'Leyendo tus compras…'
+            : !outcome
+              ? 'Falta el precio de hoy de alguna moneda'
+              : invested > 0
+                ? <>Metido <span className="text-slate-700 dark:text-slate-200">{wholeEur(invested)}</span> · quedan {wholeEur(left)}</>
+                : <>Aún sin compras · <span className="text-slate-700 dark:text-slate-200">{wholeEur(left)}</span> por meter</>}
+        </span>
+        <span className="inline-flex shrink-0 items-center gap-0.5 font-semibold text-slate-500 dark:text-slate-300">
+          {open ? 'Ocultar' : 'Monedas'}
+          <ChevronDown size={14} className={cn('transition-transform duration-300', open && 'rotate-180')} />
+        </span>
+      </div>
+      {invested > 0 && moments.length > 0 && (
+        <div className="mt-3"><MomentTags moments={moments} onPick={onPick} /></div>
+      )}
+    </HeroCard>
+  );
+}
+
+type HeroTone = 'up' | 'down' | 'flat';
+
+/** Cabecera común a todos los planes. Si se puede tocar, despliega el detalle debajo. */
+function HeroCard({ children, onToggle, open }: { tone?: HeroTone; children: ReactNode; onToggle?: () => void; open?: boolean }) {
+  if (!onToggle) return <section>{children}</section>;
+  return (
+    <section
+      role="button"
+      tabIndex={0}
+      aria-expanded={open}
+      onClick={onToggle}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onToggle();
+        }
+      }}
+      className="-mx-2 cursor-pointer rounded-3xl px-2 py-1 transition-colors active:bg-slate-900/[0.03] dark:active:bg-white/5"
+    >
+      {children}
+    </section>
+  );
+}
+
+function HeroBar({ share, tone }: { share: number; tone: HeroTone }) {
+  const fill = tone === 'up' ? 'from-[#16c784] to-[#3ee0a1]' : tone === 'down' ? 'from-[#ea3943] to-[#ff7a82]' : 'from-slate-800 to-slate-500 dark:from-white dark:to-slate-300';
+  return (
+    <div className="mt-3.5 h-1 overflow-hidden rounded-full bg-slate-900/[0.07] dark:bg-white/10">
+      <div className={cn('h-full rounded-full bg-gradient-to-r transition-[width] duration-700 ease-out', fill)} style={{ width: `${Math.max(0, Math.min(100, share))}%` }} />
+    </div>
+  );
+}
+
 function shortDay(iso: string): string {
   const names = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
   const month = Number(iso.slice(5, 7));
   return `${Number(iso.slice(8, 10))} ${names[month - 1] || ''}`.trim();
 }
 
-function SoftEur({ value, signed = false }: { value: number; signed?: boolean }) {
+function SoftEur({ value, signed = false, whole = false }: { value: number; signed?: boolean; whole?: boolean }) {
   const [shown, setShown] = useState(value);
   const from = useRef(value);
   useEffect(() => {
@@ -1702,6 +2103,7 @@ function SoftEur({ value, signed = false }: { value: number; signed?: boolean })
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
   }, [value]);
+  if (whole) return <>{shown === 0 ? '0 €' : wholeEur(shown)}</>;
   return <>{signed ? formatSignedEur(shown) : formatEur(shown)}</>;
 }
 

@@ -3,9 +3,12 @@ import { PlatformLogo } from '@/components/PlatformLogo';
 import { QuietLoad } from '@/components/QuietLoad';
 import { Field, Input, fieldClass } from '@/components/ui/Input';
 import { EntrySheet } from '@/components/EntrySheet';
+import { Modal } from '@/components/Modal';
+import { TaxReportPanel } from '@/components/TaxReportPanel';
 import { api, ApiError } from '@/lib/api';
 import { formatDay, formatEur } from '@/lib/format';
 import { TYPE_LABEL } from '@/lib/labels';
+import { moveFaces } from '@/lib/move-faces';
 import { verbFromType } from '@/lib/verbs';
 import { cn, docId } from '@/lib/utils';
 import type { AccountRow, HoldingRow, MovementRow } from '@/lib/types';
@@ -86,6 +89,9 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
   const [error, setError] = useState('');
   const [ready, setReady] = useState(false);
   const [openGroup, setOpenGroup] = useState<string | null>(null);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [taxYear, setTaxYear] = useState(initialYear);
+  const [taxBusy, setTaxBusy] = useState(false);
 
   const load = async () => {
     const params = new URLSearchParams();
@@ -103,6 +109,11 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
   useEffect(() => {
     load().catch((err: Error) => setError(err.message)).finally(() => setReady(true));
   }, [filters.q, filters.type, filters.accountId, filters.from, filters.to]);
+
+  const faces = useMemo(() => moveFaces(rows), [rows]);
+  const titleOf = (row: MovementRow) => faces.get(docId(row))?.title || moveTitle(row);
+  const kindOf = (row: MovementRow) => faces.get(docId(row))?.kind || TYPE_LABEL[row.type] || row.type;
+  const toneOf = (row: MovementRow) => (faces.has(docId(row)) ? 'text-slate-500' : moveTone(row));
 
   const sorted = useMemo(() => {
     const copy = [...rows];
@@ -193,7 +204,7 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
 
   const exportCsv = () => {
     const header = ['fecha', 'tipo', 'importe', 'moneda', 'categoria', 'descripcion', 'cuenta', 'destino'];
-    const lines = sorted.map((row) => [row.date, TYPE_LABEL[row.type] || row.type, String(row.amount), row.currency, row.category, row.description, nameOf(row.accountId), nameOf(row.counterAccountId)].map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(';'));
+    const lines = sorted.map((row) => [row.date, kindOf(row), String(row.amount), row.currency, row.category, faces.get(docId(row))?.title || row.description, nameOf(row.accountId), nameOf(row.counterAccountId)].map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(';'));
     const blob = new Blob([[header.join(';'), ...lines].join('\n')], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -216,7 +227,7 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
       <div className={embedded ? 'flex items-center justify-between gap-3' : 'sticky top-0 z-20 -mx-4 flex items-center justify-between gap-3 bg-[var(--app-bg)] px-4 py-2 md:-mx-8 md:px-8'}>
         <h2 className={embedded ? 'text-lg font-semibold tracking-tight' : 'text-2xl font-semibold tracking-tight'}>Movimientos</h2>
         <div className="flex items-center gap-3">
-          <button type="button" onClick={exportCsv} className="text-sm font-semibold text-slate-500">Exportar</button>
+          <button type="button" onClick={() => { setTaxYear(year || initialYear); setExportOpen(true); }} className="text-sm font-semibold text-slate-500">Descargar</button>
           <button type="button" onClick={() => { setEditing(null); setDuplicate(false); setFormMore(false); setDraft(emptyDraft(accounts[0] ? docId(accounts[0]) : '')); }} className="rounded-full bg-slate-950 px-4 py-2 text-sm font-semibold text-white dark:bg-white dark:text-slate-950">Nuevo</button>
         </div>
       </div>
@@ -294,12 +305,12 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
                     <button type="button" onClick={() => { if (many) setOpenGroup(open ? null : group.id); else openEdit(row); }} className="flex w-full items-center gap-3 px-4 py-3 text-left">
                       <PlatformLogo name={accountOf(row.accountId)?.platform || nameOf(row.accountId)} size={36} />
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[15px] font-semibold">{moveTitle(row)}</span>
+                        <span className="block truncate text-[15px] font-semibold">{titleOf(row)}</span>
                         <span className="mt-0.5 block truncate text-[12px] font-medium text-slate-400">
-                          {many ? `${group.rows.length} apuntes · ${nameOf(row.accountId)}` : `${nameOf(row.accountId)} · ${TYPE_LABEL[row.type] || row.type}`}
+                          {many ? `${group.rows.length} apuntes · ${nameOf(row.accountId)}` : `${nameOf(row.accountId)} · ${kindOf(row)}`}
                         </span>
                       </span>
-                      <span className={cn('shrink-0 text-right text-[15px] font-semibold tabular-nums', moveTone(row))}>
+                      <span className={cn('shrink-0 text-right text-[15px] font-semibold tabular-nums', toneOf(row))}>
                         {total > 0 ? '+' : total < 0 ? '−' : ''}{formatMove(total, row.currency)}
                       </span>
                     </button>
@@ -309,7 +320,7 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
                           <li key={docId(item)} className="border-t border-slate-100 first:border-t-0 dark:border-white/10">
                             <button type="button" onClick={() => openEdit(item)} className="flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left">
                               <span className="text-[13px] font-medium text-slate-500">{formatDay(item.date)} · {(item.description.split('·')[1] || '').trim()}</span>
-                              <span className={cn('text-xs font-semibold tabular-nums', moveTone(item))}>{moveSign(item) < 0 ? '−' : '+'}{formatMove(item.amount, item.currency)}</span>
+                              <span className={cn('text-xs font-semibold tabular-nums', toneOf(item))}>{moveSign(item) < 0 ? '−' : '+'}{formatMove(item.amount, item.currency)}</span>
                             </button>
                           </li>
                         ))}
@@ -322,6 +333,20 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
           </section>
         ))}
       </div>
+      {exportOpen && (
+        <Modal title="Descargar movimientos" onClose={() => { if (!taxBusy) setExportOpen(false); }}>
+          <div className="space-y-5">
+            <TaxReportPanel years={Array.from({ length: 8 }, (_, index) => now.getFullYear() - index)} initialYear={taxYear} onBusy={setTaxBusy} />
+            <section className="flex items-center justify-between gap-3 px-1">
+              <span className="min-w-0">
+                <span className="block text-[15px] font-semibold">Lista de esta pantalla</span>
+                <span className="block text-[13px] text-slate-500 dark:text-slate-400">CSV con los {sorted.length} movimientos que ves ahora</span>
+              </span>
+              <button type="button" onClick={exportCsv} className="shrink-0 rounded-full px-4 py-2 text-sm font-semibold text-slate-700 ring-1 ring-slate-200 dark:text-slate-200 dark:ring-white/15">CSV</button>
+            </section>
+          </div>
+        </Modal>
+      )}
       {draft && (
         <EntrySheet
           accounts={accounts.filter((account) => !account.archived).map((account) => ({ id: docId(account), name: account.name, kind: account.kind, tracking: account.tracking, currency: account.currency, balance: account.balance }))}

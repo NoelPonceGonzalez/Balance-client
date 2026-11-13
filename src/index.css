@@ -68,6 +68,17 @@
   touch-action: pan-y;
 }
 
+/* Se desplaza con el dedo o la rueda, sin barra visible. */
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
 .dock-glass {
   background: color-mix(in srgb, white 18%, transparent);
   -webkit-backdrop-filter: blur(28px) saturate(1.7);
@@ -76,6 +87,36 @@
 
 html.dark .dock-glass {
   background: color-mix(in srgb, #05070c 22%, transparent);
+}
+
+.sheet-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.7) transparent;
+}
+
+.sheet-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.sheet-scroll::-webkit-scrollbar-track {
+  background: transparent;
+  margin-block: 10px;
+}
+
+.sheet-scroll::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.55);
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+}
+
+html.dark .sheet-scroll {
+  scrollbar-color: rgba(255, 255, 255, 0.35) transparent;
+}
+
+html.dark .sheet-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.28);
+  background-clip: padding-box;
 }
 
 .app-scroll {

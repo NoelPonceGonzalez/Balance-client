@@ -3,6 +3,7 @@ import { bindHold, HoldMenu, holdItemClass, placeMenu } from '@/components/HoldM
 import { AnimatePresence, motion } from 'motion/react';
 import { ArrowUpDown, ChevronLeft, ChevronRight, Eye, EyeOff, Pencil, Plus, Search, Star, Tag, Trash2 } from 'lucide-react';
 import { PlatformLogo } from '@/components/PlatformLogo';
+import { HomeGlance } from '@/components/HomeGlance';
 import { QuietLoad } from '@/components/QuietLoad';
 import { QuickSplit } from '@/components/QuickSplit';
 import { Modal } from '@/components/Modal';
@@ -406,10 +407,21 @@ function foldDetail(detail?: string): string {
 
 function pieceMove(item: AccountPart): { text: string; className: string } | null {
   if (item.costEur == null || !(item.costEur > 0)) return null;
-  const gain = item.eur - item.costEur;
+  const gain = Math.round((item.eur - item.costEur) * 100) / 100;
+  if (gain === 0) return null;
   const pct = (gain / item.costEur) * 100;
-  if (Math.abs(pct) < 0.05) return null;
-  return { text: formatPct(pct), className: toneClass(gain) };
+  return { text: `${formatSignedEur(gain)} · ${formatPct(pct)}`, className: toneClass(gain) };
+}
+
+/** Media de compra y, si está por debajo, cuánto tiene que subir el precio para quedar en positivo. */
+function pieceAverage(item: AccountPart): string {
+  const group = item.group || 'other';
+  if (!['crypto', 'etf', 'stock'].includes(group) || item.costEur == null || !(item.costEur > 0) || !item.quantity || !(item.quantity > 0)) return '';
+  const average = item.costEur / item.quantity;
+  const price = item.eur / item.quantity;
+  const shown = `Media ${formatPrice(average)}`;
+  if (price >= average) return shown;
+  return `${shown} · tiene que subir un ${formatNumber((average / price - 1) * 100, 1)} %`;
 }
 
 function FoldShare({ sides, color }: { sides: Side[]; color: string }) {
@@ -451,12 +463,24 @@ function makeSide(group: string, title: string, items: AccountPart[], section?: 
   return { group, title, items, total, invested, gain, icon: section?.icon, hint: section?.hint };
 }
 
-function accountSides(parts: AccountPart[], name: string): Side[] {
+function accountSides(parts: AccountPart[], name: string, balance = 0): Side[] {
   const products = accountProducts(name);
   const skins = Boolean(products.auto);
   const sides: Side[] = [];
   const cash = parts.filter((part) => (part.group || 'other') === 'cash');
   if (cash.length) sides.push(makeSide('cash', products.cash?.title || 'Líquido', cash));
+  else if (products.cash || skins) {
+    const title = products.cash?.title || 'Efectivo';
+    sides.push(makeSide('cash', title, [{
+      label: title,
+      eur: Math.round(balance * 100) / 100,
+      group: 'cash',
+      costEur: null,
+      detail: '',
+      image: null,
+      id: null,
+    }]));
+  }
   const placed = new Map<string, AccountPart[]>();
   const loose = new Map<PartGroup, AccountPart[]>();
   for (const part of parts) {
@@ -1133,12 +1157,14 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
     return data.accounts.map((account) => {
       const gain = accountGain(account, data.pnl);
       const name = account.platform || account.name;
+      const sides = accountSides(account.parts || [], name, account.balance);
+      const covered = Math.round(sides.reduce((sum, side) => sum + side.total, 0) * 100) / 100;
       return {
         key: account.id,
         name,
         logoName: name,
         color: brandColor(name),
-        value: account.valueEur,
+        value: account.valueEur == null ? covered : Math.max(account.valueEur, covered),
         cash: account.balance,
         planId: account.planId || null,
         flows: account.flows || [],
@@ -1148,7 +1174,7 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
         kind: account.kind,
         currency: account.currency,
         balance: account.balance,
-        sides: accountSides(account.parts || [], name),
+        sides,
         sections: account.sections || [],
         gainEur: gain?.eur ?? null,
         gainPct: gain?.percent ?? null,
@@ -1532,7 +1558,7 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
     });
   };
   const pin = (
-    <div className="sticky top-0 z-30 -mx-4 flex flex-col gap-2 bg-[var(--app-bg)] px-4 py-2 md:-mx-8 md:px-8">
+    <div className="sticky top-0 z-30 -mx-4 flex min-w-0 flex-col gap-2 bg-[var(--app-bg)] px-4 py-2 md:-mx-8 md:px-8">
       <div className="order-2 min-w-0">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <div className="flex shrink-0 items-center gap-2">
@@ -1586,9 +1612,9 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
           </motion.p>
         )}
         {!inAccount && (
-          <div className="mt-2 flex gap-1.5 overflow-x-auto empty:hidden [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className="no-scrollbar mt-2 flex w-full min-w-0 snap-x snap-proximity gap-1.5 overflow-x-auto overflow-y-hidden overscroll-x-contain scroll-pe-5 pe-1 empty:hidden max-md:[mask-image:linear-gradient(to_right,#000_0,#000_calc(100%-1.75rem),transparent)]">
             {offerLine && (
-              <button type="button" onClick={() => openOffer(offerLine)} className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-white py-1 pl-1 pr-3 text-[13px] font-semibold text-slate-700 ring-1 ring-slate-200/80 dark:bg-slate-900 dark:text-slate-200 dark:ring-white/10">
+              <button type="button" onClick={() => openOffer(offerLine)} className="inline-flex shrink-0 snap-start items-center gap-1.5 whitespace-nowrap rounded-full bg-white py-1 pl-1 pr-3 text-[13px] font-semibold text-slate-700 ring-1 ring-slate-200/80 transition active:scale-[0.97] dark:bg-slate-900 dark:text-slate-200 dark:ring-white/10">
                 <span className="inline-flex items-center gap-1 rounded-full bg-slate-950 px-2 py-0.5 text-[12px] font-bold tabular-nums text-white dark:bg-white dark:text-slate-950">
                   <Tag size={12} strokeWidth={2.4} />
                   {hidden ? null : offerCount}
@@ -1597,7 +1623,7 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
               </button>
             )}
             {followCount > 0 && (
-              <button type="button" onClick={() => { setFollowDrop(null); setFollowOpen(true); }} className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-white py-1 pl-1 pr-3 text-[13px] font-semibold text-slate-700 ring-1 ring-slate-200/80 dark:bg-slate-900 dark:text-slate-200 dark:ring-white/10">
+              <button type="button" onClick={() => { setFollowDrop(null); setFollowOpen(true); }} className="inline-flex shrink-0 snap-start items-center gap-1.5 whitespace-nowrap rounded-full bg-white py-1 pl-1 pr-3 text-[13px] font-semibold text-slate-700 ring-1 ring-slate-200/80 transition active:scale-[0.97] dark:bg-slate-900 dark:text-slate-200 dark:ring-white/10">
                 <span className="inline-flex items-center gap-1 rounded-full bg-slate-950 px-2 py-0.5 text-[12px] font-bold tabular-nums text-white dark:bg-white dark:text-slate-950">
                   <Star size={12} strokeWidth={2.4} />
                   {hidden ? null : followCount}
@@ -1606,22 +1632,22 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
               </button>
             )}
             {dueLine && (
-              <button type="button" onClick={() => window.dispatchEvent(new Event('pat-due'))} className="inline-flex max-w-[220px] shrink-0 items-center rounded-full bg-white px-3 py-1 text-[13px] font-semibold text-slate-600 ring-1 ring-slate-200/80 dark:bg-slate-900 dark:text-slate-300 dark:ring-white/10">
-                <span className="truncate">{dueLine.direction === 'in' ? 'Ha entrado' : 'Confirmar'} {dueLine.label}{hidden ? '' : ` ${formatEur(dueLine.amount)}`}</span>
+              <button type="button" onClick={() => window.dispatchEvent(new Event('pat-due'))} className="inline-flex shrink-0 snap-start items-center whitespace-nowrap rounded-full bg-white px-3 py-1 text-[13px] font-semibold text-slate-600 ring-1 ring-slate-200/80 transition active:scale-[0.97] dark:bg-slate-900 dark:text-slate-300 dark:ring-white/10">
+                <span>{dueLine.direction === 'in' ? 'Ha entrado' : 'Confirmar'} {dueLine.label}{hidden ? '' : ` ${formatEur(dueLine.amount)}`}</span>
               </button>
             )}
             {markLine && markLine.label !== dueLine?.label && (
-              <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('pat-plan', { detail: markLine.planId }))} className="inline-flex max-w-[220px] shrink-0 items-center rounded-full bg-white px-3 py-1 text-[13px] font-semibold text-slate-600 ring-1 ring-slate-200/80 dark:bg-slate-900 dark:text-slate-300 dark:ring-white/10">
-                <span className="truncate">Hoy {markLine.label}{hidden ? '' : ` ${formatEur(markLine.amount)}`}</span>
+              <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('pat-plan', { detail: markLine.planId }))} className="inline-flex shrink-0 snap-start items-center whitespace-nowrap rounded-full bg-white px-3 py-1 text-[13px] font-semibold text-slate-600 ring-1 ring-slate-200/80 transition active:scale-[0.97] dark:bg-slate-900 dark:text-slate-300 dark:ring-white/10">
+                <span>Hoy {markLine.label}{hidden ? '' : ` ${formatEur(markLine.amount)}`}</span>
               </button>
             )}
             {pendingMonth(data) > 0 && (
-              <p className="inline-flex shrink-0 items-center rounded-full bg-white px-3 py-1 text-[13px] font-semibold text-slate-600 ring-1 ring-slate-200/80 dark:bg-slate-900 dark:text-slate-300 dark:ring-white/10">
+              <p className="inline-flex shrink-0 snap-start items-center whitespace-nowrap rounded-full bg-white px-3 py-1 text-[13px] font-semibold text-slate-600 ring-1 ring-slate-200/80 transition active:scale-[0.97] dark:bg-slate-900 dark:text-slate-300 dark:ring-white/10">
                 {hidden ? 'Por confirmar' : `Por confirmar ${formatEur(pendingMonth(data))}`}
               </p>
             )}
             {data?.variation.available && data.variation.amount != null && data.contributions.complete && (
-              <p className="inline-flex shrink-0 items-center rounded-full bg-white px-3 py-1 text-[13px] font-semibold text-slate-500 ring-1 ring-slate-200/80 dark:bg-slate-900 dark:text-slate-400 dark:ring-white/10">
+              <p className="inline-flex shrink-0 snap-start items-center whitespace-nowrap rounded-full bg-white px-3 py-1 text-[13px] font-semibold text-slate-500 ring-1 ring-slate-200/80 dark:bg-slate-900 dark:text-slate-400 dark:ring-white/10">
                 {hidden ? 'Aportado' : `Aportado ${formatSignedEur(data.contributions.eur)}`}
               </p>
             )}
@@ -1915,6 +1941,8 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
         <p className="text-center text-[13px] font-medium text-slate-400">El reparto aparece cuando haya saldo en algún sitio.</p>
       )}
 
+      <HomeGlance data={data} hidden={hidden} notes={offerNotes} />
+
       <section className="space-y-3">
         {ordered.length > 0 && (
           <div className="flex justify-end">
@@ -2016,7 +2044,12 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
                           <li key={side.group} className="border-t border-slate-200/80 first:border-t-0 dark:border-white/10">
                             {side.group !== 'cash' && side.items.length > 1 && (
                               <div className="flex items-baseline justify-between gap-3 pt-3.5">
-                                <span className="text-xs font-semibold text-slate-400">{side.title}</span>
+                                <span className="text-xs font-semibold text-slate-400">
+                                  {side.title}
+                                  {side.gain != null && Math.round(side.gain * 100) !== 0 && (
+                                    <span className={toneClass(side.gain)}> · {mask(formatSignedEur(side.gain))}</span>
+                                  )}
+                                </span>
                                 <span className="text-xs font-semibold tabular-nums text-slate-500">
                                   <RisingAmount value={side.total} hidden={hidden} />
                                 </span>
@@ -2025,14 +2058,15 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
                             {side.group === 'cash' && (
                               <div className="flex items-center justify-between gap-3 py-3.5">
                                 <span className="text-[15px] font-bold">{side.title}</span>
-                                <span className="text-[15px] font-semibold tabular-nums">
-                                  <RisingAmount value={side.total} hidden={hidden} />
+                                <span className={cn('text-[15px] font-semibold tabular-nums', side.total < 0 && 'text-rose-600')}>
+                                  <RisingAmount value={side.total} hidden={hidden} signed={side.total < 0} />
                                 </span>
                               </div>
                             )}
                             {side.group !== 'cash' && side.items.map((item) => {
                               const move = pieceMove(item);
                               const detail = foldDetail(item.detail);
+                              const average = hidden ? '' : pieceAverage(item);
                               return (
                                 <button
                                   key={item.id || item.label}
@@ -2043,6 +2077,7 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
                                   <span className="min-w-0 flex-1">
                                     <span className="block truncate text-[15px] font-bold leading-tight">{item.label}</span>
                                     {detail && <span className="mt-0.5 block truncate text-xs font-medium text-slate-400">{detail}</span>}
+                                    {average && <span className="mt-0.5 block text-xs font-medium leading-snug text-slate-400">{average}</span>}
                                   </span>
                                   <span className="shrink-0 text-right">
                                     <span className="block text-[15px] font-semibold tabular-nums">
@@ -2058,6 +2093,7 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
                       }
                       const move = pieceMove(alone);
                       const caption = [side.title, foldDetail(alone.detail)].filter(Boolean).join(' · ');
+                      const average = hidden ? '' : pieceAverage(alone);
                       return (
                         <li key={side.group} className="border-t border-slate-200/80 first:border-t-0 dark:border-white/10">
                           <button
@@ -2068,6 +2104,7 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
                             <span className="min-w-0 flex-1">
                               <span className="block truncate text-[15px] font-bold leading-tight">{alone.label}</span>
                               <span className="mt-0.5 block truncate text-xs font-medium text-slate-400">{caption}</span>
+                              {average && <span className="mt-0.5 block text-xs font-medium leading-snug text-slate-400">{average}</span>}
                             </span>
                             <span className="shrink-0 text-right">
                               <span className="block text-[15px] font-semibold tabular-nums">

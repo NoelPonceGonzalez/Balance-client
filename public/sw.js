@@ -10,8 +10,17 @@ self.addEventListener('activate', (event) => {
   })());
 });
 
+function absolute(path) {
+  if (!path) return '';
+  try {
+    return new URL(path, self.location.origin).href;
+  } catch {
+    return '';
+  }
+}
+
 self.addEventListener('push', (event) => {
-  let payload = { title: 'Balance', body: '', url: '/' };
+  let payload = { title: 'Balance', body: '', url: '/', image: '', tag: '' };
   try {
     payload = { ...payload, ...(event.data ? event.data.json() : {}) };
   } catch {
@@ -19,17 +28,27 @@ self.addEventListener('push', (event) => {
   }
   const title = payload.title || 'Balance';
   const url = payload.url || '/';
+  const icon = absolute('/icons/icon-192.png');
+  const badge = absolute('/icons/badge-96.png');
+  const image = absolute(payload.image);
   const shown = {
-    body: payload.body,
+    body: payload.body || '',
     lang: 'es',
-    icon: '/icons/icon-192.png',
+    icon,
+    badge,
     data: { url },
+    timestamp: Date.now(),
   };
+  if (image) shown.image = image;
+  if (payload.tag) {
+    shown.tag = payload.tag;
+    shown.renotify = true;
+  }
   event.waitUntil((async () => {
     try {
       await self.registration.showNotification(title, shown);
     } catch {
-      await self.registration.showNotification(title, { body: payload.body, lang: 'es', data: { url } });
+      await self.registration.showNotification(title, { body: payload.body, lang: 'es', icon, badge, data: { url } });
     }
   })());
 });

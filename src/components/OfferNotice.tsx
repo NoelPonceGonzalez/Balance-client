@@ -4,10 +4,13 @@ import { AnimatePresence, animate, motion, useMotionValue, type AnimationPlaybac
 import { ModalClose, modalOverlayClass, modalPanelClass } from '@/components/Modal';
 import { api, ApiError } from '@/lib/api';
 import { formatDay, formatEur } from '@/lib/format';
-import { glide, jelly, quickOut } from '@/lib/motion';
+import { glide } from '@/lib/motion';
 import { skinArt, skinArtSteam } from '@/lib/skin-art';
 import { cn } from '@/lib/utils';
 import type { AppNotification } from '@/lib/types';
+
+const rise = { type: 'spring' as const, stiffness: 260, damping: 32, mass: 0.92 };
+const fadeOut = { duration: 0.22, ease: [0.4, 0, 0.2, 1] as const };
 
 const SKIP = 'pat_offer_skip';
 const PASSED = 'pat_offer_passed';
@@ -17,6 +20,20 @@ const offerSkipWatchers = new Set<() => void>();
 export function watchOfferSkips(onChange: () => void): () => void {
   offerSkipWatchers.add(onChange);
   return () => { offerSkipWatchers.delete(onChange); };
+}
+
+/** Avisos de compra que siguen puestos. Mientras no se sepa, no se enseña ninguna oferta. */
+let liveWatchIds: Set<string> | null = null;
+
+function setLiveWatches(ids: string[]) {
+  liveWatchIds = new Set(ids);
+  for (const notify of offerSkipWatchers) notify();
+}
+
+/** Una oferta solo se enseña si el aviso que la trajo sigue puesto. */
+function fromLiveWatch(item: AppNotification): boolean {
+  const id = item.quoteKey?.match(/^listing:([a-f0-9]{24}):/)?.[1];
+  return Boolean(id && liveWatchIds?.has(id));
 }
 
 function skippedIds(): Set<string> {
@@ -89,7 +106,7 @@ export function rankedOffers(items: AppNotification[]): AppNotification[] {
   const skip = skippedIds();
   const passed = readPassed();
   return items
-    .filter((item) => item.quoteKey?.startsWith('listing:') && !dismissed(item, skip, passed) && listingStillUp(item.url))
+    .filter((item) => item.quoteKey?.startsWith('listing:') && fromLiveWatch(item) && !dismissed(item, skip, passed) && listingStillUp(item.url))
     .sort((a, b) => (a.priceEur ?? Number.POSITIVE_INFINITY) - (b.priceEur ?? Number.POSITIVE_INFINITY) || a.createdAt.localeCompare(b.createdAt))
     .slice(0, OFFER_LIMIT);
 }
@@ -253,6 +270,7 @@ export function OfferNotice({ focused = null, onFocusedClose }: { focused?: AppN
           }
           setCeilings(next);
           setHashes(names);
+          setLiveWatches(Object.keys(next));
         })
         .catch(() => {
           if (cancelled || retry >= 3) return;
@@ -287,7 +305,7 @@ export function OfferNotice({ focused = null, onFocusedClose }: { focused?: AppN
   const unique: AppNotification[] = [];
   const buckets = new Set<string>();
   for (const item of items) {
-    if (!item.quoteKey?.startsWith('listing:')) continue;
+    if (!item.quoteKey?.startsWith('listing:') || !fromLiveWatch(item)) continue;
     const listing = listingOf(item.quoteKey);
     const token = listing && item.priceEur != null ? `${listing}:${Math.round(item.priceEur)}` : item.id;
     if (buckets.has(token)) continue;
@@ -296,7 +314,7 @@ export function OfferNotice({ focused = null, onFocusedClose }: { focused?: AppN
     unique.push(item);
   }
   unique.sort((a, b) => (a.priceEur ?? Number.POSITIVE_INFINITY) - (b.priceEur ?? Number.POSITIVE_INFINITY) || a.createdAt.localeCompare(b.createdAt));
-  const picked = focused?.quoteKey?.startsWith('listing:') ? focused : null;
+  const picked = focused?.quoteKey?.startsWith('listing:') && fromLiveWatch(focused) ? focused : null;
   const deck = unique.filter((item) => !dismissed(item, skip, passed)).slice(0, OFFER_LIMIT);
   if (picked && listingStillUp(picked.url) && !deck.some((item) => item.id === picked.id)) {
     deck.unshift(picked);
@@ -495,7 +513,8 @@ export function OfferNotice({ focused = null, onFocusedClose }: { focused?: AppN
             onPointerDown={(event) => { if (event.target === event.currentTarget) leave(); }}
           initial={still ? false : { opacity: 0 }}
           animate={{ opacity: 1 }}
-          exit={still ? undefined : { opacity: 0, transition: quickOut }}
+          exit={still ? undefined : { opacity: 0, transition: fadeOut }}
+          transition={still ? { duration: 0 } : { duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
         >
           <motion.div
             key={shown.id}
@@ -509,10 +528,10 @@ export function OfferNotice({ focused = null, onFocusedClose }: { focused?: AppN
             onPointerCancel={drop}
             className={cn(modalPanelClass, 'max-w-sm cursor-grab touch-none active:cursor-grabbing')}
             onClick={(event) => event.stopPropagation()}
-            initial={still || dragOn ? false : nudge === 0 ? { opacity: 0, y: 28, scale: 0.96 } : { opacity: 1, x: Math.sign(nudge) * 48 }}
+            initial={still || dragOn ? false : nudge === 0 ? { opacity: 0, y: 14, scale: 0.985 } : { opacity: 1, x: Math.sign(nudge) * 36 }}
             animate={dragOn ? { opacity: 1, scale: 1 } : { opacity: 1, x: 0, y: 0, scale: 1 }}
-            exit={still ? undefined : { opacity: 0, transition: quickOut }}
-            transition={still || dragOn ? { duration: 0 } : nudge === 0 ? { ...jelly, opacity: { duration: 0.18 } } : glide}
+            exit={still ? undefined : { opacity: 0, scale: 0.985, transition: fadeOut }}
+            transition={still || dragOn ? { duration: 0 } : nudge === 0 ? { ...rise, opacity: { duration: 0.24, ease: [0.22, 1, 0.36, 1] } } : glide}
           >
             <div className="flex items-start justify-between gap-3">
               <h2 id="offer-notice-title" className="min-w-0 text-[17px] font-black tracking-tight">{name}</h2>

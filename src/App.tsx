@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
 import { Shell, type Section } from '@/components/Shell';
 import { api, ApiError } from '@/lib/api';
+import { forgetWallets, loadWallets } from '@/lib/wallet-accounts';
 import { glide } from '@/lib/motion';
 import { disablePhonePush } from '@/lib/push';
 import type { User } from '@/lib/types';
@@ -107,7 +108,6 @@ export default function App() {
   };
 
   useEffect(() => {
-    localStorage.removeItem('pat_login_id');
     restoreSession();
     const params = new URLSearchParams(window.location.search);
     const fromUrl = params.get('junta') || '';
@@ -127,11 +127,13 @@ export default function App() {
 
   useEffect(() => {
     if (!user) {
+      forgetWallets();
       document.documentElement.classList.remove('dark');
       document.documentElement.style.colorScheme = 'light';
       return;
     }
     applyTheme(user.theme || 'system');
+    void loadWallets().catch(() => undefined);
   }, [user]);
 
   const changeHero = (ms: number) => {

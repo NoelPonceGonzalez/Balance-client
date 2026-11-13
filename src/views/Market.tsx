@@ -13,7 +13,8 @@ import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { api } from '@/lib/api';
 import { activatePush } from '@/lib/device';
-import { formatAgo, formatDay, formatEur, formatNumber, formatPct, formatPrice } from '@/lib/format';
+import { formatAgo, formatDay, formatNumber, formatPct } from '@/lib/format';
+import { marketDisplay, marketMark, marketMoney, marketReady, marketToEur, MarketCurrency, useMarketCode, useRescaleAmounts } from '@/lib/marketCurrency';
 import { quickOut, softSpring } from '@/lib/motion';
 import { cn } from '@/lib/utils';
 import { CashChart, type LinePoint } from '@/views/Wallets';
@@ -412,7 +413,7 @@ function GameBoard({ items, filtered, quiet, warm, onOpen }: { items: MarketTape
 
 function quoteAmount(kind: string, value: number | null | undefined): string {
   if (kind === 'index') return formatNumber(value, 2);
-  return formatPrice(value);
+  return marketMoney(value);
 }
 
 function QuoteRow({ item, onOpen, onChanged }: { item: MarketItem; onOpen: () => void; onChanged: () => void }) {
@@ -427,8 +428,8 @@ function QuoteRow({ item, onOpen, onChanged }: { item: MarketItem; onOpen: () =>
         </div>
         <span className="hidden sm:block"><Sparkline values={item.sparkline} up={up && item.changePct !== 0} /></span>
         <div className="text-right">
-          <p className="font-black tabular-nums">{formatPrice(item.priceEur)}</p>
-          <p className="text-[11px] font-medium text-slate-500">{item.quantity > 0 ? `${formatNumber(item.quantity, 8)} · ${formatEur(item.valueEur)}` : 'Sin cantidad'}</p>
+          <p className="font-black tabular-nums">{marketMoney(item.priceEur)}</p>
+          <p className="text-[11px] font-medium text-slate-500">{item.quantity > 0 ? `${formatNumber(item.quantity, 8)} · ${marketMoney(item.valueEur)}` : 'Sin cantidad'}</p>
           <p className={cn('text-[11px] font-black tabular-nums', item.changePct == null ? 'text-slate-400' : up ? 'text-[#16c784]' : 'text-[#ea3943]')}>
             {item.changePct == null ? '—' : formatPct(item.changePct)}
             <span className="ml-1 font-bold opacity-80">{item.changeLabel}</span>
@@ -517,7 +518,7 @@ function SavedDesk({ needle }: { needle: string }) {
                 {offer.image && <img src={offer.image} alt="" referrerPolicy="no-referrer" className="h-14 w-20 shrink-0 object-contain" />}
                 <div className="min-w-0 flex-1">
                   <p className="truncate font-semibold">{offer.label}</p>
-                  <p className="text-sm font-bold tabular-nums text-slate-500">{offer.priceEur == null ? '—' : formatEur(offer.priceEur)}{offer.floatValue == null ? '' : ` · float ${offer.floatValue.toFixed(4)}`}</p>
+                  <p className="text-sm font-bold tabular-nums text-slate-500">{offer.priceEur == null ? '—' : marketMoney(offer.priceEur)}{offer.floatValue == null ? '' : ` · float ${offer.floatValue.toFixed(4)}`}</p>
                 </div>
                 <a href={offer.url} target="_blank" rel="noopener noreferrer" className="shrink-0 rounded-full bg-slate-900 px-3 py-2 text-xs font-black text-white dark:bg-white dark:text-slate-900">Abrir</a>
                 <button type="button" onClick={() => remove(offer.id)} className="shrink-0 text-[11px] font-bold text-slate-400">Quitar</button>
@@ -540,8 +541,8 @@ function sameAlert(item: MarketSignal, note: AppNotification): boolean {
 
 function ruleLine(item: MarketSignal): string {
   const parts = [
-    item.above != null ? `Por encima de ${formatEur(item.above)}` : '',
-    item.below != null ? `Por debajo de ${formatEur(item.below)}` : '',
+    item.above != null ? `Por encima de ${marketMoney(item.above)}` : '',
+    item.below != null ? `Por debajo de ${marketMoney(item.below)}` : '',
     item.maxFloat != null ? `Float hasta ${item.maxFloat}` : '',
     item.paintSeed != null ? `Patrón ${item.paintSeed}` : '',
   ].filter(Boolean);
@@ -550,7 +551,7 @@ function ruleLine(item: MarketSignal): string {
 
 function withCeiling(text: string, ceiling: number | null): string {
   if (ceiling == null) return text;
-  return text.replace(/por debajo de\s+\d[\d.\s]*,\d{2}\s*€/gi, `por debajo de ${formatEur(ceiling)}`);
+  return text.replace(/por debajo de\s+\d[\d.\s]*,\d{2}\s*€/gi, `por debajo de ${marketMoney(ceiling)}`);
 }
 
 function optionalBound(value: string, min: number, max: number, integer = false): number | null {
@@ -622,6 +623,7 @@ function AlertDesk({ items, catalog, hashes, market, onChanged }: { items: Marke
   const [pattern, setPattern] = useState('');
   const [priceWait, setPriceWait] = useState(false);
   const [dropping, setDropping] = useState<string | null>(null);
+  useRescaleAmounts(setAbove, setBelow);
 
   useEffect(() => {
     if (!history) {
@@ -688,6 +690,15 @@ function AlertDesk({ items, catalog, hashes, market, onChanged }: { items: Marke
     const number = Number(value.replace(',', '.'));
     return number > 0 ? number : null;
   };
+  const priced = (value: string) => {
+    const number = amount(value);
+    return number == null ? null : marketToEur(number);
+  };
+  const rateReady = () => {
+    if (marketReady()) return true;
+    setNote('El cambio del dólar no ha llegado. Espera un momento.');
+    return false;
+  };
 
   const beginEdit = (item: MarketSignal) => {
     setHistory(null);
@@ -696,8 +707,8 @@ function AlertDesk({ items, catalog, hashes, market, onChanged }: { items: Marke
     setQuotes([]);
     setSkins([]);
     setEditing(item);
-    setAbove(item.above != null ? String(item.above) : '');
-    setBelow(item.below != null ? String(item.below) : '');
+    setAbove(item.above != null ? marketDisplay(item.above) : '');
+    setBelow(item.below != null ? marketDisplay(item.below) : '');
     setMaxFloat(item.maxFloat != null ? String(item.maxFloat) : '');
     setPattern(item.paintSeed != null ? String(item.paintSeed) : '');
     setDropping(null);
@@ -723,12 +734,12 @@ function AlertDesk({ items, catalog, hashes, market, onChanged }: { items: Marke
   };
 
   const save = async () => {
-    if (!picked || busy) return;
+    if (!picked || busy || !rateReady()) return;
     setNote('');
     setBusy(true);
     try {
       if (picked.kind === 'skin') {
-        const price = amount(below);
+        const price = priced(below);
         if (price == null) {
           setNote('Pon el precio por debajo del cual avisar.');
           return;
@@ -745,8 +756,8 @@ function AlertDesk({ items, catalog, hashes, market, onChanged }: { items: Marke
           body: JSON.stringify({ label: picked.name.replace(/^★\s*/, ''), marketHashName, below: price, maxFloat: cap, paintSeed: seed }),
         });
       } else {
-        const high = amount(above);
-        const low = amount(below);
+        const high = priced(above);
+        const low = priced(below);
         if (high == null && low == null) {
           setNote('Pon un precio por encima, por debajo, o los dos.');
           return;
@@ -765,10 +776,10 @@ function AlertDesk({ items, catalog, hashes, market, onChanged }: { items: Marke
   };
 
   const saveEdit = async () => {
-    if (!editing || busy) return;
+    if (!editing || busy || !rateReady()) return;
     setNote('');
-    const low = amount(below);
-    const high = amount(above);
+    const low = priced(below);
+    const high = priced(above);
     setBusy(true);
     try {
       if (editing.kind === 'compra') {
@@ -816,7 +827,10 @@ function AlertDesk({ items, catalog, hashes, market, onChanged }: { items: Marke
 
   const remove = (item: MarketSignal) => {
     const path = item.kind === 'compra' ? `/api/market/watch/${item.id}` : `/api/market/listen/${item.id}`;
-    void api(path, { method: 'DELETE' }).then(onChanged);
+    void api(path, { method: 'DELETE' }).then(() => {
+      window.dispatchEvent(new Event('pat-alerts'));
+      onChanged();
+    });
   };
 
   const pickKind = (kind: CreateKind) => {
@@ -880,9 +894,9 @@ function AlertDesk({ items, catalog, hashes, market, onChanged }: { items: Marke
             <Mark image={editing.image || null} symbol={editing.name} contain={editing.kind === 'compra'} fallback={editing.kind === 'compra' ? '/platforms/cs2.svg' : null} />
             <span className="min-w-0">{editing.name}</span>
           </p>
-          <p className="text-xs font-medium text-slate-400">Ahora: {ruleLine(editing)}{editing.priceEur == null ? '' : ` · precio ${formatEur(editing.priceEur)}`}</p>
-          {editing.kind === 'precio' && <Input label="Avisar si pasa por encima de (€)" type="number" min="0" step="any" value={above} onChange={(event) => setAbove(event.target.value)} placeholder="Opcional" />}
-          <Input label={editing.kind === 'compra' ? 'Avisar si alguien lo pone por debajo de (€)' : 'Avisar si baja de (€)'} type="number" min="0" step="any" value={below} onChange={(event) => setBelow(event.target.value)} placeholder={editing.kind === 'precio' ? 'Opcional' : ''} />
+          <p className="text-xs font-medium text-slate-400">Ahora: {ruleLine(editing)}{editing.priceEur == null ? '' : ` · precio ${marketMoney(editing.priceEur)}`}</p>
+          {editing.kind === 'precio' && <Input label={`Avisar si pasa por encima de (${marketMark()})`} type="number" min="0" step="any" value={above} onChange={(event) => setAbove(event.target.value)} placeholder="Opcional" />}
+          <Input label={editing.kind === 'compra' ? `Avisar si alguien lo pone por debajo de (${marketMark()})` : `Avisar si baja de (${marketMark()})`} type="number" min="0" step="any" value={below} onChange={(event) => setBelow(event.target.value)} placeholder={editing.kind === 'precio' ? 'Opcional' : ''} />
           {editing.kind === 'compra' && (
             <>
               <Input label="Float máximo" type="number" min="0" max="1" step="0.0001" value={maxFloat} onChange={(event) => setMaxFloat(event.target.value)} placeholder="Opcional" />
@@ -905,7 +919,7 @@ function AlertDesk({ items, catalog, hashes, market, onChanged }: { items: Marke
             <div className="min-w-0">
               <p className="font-semibold">{history.name}</p>
               <p className="text-[13px] font-semibold text-slate-600 dark:text-slate-300">{ruleLine(history)}</p>
-              <p className="text-xs font-medium text-slate-400">{history.priceEur == null ? 'Sin precio ahora' : `Ahora ${formatEur(history.priceEur)}`}</p>
+              <p className="text-xs font-medium text-slate-400">{history.priceEur == null ? 'Sin precio ahora' : `Ahora ${marketMoney(history.priceEur)}`}</p>
             </div>
           </div>
           {notes == null && <p className="mt-4 text-sm font-medium text-slate-400">Cargando…</p>}
@@ -919,7 +933,7 @@ function AlertDesk({ items, catalog, hashes, market, onChanged }: { items: Marke
                   onClick={() => { if (item.quoteKey?.startsWith('listing:')) openOffer(item); }}
                   className="block w-full py-3 text-left"
                 >
-                  <p className="font-black text-[#ea3943]">{item.priceEur == null ? withCeiling(item.title, history.below) : formatEur(item.priceEur)}</p>
+                  <p className="font-black text-[#ea3943]">{item.priceEur == null ? withCeiling(item.title, history.below) : marketMoney(item.priceEur)}</p>
                   {item.priceEur != null && <p className="text-xs font-medium text-slate-500">{withCeiling(item.title, history.below)}</p>}
                   <p className="text-xs font-medium text-slate-500">{withCeiling(item.body, history.below)}</p>
                   {item.floatValue != null && <p className="text-[11px] font-medium text-slate-400">Float {item.floatValue.toFixed(4)}</p>}
@@ -952,7 +966,7 @@ function AlertDesk({ items, catalog, hashes, market, onChanged }: { items: Marke
                           <span className="min-w-0 flex-1">
                             <span className="block truncate font-semibold">{item.name}</span>
                             <span className="block text-[13px] font-semibold text-slate-700 dark:text-slate-200">{ruleLine(item)}</span>
-                            <span className="block text-xs font-medium text-slate-400">{item.priceEur == null ? 'Sin precio ahora' : `Ahora ${formatEur(item.priceEur)}`}</span>
+                            <span className="block text-xs font-medium text-slate-400">{item.priceEur == null ? 'Sin precio ahora' : `Ahora ${marketMoney(item.priceEur)}`}</span>
                           </span>
                         </button>
                         {dropping === key ? (
@@ -1019,7 +1033,7 @@ function AlertDesk({ items, catalog, hashes, market, onChanged }: { items: Marke
                         <Mark image={item.image} symbol={item.symbol} />
                         <span className="min-w-0">
                           {item.name}
-                          <span className="ml-2 text-[11px] font-bold uppercase text-slate-400">{item.priceEur == null ? item.symbol : formatEur(item.priceEur)}</span>
+                          <span className="ml-2 text-[11px] font-bold uppercase text-slate-400">{item.priceEur == null ? item.symbol : marketMoney(item.priceEur)}</span>
                         </span>
                       </button>
                     );
@@ -1056,7 +1070,7 @@ function AlertDesk({ items, catalog, hashes, market, onChanged }: { items: Marke
                 <Mark image={picked.image} symbol={picked.name} contain={picked.kind === 'skin'} fallback={picked.kind === 'skin' ? '/platforms/cs2.svg' : null} />
                 <p className="min-w-0 flex-1 text-sm font-semibold">
                   {picked.name}
-                  {picked.kind === 'quote' ? <span className="mt-0.5 block text-xs font-medium text-slate-400">{picked.priceEur != null ? formatEur(picked.priceEur) : priceWait ? 'Buscando el precio…' : 'Sin precio ahora'}</span> : null}
+                  {picked.kind === 'quote' ? <span className="mt-0.5 block text-xs font-medium text-slate-400">{picked.priceEur != null ? marketMoney(picked.priceEur) : priceWait ? 'Buscando el precio…' : 'Sin precio ahora'}</span> : null}
                 </p>
                 {fixed.length !== 1 && (
                   <button type="button" onClick={() => setPicked(null)} className="shrink-0 text-[13px] font-semibold text-slate-500">Cambiar</button>
@@ -1069,8 +1083,8 @@ function AlertDesk({ items, catalog, hashes, market, onChanged }: { items: Marke
                   ))}
                 </div>
               )}
-              {picked.kind === 'quote' && <Input label="Avisar si pasa por encima de (€)" type="number" min="0" step="any" value={above} onChange={(event) => setAbove(event.target.value)} placeholder="Opcional" />}
-              <Input label={picked.kind === 'skin' ? 'Avisar si alguien lo pone por debajo de (€)' : 'Avisar si baja de (€)'} type="number" min="0" step="any" value={below} onChange={(event) => setBelow(event.target.value)} placeholder={picked.kind === 'quote' ? 'Opcional' : ''} />
+              {picked.kind === 'quote' && <Input label={`Avisar si pasa por encima de (${marketMark()})`} type="number" min="0" step="any" value={above} onChange={(event) => setAbove(event.target.value)} placeholder="Opcional" />}
+              <Input label={picked.kind === 'skin' ? `Avisar si alguien lo pone por debajo de (${marketMark()})` : `Avisar si baja de (${marketMark()})`} type="number" min="0" step="any" value={below} onChange={(event) => setBelow(event.target.value)} placeholder={picked.kind === 'quote' ? 'Opcional' : ''} />
               {picked.kind === 'skin' && (
                 <>
                   <Input label="Float máximo" type="number" min="0" max="1" step="0.0001" value={maxFloat} onChange={(event) => setMaxFloat(event.target.value)} placeholder="Opcional" />
@@ -1225,7 +1239,7 @@ function StoryDialog({ item, onClose }: { item: { kind: string; key: string; nam
                   <span className="block text-sm font-bold">{band.label}{band.yours ? ' · el tuyo' : ''}</span>
                   <span className="block text-[11px] font-medium text-slate-400">{band.sales > 0 ? `${band.range} · ${band.sales} ventas` : band.range}</span>
                 </span>
-                <span className="font-black tabular-nums">{formatPrice(band.priceEur)}</span>
+                <span className="font-black tabular-nums">{marketMoney(band.priceEur)}</span>
               </li>
             ))}
           </ul>
@@ -1236,7 +1250,16 @@ function StoryDialog({ item, onClose }: { item: { kind: string; key: string; nam
   );
 }
 
-export function Market({ focusListing, focusTick = 0, focusSkin = null }: { focusListing?: string | null; focusTick?: number; focusSkin?: { name: string; wear: string; label: string; image: string | null } | null }) {
+export function Market(props: { focusListing?: string | null; focusTick?: number; focusSkin?: { name: string; wear: string; label: string; image: string | null } | null }) {
+  return (
+    <MarketCurrency>
+      <MarketScreen {...props} />
+    </MarketCurrency>
+  );
+}
+
+function MarketScreen({ focusListing, focusTick = 0, focusSkin = null }: { focusListing?: string | null; focusTick?: number; focusSkin?: { name: string; wear: string; label: string; image: string | null } | null }) {
+  const { code, setCode } = useMarketCode();
   const [data, setData] = useState<MarketBoard | null>(null);
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
@@ -1395,6 +1418,19 @@ export function Market({ focusListing, focusTick = 0, focusSkin = null }: { focu
             <img src={active.icon} alt="" referrerPolicy="no-referrer" className="h-7 w-7 shrink-0 rounded-lg bg-white object-cover" />
           ) : null}
           <h1 className="min-w-0 flex-1 truncate text-base font-semibold">{heading}</h1>
+          <div className="flex shrink-0 rounded-full bg-slate-200/80 p-0.5 text-[12px] font-bold dark:bg-white/10" role="group" aria-label="Moneda de los precios">
+            {(['EUR', 'USD'] as const).map((id) => (
+              <button
+                key={id}
+                type="button"
+                aria-pressed={code === id}
+                onClick={() => setCode(id)}
+                className={cn('rounded-full px-2 py-1 tabular-nums', code === id ? 'bg-white text-slate-950 shadow-sm dark:bg-slate-950 dark:text-white' : 'text-slate-500')}
+              >
+                {id === 'EUR' ? '€' : '$'}
+              </button>
+            ))}
+          </div>
           <div className="flex shrink-0 items-center">
             <button type="button" aria-label="CSFloat" onClick={() => setDesk('csfloat')} className={cn('grid h-8 w-8 place-items-center rounded-full', desk === 'csfloat' ? 'text-slate-950 dark:text-white' : 'text-slate-400')}>
               <Star size={16} />
@@ -1406,6 +1442,7 @@ export function Market({ focusListing, focusTick = 0, focusSkin = null }: { focu
         </div>
         <p className="truncate text-[13px] font-semibold text-slate-500 dark:text-slate-400">
           {fresh ? `En vivo · ${formatAgo(data.updatedAt)}` : `Último intento ${formatAgo(data.updatedAt)}`}
+          {code === 'USD' && !marketReady() ? ' · buscando el cambio del dólar' : code === 'USD' ? ' · en dólares' : ''}
         </p>
       {searchOn && (
           <div className="relative mt-1">
