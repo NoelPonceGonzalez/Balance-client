@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import tesseractWorkerUrl from 'tesseract.js/dist/worker.min.js?url';
 import { createPortal } from 'react-dom';
 import { ChevronDown, ImagePlus, Plus, X } from 'lucide-react';
 import { motion } from 'motion/react';
@@ -28,6 +29,11 @@ interface Member {
   userId: string;
   name: string;
   color: string;
+}
+
+interface OcrApi {
+  createWorker: (langs: string, oem: 1, options: { workerPath: string; workerBlobURL: boolean }) => Promise<{ setParameters: (params: Record<string, string>) => Promise<unknown>; recognize: (image: string, opts?: object, output?: { text?: boolean; blocks?: boolean }) => Promise<{ data: { text: string; blocks?: { paragraphs?: { lines?: { words?: OcrWord[] }[] }[] }[] | null } }>; terminate: () => Promise<unknown> }>;
+  PSM: { SINGLE_BLOCK: string };
 }
 
 const chipOn = 'border-slate-200 bg-slate-100 text-slate-800 dark:border-white/15 dark:bg-white/10 dark:text-white';
@@ -742,11 +748,21 @@ export function TicketCam({
 
   const readWorker = () => {
     if (!ocrWorker.current) {
-      ocrWorker.current = import('tesseract.js').then(async ({ createWorker, PSM }) => {
-        const worker = await createWorker('spa+eng');
-        await worker.setParameters({ tessedit_pageseg_mode: PSM.SINGLE_BLOCK, user_defined_dpi: '300' });
+      const pending = import('tesseract.js').then(async (loaded) => {
+        const bag = loaded as unknown as OcrApi & { default?: OcrApi };
+        const api = typeof bag.createWorker === 'function' ? bag : bag.default;
+        if (!api) throw new Error('lector');
+        const worker = await api.createWorker('spa+eng', 1, {
+          workerPath: tesseractWorkerUrl,
+          workerBlobURL: false,
+        });
+        await worker.setParameters({ tessedit_pageseg_mode: api.PSM.SINGLE_BLOCK, user_defined_dpi: '300' });
         return worker;
       });
+      pending.catch(() => {
+        if (ocrWorker.current === pending) ocrWorker.current = null;
+      });
+      ocrWorker.current = pending;
     }
     return ocrWorker.current;
   };
@@ -773,8 +789,13 @@ export function TicketCam({
         const result = await worker.recognize(prepared.image, {}, { text: true, blocks: true });
         if (cancel) return;
         const plain = result.data.text || '';
-        const colored = textFromWords(wordsIn(result.data.blocks), prepared.pixels);
         const fromPlain = readWalletText(plain, accountsRef.current);
+        let colored = { text: plain, tones: [] as { value: number; ink: 'up' | 'down' }[] };
+        try {
+          colored = textFromWords(wordsIn(result.data.blocks), prepared.pixels);
+        } catch {
+          colored = { text: plain, tones: [] };
+        }
         const fromColor = readWalletText(colored.text, accountsRef.current);
         const plainGains = fromPlain.lines.filter((line) => line.gain != null || line.amount < 0).length;
         const colorGains = fromColor.lines.filter((line) => line.gain != null || line.amount < 0).length;
