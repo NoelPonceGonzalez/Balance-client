@@ -32,7 +32,7 @@ interface Member {
 }
 
 interface OcrApi {
-  createWorker: (langs: string, oem: 1, options: { workerPath: string; workerBlobURL: boolean }) => Promise<{ setParameters: (params: Record<string, string>) => Promise<unknown>; recognize: (image: string, opts?: object, output?: { text?: boolean; blocks?: boolean }) => Promise<{ data: { text: string; blocks?: { paragraphs?: { lines?: { words?: OcrWord[] }[] }[] }[] | null } }>; terminate: () => Promise<unknown> }>;
+  createWorker: (langs: string, oem: 1, options: { workerPath: string; corePath: string; langPath: string; workerBlobURL: boolean; gzip: boolean }) => Promise<{ setParameters: (params: Record<string, string>) => Promise<unknown>; recognize: (image: string, opts?: object, output?: { text?: boolean; blocks?: boolean }) => Promise<{ data: { text: string; blocks?: { paragraphs?: { lines?: { words?: OcrWord[] }[] }[] }[] | null } }>; terminate: () => Promise<unknown> }>;
   PSM: { SINGLE_BLOCK: string };
 }
 
@@ -752,8 +752,12 @@ export function TicketCam({
         const bag = loaded as unknown as OcrApi & { default?: OcrApi };
         const api = typeof bag.createWorker === 'function' ? bag : bag.default;
         if (!api) throw new Error('lector');
+        // El motor y los idiomas van en /tesseract. La web no deja bajarlos de otro sitio.
         const worker = await api.createWorker('spa+eng', 1, {
           workerPath: tesseractWorkerUrl,
+          corePath: '/tesseract/tesseract-core-lstm.wasm.js',
+          langPath: '/tesseract',
+          gzip: true,
           workerBlobURL: false,
         });
         await worker.setParameters({ tessedit_pageseg_mode: api.PSM.SINGLE_BLOCK, user_defined_dpi: '300' });
