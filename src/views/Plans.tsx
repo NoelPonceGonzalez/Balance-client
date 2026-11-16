@@ -373,7 +373,7 @@ function OutcomeCorner({ outcome, fill, beat }: { outcome: PlanOutcome | null; f
   return <TurnCorner frames={[{ text: share, className }, { text: money, className }]} beat={beat} />;
 }
 
-/** Parte del plan ya comprada. El color sigue siendo la ganancia o la pérdida, no este porcentaje. */
+/** Lo que sigue dentro de la cartera frente a lo que el plan aún quiere comprar. El color es la ganancia o la pérdida. */
 function deployedShare(plan: PlanRow, outcome: PlanOutcome | null): number {
   const invested = outcome?.invested ?? 0;
   const left = (plan.buys || []).reduce((sum, buy) => sum + buyLeft(buy), 0);

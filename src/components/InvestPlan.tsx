@@ -342,19 +342,28 @@ export interface PlanOutcome {
   share: number;
 }
 
-/** Cómo va solo el dinero metido en las tandas del plan, al precio de hoy. */
+/**
+ * Cómo va la inversión que hay ahora en la cartera enlazada, al precio de hoy.
+ * Una venta, una compra o un traspaso mueven esta cifra porque sale de la cartera, no de una copia de la tanda.
+ */
 export function planOutcome(plan: PlanRow, holdings: CoinHolding[]): PlanOutcome | null {
+  const assets = [...new Set((plan.buys || []).map((buy) => buy.asset))];
+  if (!assets.length || !holdings.length) return null;
   let invested = 0;
   let value = 0;
-  for (const buy of plan.buys || []) {
-    const spent = (buy.spent || 0) > 0 ? (buy.spent as number) : buy.done ? buy.amount : 0;
-    if (!(spent > 0)) continue;
-    const quantity = (buy.quantity || 0) > 0 ? (buy.quantity as number) : buy.priceEur ? spent / buy.priceEur : 0;
-    const price = coinsOf(plan, buy.asset, holdings).find((item) => item.unitMarketValue != null)?.unitMarketValue;
-    if (!quantity || price == null) return null;
-    invested += spent;
+  let any = false;
+  for (const asset of assets) {
+    const mine = coinsOf(plan, asset, holdings).filter((item) => item.quantity > 0);
+    if (!mine.length) continue;
+    const price = mine.find((item) => item.unitMarketValue != null)?.unitMarketValue;
+    const cost = mine.reduce((sum, item) => sum + (item.costBasis ?? 0), 0);
+    const quantity = mine.reduce((sum, item) => sum + item.quantity, 0);
+    if (price == null || !(cost > 0) || !(quantity > 0)) return null;
+    any = true;
+    invested += cost;
     value += quantity * price;
   }
+  if (!any) return { invested: 0, value: 0, result: 0, share: 0 };
   return { invested, value, result: value - invested, share: invested > 0 ? (value / invested) * 100 : 0 };
 }
 
