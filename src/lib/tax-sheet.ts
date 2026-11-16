@@ -237,6 +237,7 @@ function summarySheet(report: TaxReport, owner: string, mark: Blob | null): Shee
     ['Traspasos y Earn', 'Mover monedas entre tus cuentas o a Earn: siguen siendo tuyas.', count(EFFECT.own)],
     ['Movimientos en euros', 'Nómina, gastos y euros que metes o sacas: no son inversiones.', count(EFFECT.euros)],
     ['Mismo activo en otro formato', 'Por ejemplo, ETH en staking como WBETH. Detalle en la hoja «Sin efecto fiscal».', report.rewraps.length],
+    ['Bienes personales', 'Skins, relojes y otros bienes que no son una inversión. No van a la renta.', count(EFFECT.personal)],
   ] as [string, string, number][]).filter(([, , n]) => n > 0);
   data.push(quietHeader(['Tipo', 'Por qué no tributa', null, null, 'Movimientos'], [4], { 1: 3 }));
   for (const [label, why, n] of outside) data.push(line([text(label), text(why, { columnSpan: 3, textColor: MUTED, wrap: true }), null, null, n], 30));

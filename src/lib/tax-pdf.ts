@@ -92,7 +92,23 @@ function drawScale(doc: JsPdf, x: number, y: number, width: number, ink: Rgb = I
 export async function buildTaxPdf(report: TaxReport, owner: string): Promise<JsPdf> {
   const [{ jsPDF }, { default: autoTable }] = await Promise.all([import('jspdf'), import('jspdf-autotable')]);
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
-  doc.setProperties({ title: `Informe para la Renta ${report.year}`, author: 'Balance', subject: `Renta ${report.year} · ${owner}`, creator: 'Balance' });
+  // Un carácter fuera de la fuente (por ejemplo ★) pasaba toda la frase a UTF-16 y el PDF la enseñaba ilegible.
+  const safe = (value: string) => {
+    let out = '';
+    for (const char of value) {
+      const code = char.codePointAt(0) ?? 0;
+      if (code === 0xfeff || code === 0x202f || code === 0x00a0) out += ' ';
+      else if (code <= 255 || code === 0x20ac || code === 0x2013 || code === 0x2014 || code === 0x2018 || code === 0x2019 || code === 0x201c || code === 0x201d || code === 0x2022 || code === 0x2026) out += char;
+      else if (code === 0x2605 || code === 0x2606) out += '*';
+      else out += ' ';
+    }
+    return out.replace(/ {2,}/g, ' ');
+  };
+  const writeText = doc.text.bind(doc);
+  const splitText = doc.splitTextToSize.bind(doc);
+  doc.text = ((text: string | string[], x: number, y: number, options?: unknown) => writeText((Array.isArray(text) ? text.map((item) => safe(item)) : safe(text)) as string, x, y, options as never)) as typeof doc.text;
+  doc.splitTextToSize = ((text: string, size: number) => splitText(safe(text), size)) as typeof doc.splitTextToSize;
+  doc.setProperties({ title: `Informe para la Renta ${report.year}`, author: 'Balance', subject: safe(`Renta ${report.year} · ${owner}`), creator: 'Balance' });
   const width = doc.internal.pageSize.getWidth();
   const height = doc.internal.pageSize.getHeight();
   const margin = 48;
@@ -300,6 +316,7 @@ export async function buildTaxPdf(report: TaxReport, owner: string): Promise<JsP
     ...(ownMoves ? [['Traspasos y Earn', 'Mover monedas entre tus cuentas o a Earn: siguen siendo tuyas.', String(ownMoves)]] : []),
     ...(countEffect(EFFECT.euros) ? [['Movimientos en euros', 'Nómina, gastos y euros que metes o sacas: no son inversiones.', String(countEffect(EFFECT.euros))]] : []),
     ...(report.rewraps.length ? [['Mismo activo en otro formato', 'Por ejemplo, ETH en staking como WBETH. Detalle debajo.', String(report.rewraps.length)]] : []),
+    ...(countEffect(EFFECT.personal) ? [['Bienes personales', 'Skins, relojes y otros bienes que no son una inversión. No van a la renta.', String(countEffect(EFFECT.personal))]] : []),
   ];
   heading('Lo que no tributa', 'Movimientos revisados que no van a la declaración.');
   table(['Tipo', 'Por qué no tributa', 'Movimientos'], outside, undefined, [2], { 0: 150, 2: 70 });

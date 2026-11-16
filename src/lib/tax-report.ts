@@ -186,6 +186,8 @@ const CASH_GAP_SECONDS = 10;
 const SPLIT_GAP_SECONDS = 2;
 const CASH_TYPES = new Set(['adjustment', 'sell', 'buy', 'fee']);
 const FIAT = new Set(['EUR', 'USD', 'GBP', 'CHF']);
+/** Solo esto entra en la renta. Skins, relojes y el resto de bienes personales no. */
+const INVESTED = new Set(['crypto', 'stock', 'etf']);
 const MOVE_TYPES = new Set(['transfer', 'deposit', 'withdrawal']);
 
 export const EFFECT = {
@@ -197,6 +199,7 @@ export const EFFECT = {
   own: 'Traspaso entre cuentas propias',
   euros: 'Movimiento en euros',
   rewrap: 'Mismo activo en otro formato · no tributa',
+  personal: 'Bien personal · no tributa',
 };
 
 /** Tokens de staking o envueltos que representan la misma moneda de base. */
@@ -304,7 +307,7 @@ export function compensate(year: number, gainsBy: Map<number, number>, capitalBy
 }
 
 function clockOf(row: MovementRow): string {
-  return (row.description.match(/(\d{2}:\d{2}:\d{2})/) || ['', ''])[1];
+  return (String(row.description || '').match(/(\d{2}:\d{2}:\d{2})/) || ['', ''])[1];
 }
 
 function secondsOf(time: string): number {
@@ -313,7 +316,7 @@ function secondsOf(time: string): number {
 }
 
 function conceptOf(row: MovementRow): string {
-  return row.description.replace(/\s*·\s*\d{2}:\d{2}:\d{2}\s*$/, '').trim() || TYPE_LABEL[row.type] || row.type;
+  return String(row.description || '').replace(/\s*·\s*\d{2}:\d{2}:\d{2}\s*$/, '').trim() || TYPE_LABEL[row.type] || row.type;
 }
 
 function signOf(row: MovementRow): number {
@@ -377,6 +380,10 @@ export async function buildTaxReport(
   for (const { row, time } of rows) {
     const id = String(row._id);
     const holding = row.holdingId ? holdingById.get(String(row.holdingId)) : undefined;
+    if (holding && !INVESTED.has(holding.assetClass)) {
+      effects.set(id, EFFECT.personal);
+      continue;
+    }
     const money = row.currency === 'EUR' ? row.amount : row.eurPerUnit && row.eurPerUnit > 0 ? row.amount * row.eurPerUnit : null;
     const platform = platformOf(row.accountId);
     const tradeFor = (key: string) => {
@@ -468,6 +475,7 @@ export async function buildTaxReport(
 
   const buys: Extract<Event, { buy: unknown }>['buy'][] = [];
   for (const holding of input.holdings) {
+    if (!INVESTED.has(holding.assetClass)) continue;
     for (const buy of holding.buys || []) {
       const at = new Date(buy.at);
       if (Number.isNaN(at.getTime()) || !(buy.quantity > 0)) continue;
@@ -485,6 +493,7 @@ export async function buildTaxReport(
   for (const { row } of rows) {
     if (!inYear(row.date) || row.currency === 'EUR') continue;
     const holding = row.holdingId ? holdingById.get(String(row.holdingId)) : undefined;
+    if (holding && !INVESTED.has(holding.assetClass)) continue;
     pricer.need(holding ? assetOf(holding) : row.currency, row.date, null);
   }
 
@@ -826,7 +835,8 @@ export async function buildTaxReport(
     const assets = [...new Set(uncovered.map((item) => item.asset))].join(', ');
     warnings.push(`${uncovered.length} ${uncovered.length === 1 ? 'transmisión lleva' : 'transmisiones llevan'} unidades sin compra apuntada antes (${assets}), con coste 0 €. Suman ${new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(extra)} de ganancia; suele ser interés de Earn que Binance suma sin apunte aparte.`);
   }
-  if (unpriced.size) warnings.push(`Precio histórico pendiente para ${[...unpriced].join(', ')}. Esas filas llevan 0 € y conviene completarlas a mano.`);
+  if (pricer.down) warnings.push('No se han podido leer los precios de Binance. Las operaciones que no traían euros salen a 0 € y hay que completarlas a mano.');
+  else if (unpriced.size) warnings.push(`Precio histórico pendiente para ${[...unpriced].join(', ')}. Esas filas llevan 0 € y conviene completarlas a mano.`);
 
   return {
     year,

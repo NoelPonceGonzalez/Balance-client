@@ -14,9 +14,19 @@ type Kline = [number, string, string, string, string, ...unknown[]];
 type FetchJson = (url: string) => Promise<unknown>;
 
 async function fetchJson(url: string): Promise<unknown> {
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`Binance ha respondido ${response.status}`);
-  return response.json();
+  let last = 'Binance no ha respondido';
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    try {
+      const response = await fetch(url);
+      if (response.ok) return response.json();
+      last = `Binance ha respondido ${response.status}`;
+      if (response.status !== 429 && response.status !== 418 && response.status < 500) break;
+    } catch {
+      last = 'Sin conexión con Binance';
+    }
+    await new Promise((resolve) => setTimeout(resolve, 350 * (attempt + 1)));
+  }
+  throw new Error(last);
 }
 
 function dayStart(date: string): number {
@@ -31,6 +41,7 @@ function hourOf(time: string): number {
 /** Precios históricos en euros a partir de las velas públicas de Binance. */
 export function createPricer(load: FetchJson = fetchJson) {
   let symbols: Set<string> | null = null;
+  let down = false;
   const routes = new Map<string, Route | null>();
   const daily = new Map<string, Map<string, number>>();
   const hourly = new Map<string, Map<number, number>>();
@@ -65,10 +76,19 @@ export function createPricer(load: FetchJson = fetchJson) {
   }
 
   return {
+    get down() {
+      return down;
+    },
+
     async prepare() {
       if (symbols) return;
-      const list = (await load(`${BASE}/ticker/price`)) as { symbol: string }[];
-      symbols = new Set(list.map((item) => item.symbol));
+      try {
+        const list = (await load(`${BASE}/ticker/price`)) as { symbol: string }[];
+        symbols = new Set(list.map((item) => item.symbol));
+      } catch {
+        symbols = new Set();
+        down = true;
+      }
     },
 
     /** Apunta un precio que hará falta. Con hora se usa la vela de esa hora; sin hora, el cierre del día. */
@@ -101,7 +121,7 @@ export function createPricer(load: FetchJson = fetchJson) {
         onProgress?.(done, done + keys.length);
         return next();
       };
-      await Promise.all(Array.from({ length: Math.min(6, keys.length) }, next));
+      await Promise.all(Array.from({ length: Math.min(3, keys.length) }, next));
     },
 
     /** Precio en euros de una unidad. null si Binance no lo tiene. */

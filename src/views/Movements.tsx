@@ -205,7 +205,7 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
   const exportCsv = () => {
     const header = ['fecha', 'tipo', 'importe', 'moneda', 'categoria', 'descripcion', 'cuenta', 'destino'];
     const lines = sorted.map((row) => [row.date, kindOf(row), String(row.amount), row.currency, row.category, faces.get(docId(row))?.title || row.description, nameOf(row.accountId), nameOf(row.counterAccountId)].map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(';'));
-    const blob = new Blob([[header.join(';'), ...lines].join('\n')], { type: 'text/csv;charset=utf-8' });
+    const blob = new Blob(['\uFEFF', [header.join(';'), ...lines].join('\n')], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
