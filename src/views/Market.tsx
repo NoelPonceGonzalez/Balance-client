@@ -1178,13 +1178,13 @@ function StoryDialog({ item, onClose }: { item: { kind: string; key: string; nam
         return { day, eur };
       })
     : [];
-  const points: LinePoint[] = fromStory.length >= 2 ? fromStory : fromSpark;
+  const waiting = Boolean(item.key) && !story && !failed;
+  const points: LinePoint[] = fromStory.length >= 2 ? fromStory : waiting ? [] : fromSpark;
   const matched = fromStory.length >= 2;
   const change = matched ? story?.changePct : item.changePct;
   const label = matched ? story?.changeLabel : item.changeLabel;
   const up = (change ?? 0) > 0;
   const down = (change ?? 0) < 0;
-  const waiting = Boolean(item.key) && !story && !failed;
   return (
     <Modal title={item.name} onClose={onClose} wide>
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -1215,9 +1215,10 @@ function StoryDialog({ item, onClose }: { item: { kind: string; key: string; nam
       <div className="mt-4">
         {waiting && points.length < 2 ? <QuietLoad kind="chart" /> : points.length >= 2 ? (
           <CashChart
-            key={`${item.key}:${loadedDays}:${points.length}`}
+            key={`${item.key}:${loadedDays}`}
             quiet
             tall
+            pending={waiting}
             points={points}
             now={item.priceEur ?? points[points.length - 1].eur}
             hidden={false}

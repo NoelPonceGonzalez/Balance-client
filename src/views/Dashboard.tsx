@@ -578,7 +578,7 @@ function PieceLine({ accountId, holdingId, assetClass, now }: { accountId: strin
         <p className="text-[2rem] font-semibold leading-none tracking-tight tabular-nums text-slate-900 dark:text-white">{formatEur(live ?? now)}</p>
         {day && <p className="text-[13px] font-semibold text-slate-400">{formatDay(day)}</p>}
       </div>
-      <CashChart points={points ?? []} now={now} hidden={false} quiet tone="ink" onValue={setLive} onDay={setDay} emptyText="" />
+      <CashChart points={points ?? []} now={now} hidden={false} quiet pending={points == null} tone="ink" onValue={setLive} onDay={setDay} emptyText="" />
     </div>
   );
 }
@@ -994,6 +994,7 @@ function pendingMonth(data: DashboardData | null): number {
 export function Dashboard({ heroMs, home, books }: { heroMs: number; home: number; books: number }) {
   const [data, setData] = useState<DashboardData | null>(null);
   const [lived, setLived] = useState<{ day: string; eur: number }[] | null>(null);
+  const [lineReady, setLineReady] = useState(false);
   const [view, setView] = useState<'general' | 'cartera'>('general');
   const [openWallet, setOpenWallet] = useState<string | null>(null);
   const [liveDay, setLiveDay] = useState<string | null>(null);
@@ -1106,7 +1107,8 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
         next[next.length - 1] = { day: today, eur: total };
         setLived(next);
       })
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .finally(() => { if (!cancelled) setLineReady(true); });
     return () => { cancelled = true; };
   }, [data]);
 
@@ -1924,9 +1926,10 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
       {chart === 'line' ? (
         <CashChart
           quiet
+          pending={!lineReady}
           tone="ink"
           hidden={hidden}
-          points={(lived && lived.length >= 2 ? lived : data.series).map((point) => ({ day: point.day, eur: point.eur }))}
+          points={lineReady ? (lived && lived.length >= 2 ? lived : data.series).map((point) => ({ day: point.day, eur: point.eur })) : []}
           now={shownWorth ?? data.series[data.series.length - 1]?.eur ?? 0}
           base={paidBase}
           spent={paid > 0 ? paid : null}

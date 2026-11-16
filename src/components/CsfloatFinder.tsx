@@ -466,6 +466,7 @@ export function SkinMarket({ skin, wear }: { skin: SkinHit; wear: string }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [story, setStory] = useState<LinePoint[]>([]);
+  const [storyPending, setStoryPending] = useState(true);
   const [storyNow, setStoryNow] = useState<number | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [starred, setStarred] = useState(false);
@@ -518,13 +519,14 @@ export function SkinMarket({ skin, wear }: { skin: SkinHit; wear: string }) {
     const hash = wearName ? `${skin.name} (${wearName})` : skin.name;
     const params = new URLSearchParams({ kind: 'cs2', key: `cs2:${hash}`, name: hash, symbol: 'CS2' });
     let cancel = false;
-    setStory([]);
+    setStoryPending(true);
     api<{ series: { at: string; eur: number }[] }>(`/api/market/story?${params}`)
       .then((data) => {
         if (cancel) return;
         setStory((data.series || []).filter((point) => point.eur > 0).map((point) => ({ day: point.at, eur: point.eur })));
+        setStoryPending(false);
       })
-      .catch(() => { if (!cancel) setStory([]); });
+      .catch(() => { if (!cancel) { setStory([]); setStoryPending(false); } });
     return () => { cancel = true; };
   }, [skin, wear]);
 
@@ -553,12 +555,13 @@ export function SkinMarket({ skin, wear }: { skin: SkinHit; wear: string }) {
   return (
     <div className="space-y-3">
       <CashChart
-        key={`${skin.name}:${wear}:${story.length}`}
+        key={`${skin.name}:${wear}`}
         quiet
         tall
+        pending={storyPending}
         tone="ink"
         hidden={false}
-        points={story}
+        points={storyPending ? [] : story}
         now={chartNow}
         onValue={setStoryNow}
         emptyText={story.length ? '' : 'La línea sale cuando CSFloat manda las ventas de esta skin.'}

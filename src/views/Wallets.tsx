@@ -373,10 +373,9 @@ function accentFor(label: string): string {
   return ACCENT_PALETTE[hash % ACCENT_PALETTE.length];
 }
 
-export function CashChart({ points, now, hidden, base = null, spent = null, label, showPct = false, beside = false, tall = false, plain = false, quiet = false, showNow = false, tone, beforePlot, onValue, onDay, onMove, emptyText = 'La gráfica aparece con el primer movimiento.' }: { points: LinePoint[]; now: number; hidden: boolean; base?: number | null; spent?: number | null; label?: string; showPct?: boolean; beside?: boolean; tall?: boolean; plain?: boolean; quiet?: boolean; showNow?: boolean; tone?: 'ink' | string; beforePlot?: ReactNode; onValue?: (eur: number) => void; onDay?: (day: string | null) => void; onMove?: (move: { amount: number; pct: number | null } | null) => void; emptyText?: string }) {
+export function CashChart({ points, now, hidden, base = null, spent = null, label, showPct = false, beside = false, tall = false, plain = false, quiet = false, showNow = false, pending = false, tone, beforePlot, onValue, onDay, onMove, emptyText = 'La gráfica aparece con el primer movimiento.' }: { points: LinePoint[]; now: number; hidden: boolean; base?: number | null; spent?: number | null; label?: string; showPct?: boolean; beside?: boolean; tall?: boolean; plain?: boolean; quiet?: boolean; showNow?: boolean; pending?: boolean; tone?: 'ink' | string; beforePlot?: ReactNode; onValue?: (eur: number) => void; onDay?: (day: string | null) => void; onMove?: (move: { amount: number; pct: number | null } | null) => void; emptyText?: string }) {
   const fillId = `fill-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
   const pastId = `${fillId}-past`;
-  const strokeRef = useRef<SVGPathElement>(null);
   const futureId = `${fillId}-future`;
   const tailId = `${fillId}-tail`;
   const guideId = `${fillId}-guide`;
@@ -397,8 +396,8 @@ export function CashChart({ points, now, hidden, base = null, spent = null, labe
   const line = [...byStamp.entries()].sort((a, b) => pointTime(a[0]) - pointTime(b[0])).map(([day, eur]) => ({ day, eur }));
   const height = plain ? 300 : tall ? 228 : 168;
   const still = stillMotion();
-  const fresh = line.length < 2 && Number.isFinite(now);
-  const enough = (fresh || line.length >= 2) && width > 0;
+  const fresh = !pending && line.length < 2 && Number.isFinite(now);
+  const enough = !pending && (fresh || line.length >= 2) && width > 0;
   const times = line.map((point) => pointTime(point.day));
   const t0 = times[0] ?? 0;
   const tSpan = (times[times.length - 1] ?? 0) - t0 || 1;
@@ -461,34 +460,6 @@ export function CashChart({ points, now, hidden, base = null, spent = null, labe
     setScrub(null);
   };
   const shownDay = focus?.day || line[line.length - 1]?.day || null;
-  const drawKey = `${line[0]?.day ?? ''}:${line.length}:${line[line.length - 1]?.day ?? ''}`;
-  useEffect(() => {
-    const path = strokeRef.current;
-    if (!path || !enough) return undefined;
-    const clear = () => {
-      path.style.transition = 'none';
-      path.style.strokeDasharray = 'none';
-      path.style.strokeDashoffset = '0';
-    };
-    if (still) {
-      clear();
-      return undefined;
-    }
-    const total = path.getTotalLength();
-    if (!(total > 0)) return undefined;
-    path.style.transition = 'none';
-    path.style.strokeDasharray = `${total}px ${total}px`;
-    path.style.strokeDashoffset = `${total}px`;
-    const start = window.setTimeout(() => {
-      path.style.transition = 'stroke-dashoffset 1.15s cubic-bezier(0.22, 1, 0.36, 1)';
-      path.style.strokeDashoffset = '0px';
-    }, 30);
-    const finish = window.setTimeout(clear, 1500);
-    return () => {
-      window.clearTimeout(start);
-      window.clearTimeout(finish);
-    };
-  }, [drawKey, enough, still]);
   useEffect(() => { onValue?.(value); }, [onValue, value]);
   useEffect(() => { if (shownDay) onDay?.(shownDay); }, [onDay, shownDay]);
   useEffect(() => {
@@ -541,7 +512,7 @@ export function CashChart({ points, now, hidden, base = null, spent = null, labe
       <div
         ref={setBox}
         className={cn('chart-finger relative select-none', plain ? '-mx-5 mt-1' : 'mt-4')}
-        style={{ height: enough || width === 0 ? height : 48, touchAction: 'none' }}
+        style={{ height: pending || enough || width === 0 ? height : 48, touchAction: 'none' }}
         onPointerDown={(event) => {
           if (!event.isPrimary || pointerRef.current != null) return;
           pointerRef.current = event.pointerId;
@@ -593,7 +564,6 @@ export function CashChart({ points, now, hidden, base = null, spent = null, labe
                 />
               )}
               <path
-                ref={strokeRef}
                 d={d}
                 fill="none"
                 stroke={stroke}
@@ -963,9 +933,17 @@ function RangeTabs({ value, onChange }: { value: RangeId; onChange: (next: Range
 
 const card = 'rounded-[24px] border border-white/70 bg-white/80 p-4 dark:border-white/10 dark:bg-white/10';
 
+function openingPane(accounts: CarteraAccount[], openId: string | null): 0 | 1 {
+  const opened = accounts.find((account) => account.key === openId);
+  const cashSide = opened?.sides.find((side) => side.group === 'cash');
+  const hasBook = opened?.sides.some((side) => side.group !== 'cash' && side.total > 1);
+  return opened && !opened.extras && cashSide && (Math.abs(cashSide.total) >= 0.01 || !hasBook) ? 0 : 1;
+}
+
 export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, onOpen, onAdd, onSections, onSaved, onKeep, onEditExtra, onFigure, onDay, onMove }: { accounts: CarteraAccount[]; hidden: boolean; beat?: number; openId: string | null; paneSlot?: HTMLElement | null; onOpen: (id: string | null) => void; onAdd?: (accountKey: string, section?: string) => void; onSections?: (accountKey: string, sections: string[]) => Promise<void>; onSaved?: () => Promise<void> | void; onKeep?: (name: string, amount: number) => void; onEditExtra?: (id: string) => void; onFigure?: (amount: number | null) => void; onDay?: (day: string | null) => void; onMove?: (move: { amount: number; pct: number | null } | null) => void }) {
   const [notes, setNotes] = useState<WalletRow[]>([]);
   const [booked, setBooked] = useState<BookedMove[]>([]);
+  const [bookedFor, setBookedFor] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [entryDraft, setEntryDraft] = useState<EntryDraft | null>(null);
   const [sheet, setSheet] = useState<VerbId | null>(null);
@@ -973,7 +951,8 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
   const [fixedDraft, setFixedDraft] = useState<FixedDraft | null>(null);
   const [ledger, setLedger] = useState<null | 'cash' | 'moves'>(null);
   const [detail, setDetail] = useState<{ label: string; note: string; amount: number; image?: string | null } | null>(null);
-  const [pane, setPane] = useState<0 | 1>(0);
+  const [pane, setPane] = useState<0 | 1>(() => openingPane(accounts, openId));
+  const [seenOpen, setSeenOpen] = useState(openId);
   const [switching, setSwitching] = useState('');
   const [focus, setFocus] = useState('all');
   const [range, setRange] = useState<RangeId>('MAX');
@@ -982,6 +961,17 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
   const [gainMode, setGainMode] = useState<'eur' | 'pct'>('eur');
   const [asset, setAsset] = useState<CarteraItem | null>(null);
   const [live, setLive] = useState<number | null>(null);
+  if (openId !== seenOpen) {
+    setSeenOpen(openId);
+    setPane(openingPane(accounts, openId));
+    setFocus('all');
+    setAsset(null);
+    setLive(null);
+    setRange('MAX');
+    setPicking(false);
+    setLedger(null);
+    setDetail(null);
+  }
 
   const load = async () => {
     const data = await api<{ wallets: WalletRow[] }>('/api/wallets');
@@ -1020,35 +1010,27 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
     if (!ledger) setSearching(false);
   }, [ledger]);
 
-  useEffect(() => {
-    setLedger(null);
-    setDetail(null);
-    const opened = accounts.find((account) => account.key === openId);
-    const cashSide = opened?.sides.find((side) => side.group === 'cash');
-    const hasBook = opened?.sides.some((side) => side.group !== 'cash' && side.total > 1);
-    const opensCash = Boolean(opened && !opened.extras && cashSide && (Math.abs(cashSide.total) >= 0.01 || !hasBook));
-    setPane(opensCash ? 0 : 1);
-    setFocus('all');
-    setAsset(null);
-    setLive(null);
-    setRange('MAX');
-    setPicking(false);
-  }, [openId]);
-
   const current = accounts.find((account) => account.key === openId) || null;
   const openCash = current?.cash;
   useEffect(() => {
     if (!openId || openId === 'extras') {
       setBooked([]);
+      setBookedFor(openId);
       return;
     }
     let cancelled = false;
     loadMovementPages<BookedMove>(new URLSearchParams({ accountId: openId }))
       .then((data) => {
-        if (!cancelled) setBooked(data.rows);
+        if (!cancelled) {
+          setBooked(data.rows);
+          setBookedFor(openId);
+        }
       })
       .catch(() => {
-        if (!cancelled) setBooked([]);
+        if (!cancelled) {
+          setBooked([]);
+          setBookedFor(openId);
+        }
       });
     return () => {
       cancelled = true;
@@ -1187,21 +1169,30 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
     const shared = investmentSides.some((side) => side.group !== page.group && side.items.some((item) => SERIES_OF[item.group || ''] === key));
     return shared ? null : key;
   })();
-  const pageSeries = useSeries(pageSeriesKey && current ? current.key : null, pageSeriesKey || '');
+  const pageFetching = Boolean(pageSeriesKey && current);
+  const pageSeries = useSeries(pageFetching && current ? current.key : null, pageSeriesKey || '');
   const ownPath = page ? holdingPath(page.items.map((item) => ({ day: item.boughtOn, cost: item.costEur, value: item.eur })), todayKey()) : null;
-  const pagePoints = pageSeriesKey ? (pageSeries && pageSeries.length < 2 && (ownPath?.length || 0) >= 2 ? ownPath : pageSeries) : ownPath;
+  const pagePoints = !pageFetching
+    ? ownPath
+    : pageSeries == null
+      ? null
+      : pageSeries.length >= 2
+        ? pageSeries
+        : (ownPath && ownPath.length >= 2 ? ownPath : pageSeries);
   const rangedPoints = pagePoints ? inRange(pagePoints, range) : null;
   const assetGroup = asset ? (SERIES_OF[asset.group || ''] || pageSeriesKey || 'all') : '';
-  const assetSeries = useSeries(asset && current && !current.extras ? current.key : null, assetGroup || 'all', asset?.id || null);
+  const assetFetching = Boolean(asset && current && !current.extras);
+  const assetSeries = useSeries(assetFetching && current ? current.key : null, assetGroup || 'all', asset?.id || null);
   const assetOwn = asset ? holdingPath([{ day: asset.boughtOn, cost: asset.costEur, value: asset.eur }], todayKey()) : null;
-  const assetPoints = assetSeries && assetSeries.length >= 2 ? assetSeries : assetOwn;
+  const assetPoints = !assetFetching ? assetOwn : assetSeries == null ? null : (assetSeries.length >= 2 ? assetSeries : assetOwn);
   const assetRanged = assetPoints ? inRange(assetPoints, range) : null;
   const inventory = Boolean(products?.auto);
   const skinItems = inventory ? groups.flatMap((group) => group.items) : [];
-  const totalSeries = useSeries(current && !current.extras && (inventory ? !asset : !page) ? current.key : null, inventory ? 'personal_good' : 'all');
+  const totalFetching = Boolean(current && !current.extras && (inventory ? !asset : !page));
+  const totalSeries = useSeries(totalFetching && current ? current.key : null, inventory ? 'personal_good' : 'all');
   const totalOwn = holdingPath(investmentSides.flatMap((side) => side.items).map((item) => ({ day: item.boughtOn, cost: item.costEur, value: item.eur })), todayKey());
-  const totalPoints = totalSeries && totalSeries.length >= 2 ? totalSeries : totalOwn;
-  const totalRanged = totalPoints.length >= 2 ? inRange(totalPoints, range) : null;
+  const totalPoints = !totalFetching ? totalOwn : totalSeries == null ? null : (totalSeries.length >= 2 ? totalSeries : totalOwn);
+  const totalRanged = totalPoints && totalPoints.length >= 2 ? inRange(totalPoints, range) : null;
   const figure = asset ? (live ?? asset.eur) : page ? (live ?? page.total) : showCash && cashSide ? (live ?? cashSide.total) : showPortfolio ? (live ?? portfolioTotal) : null;
   useEffect(() => { onFigure?.(figure); }, [figure, onFigure]);
   useEffect(() => { if (!current || ledger) onDay?.(null); }, [current, ledger, onDay]);
@@ -1518,11 +1509,12 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
                 label="Disponible"
                 quiet
                 showNow
+                pending={bookedFor !== current.key}
                 onValue={setLive}
                 onDay={onDay}
                 hidden={hidden}
                 now={cashSide.total}
-                points={cashPath(current.cash, statement.map((row) => ({ day: row.day, amount: row.amount, absorbed: row.absorbed, open: row.open })), todayKey())}
+                points={bookedFor === current.key ? cashPath(current.cash, statement.map((row) => ({ day: row.day, amount: row.amount, absorbed: row.absorbed, open: row.open })), todayKey()) : []}
               />
             </section>
           )}
@@ -1680,9 +1672,10 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
                       <div className="mt-1.5">
                         {asset ? (
                           <CashChart
-                            key={`${asset.id}:${range}:${assetRanged ? 'ready' : 'wait'}`}
+                            key={`${asset.id}:${range}`}
                             quiet
                             tall
+                            pending={assetFetching && assetSeries == null}
                             tone={accentFor(asset.label)}
                             onValue={setLive}
                             onDay={onDay}
@@ -1696,9 +1689,10 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
                           />
                         ) : (
                           <CashChart
-                            key={`${current.key}:${page.group}:${range}:${rangedPoints ? 'ready' : 'wait'}`}
+                            key={`${current.key}:${page.group}:${range}`}
                             quiet
                             tall
+                            pending={pageFetching && pageSeries == null}
                             tone="ink"
                             onValue={setLive}
                             onDay={onDay}
@@ -1782,9 +1776,10 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
                 ) : (
                   <div className="px-1">
                     <CashChart
-                      key={`${current.key}:all:${range}:${totalRanged ? 'ready' : 'wait'}`}
+                      key={`${current.key}:all:${range}`}
                       quiet
                       tall
+                      pending={totalFetching && totalSeries == null}
                       tone="ink"
                       onValue={setLive}
                       onDay={onDay}
