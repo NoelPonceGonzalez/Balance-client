@@ -9,6 +9,7 @@ import { EntrySheet } from '@/components/EntrySheet';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { api, ApiError } from '@/lib/api';
+import { loadMovementPages } from '@/lib/history';
 import { shapeLine } from '@/lib/shape-line';
 import { OriginGlyph, OriginPicker } from '@/components/OriginMark';
 import { formatDay, formatEur, formatNumber, formatPct, formatSignedEur } from '@/lib/format';
@@ -1042,9 +1043,9 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
       return;
     }
     let cancelled = false;
-    api<{ movements: BookedMove[] }>(`/api/movements?accountId=${encodeURIComponent(openId)}`)
+    loadMovementPages<BookedMove>(new URLSearchParams({ accountId: openId }))
       .then((data) => {
-        if (!cancelled) setBooked(data.movements || []);
+        if (!cancelled) setBooked(data.rows);
       })
       .catch(() => {
         if (!cancelled) setBooked([]);

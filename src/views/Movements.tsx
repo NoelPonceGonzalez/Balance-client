@@ -6,6 +6,7 @@ import { EntrySheet } from '@/components/EntrySheet';
 import { Modal } from '@/components/Modal';
 import { TaxReportPanel } from '@/components/TaxReportPanel';
 import { api, ApiError } from '@/lib/api';
+import { loadMovementPages } from '@/lib/history';
 import { formatDay, formatEur } from '@/lib/format';
 import { TYPE_LABEL } from '@/lib/labels';
 import { moveFaces } from '@/lib/move-faces';
@@ -91,17 +92,18 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
   const [openGroup, setOpenGroup] = useState<string | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const [taxYear, setTaxYear] = useState(initialYear);
-  const [taxBusy, setTaxBusy] = useState(false);
+  const [cut, setCut] = useState(false);
 
   const load = async () => {
     const params = new URLSearchParams();
     Object.entries(filters).forEach(([key, value]) => { if (value) params.set(key, value); });
     const [movementData, accountData, holdingData] = await Promise.all([
-      api<{ movements: MovementRow[] }>(`/api/movements?${params.toString()}`),
+      loadMovementPages<MovementRow>(params),
       api<{ accounts: AccountRow[] }>('/api/accounts'),
       api<{ holdings: HoldingRow[] }>('/api/holdings'),
     ]);
-    setRows(movementData.movements);
+    setRows(movementData.rows);
+    setCut(!movementData.complete);
     setAccounts(accountData.accounts);
     setHoldings(holdingData.holdings);
   };
@@ -232,6 +234,7 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
         </div>
       </div>
       {error && <p className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">{error}</p>}
+      {cut && <p className="rounded-2xl bg-white px-4 py-3 text-sm font-medium text-slate-500">Faltan los movimientos más antiguos.</p>}
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
         <select className={fieldClass} aria-label="Sitio" value={filters.accountId} onChange={(event) => setFilters({ ...filters, accountId: event.target.value })}>
           <option value="">Todos los sitios</option>
@@ -334,9 +337,9 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
         ))}
       </div>
       {exportOpen && (
-        <Modal title="Descargar movimientos" onClose={() => { if (!taxBusy) setExportOpen(false); }}>
+        <Modal title="Descargar movimientos" onClose={() => setExportOpen(false)}>
           <div className="space-y-5">
-            <TaxReportPanel years={Array.from({ length: 8 }, (_, index) => now.getFullYear() - index)} initialYear={taxYear} onBusy={setTaxBusy} />
+            <TaxReportPanel years={Array.from({ length: 8 }, (_, index) => now.getFullYear() - index)} initialYear={taxYear} />
             <section className="flex items-center justify-between gap-3 px-1">
               <span className="min-w-0">
                 <span className="block text-[15px] font-semibold">Lista de esta pantalla</span>

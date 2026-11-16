@@ -15,16 +15,16 @@ type FetchJson = (url: string) => Promise<unknown>;
 
 async function fetchJson(url: string): Promise<unknown> {
   let last = 'Binance no ha respondido';
-  for (let attempt = 0; attempt < 4; attempt += 1) {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      const response = await fetch(url);
+      const response = await fetch(url, { signal: AbortSignal.timeout(8_000) });
       if (response.ok) return response.json();
       last = `Binance ha respondido ${response.status}`;
       if (response.status !== 429 && response.status !== 418 && response.status < 500) break;
     } catch {
       last = 'Sin conexión con Binance';
     }
-    await new Promise((resolve) => setTimeout(resolve, 350 * (attempt + 1)));
+    await new Promise((resolve) => setTimeout(resolve, 400));
   }
   throw new Error(last);
 }
@@ -47,9 +47,11 @@ export function createPricer(load: FetchJson = fetchJson) {
   const hourly = new Map<string, Map<number, number>>();
   const wanted = new Set<string>();
 
-  function route(asset: string): Route | null {
+  function route(asset: string, seen = new Set<string>()): Route | null {
     const coin = asset.toUpperCase();
     if (routes.has(coin)) return routes.get(coin) ?? null;
+    if (seen.has(coin)) return null;
+    seen.add(coin);
     let found: Route | null = null;
     if (coin === 'EUR') found = { mul: [], usd: false };
     else if (coin === 'USDT') found = { mul: [], usd: true };
@@ -58,7 +60,7 @@ export function createPricer(load: FetchJson = fetchJson) {
     else {
       for (const base of CROSS) {
         if (base === coin || !symbols?.has(`${coin}${base}`)) continue;
-        const next = route(base);
+        const next = route(base, seen);
         if (next) {
           found = { mul: [`${coin}${base}`, ...next.mul], usd: next.usd };
           break;
@@ -98,8 +100,14 @@ export function createPricer(load: FetchJson = fetchJson) {
 
     async load(onProgress?: (done: number, total: number) => void) {
       const keys = [...wanted].filter((key) => !(key.startsWith('h|') ? hourly.has(key.slice(2)) : daily.has(key.slice(2))));
+      const deadline = Date.now() + 25_000;
       let done = 0;
       const next = async (): Promise<void> => {
+        if (Date.now() > deadline) {
+          down = true;
+          keys.length = 0;
+          return;
+        }
         const key = keys.shift();
         if (!key) return;
         const [grain, pair, when] = key.split('|');

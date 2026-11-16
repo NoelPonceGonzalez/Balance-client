@@ -22,7 +22,7 @@ export async function brandMarkPng(width = 260): Promise<{ dataUrl: string; blob
     const image = new Image();
     image.decoding = 'async';
     image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(scaleSvg('#0a0a0a'))}`;
-    await image.decode();
+    await Promise.race([image.decode(), new Promise((_, reject) => setTimeout(() => reject(new Error('logo')), 3_000))]);
     const canvas = document.createElement('canvas');
     canvas.width = width;
     canvas.height = Math.round(width * ratio);
@@ -30,7 +30,10 @@ export async function brandMarkPng(width = 260): Promise<{ dataUrl: string; blob
     if (!context) return null;
     context.drawImage(image, 0, 0, canvas.width, canvas.height);
     const dataUrl = canvas.toDataURL('image/png');
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+    const blob = await Promise.race([
+      new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png')),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 3_000)),
+    ]);
     return blob ? { dataUrl, blob, ratio } : null;
   } catch {
     return null;

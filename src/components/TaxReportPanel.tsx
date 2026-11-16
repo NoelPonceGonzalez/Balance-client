@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { Check, Download, FileSpreadsheet, FileText } from 'lucide-react';
 import { api } from '@/lib/api';
+import { loadMovementPages } from '@/lib/history';
 import { SCALE_PATHS } from '@/lib/brand-mark';
 import { formatEur, formatSignedEur } from '@/lib/format';
 import { glide, quickOut, softSpring } from '@/lib/motion';
@@ -40,7 +41,7 @@ interface Ready {
   owner: string;
 }
 
-export function TaxReportPanel({ years, initialYear, onBusy }: { years: number[]; initialYear: string; onBusy: (busy: boolean) => void }) {
+export function TaxReportPanel({ years, initialYear }: { years: number[]; initialYear: string }) {
   const [year, setYear] = useState(initialYear);
   const [stage, setStage] = useState<Stage>('idle');
   const [step, setStep] = useState(0);
@@ -49,6 +50,8 @@ export function TaxReportPanel({ years, initialYear, onBusy }: { years: number[]
   const [error, setError] = useState('');
   const [saving, setSaving] = useState<Format | null>(null);
   const [saved, setSaved] = useState<Format[]>([]);
+  const alive = useRef(true);
+  useEffect(() => () => { alive.current = false; }, []);
 
   const prepare = async () => {
     setStage('working');
@@ -56,33 +59,36 @@ export function TaxReportPanel({ years, initialYear, onBusy }: { years: number[]
     setPrices({ done: 0, total: 0 });
     setSaved([]);
     setError('');
-    onBusy(true);
     try {
-      const [me, movementData, accountData, holdingData, { buildTaxReport }] = await Promise.all([
+      const cutoff = `${Number(year) + 1}-02-${(Number(year) + 1) % 4 === 0 ? '29' : '28'}`;
+      const [me, movements, accountData, holdingData, { buildTaxReport }] = await Promise.all([
         api<{ user: { name: string } }>('/api/auth/me'),
-        api<{ movements: MovementRow[] }>(`/api/movements?to=${Number(year) + 1}-02-${(Number(year) + 1) % 4 === 0 ? '29' : '28'}`),
+        loadMovementPages<MovementRow>(new URLSearchParams({ to: cutoff })),
         api<{ accounts: AccountRow[] }>('/api/accounts'),
         api<{ holdings: TaxHolding[] }>('/api/holdings'),
         import('@/lib/tax-report'),
       ]);
+      if (!alive.current) return;
       setStep(1);
       const report = await buildTaxReport(
-        { movements: movementData.movements, accounts: accountData.accounts, holdings: holdingData.holdings },
+        { movements: movements.rows, accounts: accountData.accounts, holdings: holdingData.holdings },
         Number(year),
-        (done, total) => setPrices({ done, total }),
+        (done, total) => { if (alive.current) setPrices({ done, total }); },
       );
-      if (movementData.movements.length >= 5000) report.warnings.push('El informe usa los 5000 movimientos más recientes; los anteriores quedan fuera del cálculo FIFO.');
+      if (!alive.current) return;
+      if (!movements.complete) report.warnings.push('El historial es muy largo y el informe no ha podido leerlo entero. Las compras más antiguas pueden faltar en el FIFO.');
       setStep(2);
       await new Promise((resolve) => setTimeout(resolve, 380));
+      if (!alive.current) return;
       setStep(3);
       await new Promise((resolve) => setTimeout(resolve, 380));
+      if (!alive.current) return;
       setReady({ report, owner: me.user.name });
       setStage('ready');
     } catch (err) {
+      if (!alive.current) return;
       setError(err instanceof Error ? err.message : 'No se ha podido preparar el informe.');
       setStage('error');
-    } finally {
-      onBusy(false);
     }
   };
 

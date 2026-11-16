@@ -16,7 +16,7 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
     } catch (error) {
       last = error;
       const status = error instanceof ApiError ? error.status : 0;
-      if (status !== 0 && status !== 500) throw error;
+      if ((status !== 0 && status !== 500) || (error instanceof ApiError && error.code === 'timeout')) throw error;
       if (attempt === 3) break;
       await new Promise((resolve) => setTimeout(resolve, 350));
     }
@@ -29,11 +29,13 @@ async function apiOnce<T>(path: string, options: RequestInit): Promise<T> {
   const headers = new Headers(options.headers);
   if (!headers.has('Content-Type') && options.body) headers.set('Content-Type', 'application/json');
   if (token) headers.set('Authorization', `Bearer ${token}`);
+  const signal = options.signal ?? AbortSignal.timeout(options.body ? 45_000 : 20_000);
   let response: Response;
   try {
-    response = await fetch(path, { ...options, headers });
-  } catch {
-    throw new ApiError('No hay conexión con el servidor. Comprueba que la API esté en marcha.', 0);
+    response = await fetch(path, { ...options, headers, signal });
+  } catch (error) {
+    const timedOut = error instanceof DOMException && (error.name === 'TimeoutError' || error.name === 'AbortError');
+    throw new ApiError(timedOut ? 'El servidor ha tardado demasiado.' : 'No hay conexión con el servidor. Comprueba que la API esté en marcha.', 0, timedOut ? 'timeout' : 'offline');
   }
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
