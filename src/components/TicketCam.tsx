@@ -1314,63 +1314,54 @@ export function TicketCam({
           <video ref={videoRef} playsInline muted autoPlay className={cn('h-full w-full object-cover', cameraError && 'hidden')} />
           {!cameraError && (
             <>
-              <div aria-hidden className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_36%,rgba(0,0,0,0.28)_70%,rgba(0,0,0,0.62)_100%)]" />
-              <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-black/70 via-black/25 to-transparent" />
-              <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-72 bg-gradient-to-t from-black/80 via-black/35 to-transparent" />
+              <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-black/45 to-transparent" />
+              <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-black/50 to-transparent" />
               <div
                 aria-hidden
-                className="pointer-events-none absolute inset-x-5 sm:inset-x-16"
-                style={{ top: 'calc(max(0.85rem, env(safe-area-inset-top)) + 3.75rem)', bottom: 'calc(max(1.15rem, env(safe-area-inset-bottom)) + 11.25rem)' }}
+                className="pointer-events-none absolute left-7 right-7 sm:left-16 sm:right-16"
+                style={{ top: 'calc(max(0.75rem, env(safe-area-inset-top)) + 4.25rem)', bottom: 'calc(max(1rem, env(safe-area-inset-bottom)) + 8.5rem)' }}
               >
-                <div className="absolute inset-0 rounded-[32px] border border-white/25 shadow-[0_0_0_1px_rgba(0,0,0,0.25),inset_0_0_0_1px_rgba(255,255,255,0.06)]" />
-                <span className="absolute -left-px -top-px h-8 w-8 rounded-tl-[32px] border-l-[1.5px] border-t-[1.5px] border-white" />
-                <span className="absolute -right-px -top-px h-8 w-8 rounded-tr-[32px] border-r-[1.5px] border-t-[1.5px] border-white" />
-                <span className="absolute -bottom-px -left-px h-8 w-8 rounded-bl-[32px] border-b-[1.5px] border-l-[1.5px] border-white" />
-                <span className="absolute -bottom-px -right-px h-8 w-8 rounded-br-[32px] border-b-[1.5px] border-r-[1.5px] border-white" />
+                <span className="absolute left-0 top-0 h-7 w-7 border-l-2 border-t-2 border-white" />
+                <span className="absolute right-0 top-0 h-7 w-7 border-r-2 border-t-2 border-white" />
+                <span className="absolute bottom-0 left-0 h-7 w-7 border-b-2 border-l-2 border-white" />
+                <span className="absolute bottom-0 right-0 h-7 w-7 border-b-2 border-r-2 border-white" />
               </div>
             </>
           )}
-          <div className="absolute inset-x-0 top-0 px-4 pt-[max(0.85rem,env(safe-area-inset-top))]">
-            <button type="button" onClick={close} className="grid h-10 w-10 place-items-center rounded-full bg-white/10 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.22)] ring-1 ring-white/20 backdrop-blur-xl" aria-label="Cerrar">
-              <X size={16} strokeWidth={2.25} />
+          <div className="absolute inset-x-0 top-0 flex items-center px-4 pt-[max(0.75rem,env(safe-area-inset-top))]">
+            <button type="button" onClick={close} className="grid h-10 w-10 place-items-center rounded-full bg-black/45 text-white" aria-label="Cerrar">
+              <X size={18} />
             </button>
             {!cameraError && (
-              <p className="pointer-events-none absolute left-1/2 top-[max(0.85rem,env(safe-area-inset-top))] flex h-10 -translate-x-1/2 items-center text-[11px] font-medium uppercase tracking-[0.22em] text-white/80">
+              <p className="pointer-events-none absolute left-1/2 top-[max(0.75rem,env(safe-area-inset-top))] flex h-10 -translate-x-1/2 items-center text-[15px] font-semibold text-white">
                 Tique o cartera
               </p>
             )}
           </div>
           {cameraError ? (
-            <div className="flex h-full flex-col items-center justify-center px-6 text-center">
-              <div className="w-full max-w-xs rounded-[28px] bg-white/10 px-6 py-8 shadow-[inset_0_1px_0_rgba(255,255,255,0.16)] ring-1 ring-white/15 backdrop-blur-2xl">
-                <p className="text-[11px] font-medium uppercase tracking-[0.22em] text-white/45">Cámara</p>
-                <p className="mt-2 text-[22px] font-semibold tracking-tight">Elige la foto</p>
-                <p className="mt-2 text-sm font-medium leading-relaxed text-white/65">{cameraError} La leo y veo si es un tique o una cartera.</p>
-                <label className="mt-6 flex cursor-pointer items-center justify-center rounded-full bg-white px-6 py-3.5 text-[15px] font-semibold text-slate-950 shadow-[0_10px_30px_rgba(0,0,0,0.28)]">
-                  Elegir foto
-                  <input type="file" accept="image/*" className="sr-only" onChange={pickFile} />
-                </label>
-                <button type="button" onClick={() => { setCameraError(''); setCameraTry((value) => value + 1); }} className="mt-4 text-[13px] font-medium text-white/55">
-                  Reintentar la cámara
-                </button>
-              </div>
+            <div className="flex h-full flex-col items-center justify-center px-8 text-center">
+              <p className="text-[20px] font-semibold tracking-tight">Elige la foto</p>
+              <p className="mt-2 max-w-xs text-sm font-medium text-white/70">{cameraError} La leo y veo si es un tique o una cartera.</p>
+              <label className="mt-6 flex cursor-pointer items-center justify-center rounded-full bg-white px-6 py-3.5 text-[15px] font-semibold text-slate-950">
+                Elegir foto
+                <input type="file" accept="image/*" className="sr-only" onChange={pickFile} />
+              </label>
+              <button type="button" onClick={() => { setCameraError(''); setCameraTry((value) => value + 1); }} className="mt-4 text-sm font-semibold text-white/70">
+                Reintentar la cámara
+              </button>
             </div>
           ) : (
-            <div className="absolute inset-x-0 bottom-0 px-4 pb-[max(1.15rem,env(safe-area-inset-bottom))]">
-              <div className="mx-auto w-full max-w-sm rounded-[36px] bg-black/30 px-5 pb-4 pt-3.5 shadow-[0_24px_60px_rgba(0,0,0,0.38),inset_0_1px_0_rgba(255,255,255,0.18)] ring-1 ring-white/15 backdrop-blur-2xl">
-                <p className="text-center text-[12px] font-medium tracking-wide text-white/70">Encaja el papel o la pantalla</p>
-                <div className="mt-3 grid grid-cols-3 items-center">
-                  <span />
-                  <button type="button" onClick={take} className="mx-auto grid h-[78px] w-[78px] place-items-center rounded-full border border-white/35 bg-white/5 shadow-[0_10px_28px_rgba(0,0,0,0.28)] transition-transform duration-150 active:scale-95" aria-label="Hacer la foto">
-                    <span className="grid h-[66px] w-[66px] place-items-center rounded-full border-[2.5px] border-white">
-                      <span className="h-[52px] w-[52px] rounded-full bg-white shadow-[inset_0_1px_1px_rgba(255,255,255,1),inset_0_-8px_14px_rgba(15,23,42,0.12)]" />
-                    </span>
-                  </button>
-                  <label className="ml-auto grid h-12 w-12 cursor-pointer place-items-center rounded-full bg-white/10 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.2)] ring-1 ring-white/20 backdrop-blur-xl" aria-label="Elegir foto">
-                    <ImagePlus size={18} strokeWidth={2.15} />
-                    <input type="file" accept="image/*" className="sr-only" onChange={pickFile} />
-                  </label>
-                </div>
+            <div className="absolute inset-x-0 bottom-0 px-6 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
+              <p className="mb-4 text-center text-[13px] font-medium text-white/85">Encaja el papel o la pantalla</p>
+              <div className="mx-auto grid w-full max-w-xs grid-cols-3 items-center">
+                <span />
+                <button type="button" onClick={take} className="mx-auto grid h-[76px] w-[76px] place-items-center rounded-full border-[3px] border-white active:scale-95" aria-label="Hacer la foto">
+                  <span className="h-[60px] w-[60px] rounded-full bg-white" />
+                </button>
+                <label className="ml-auto grid h-12 w-12 cursor-pointer place-items-center rounded-full bg-black/45 text-white" aria-label="Elegir foto">
+                  <ImagePlus size={20} />
+                  <input type="file" accept="image/*" className="sr-only" onChange={pickFile} />
+                </label>
               </div>
             </div>
           )}
