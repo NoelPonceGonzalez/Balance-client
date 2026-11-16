@@ -29,7 +29,7 @@ export async function shapeLine(rows: Priced[]): Promise<{ day: string; eur: num
   const stories = await Promise.all(linked.map(async (row) => {
     const kind = row.source === 'coingecko' ? 'crypto' : 'stock';
     try {
-      const data = await api<Story>(`/api/market/story?kind=${kind}&key=${encodeURIComponent(`${row.source}:${row.quoteId}`)}&name=${encodeURIComponent(row.quoteId)}&days=30`);
+      const data = await api<Story>(`/api/market/story?kind=${kind}&key=${encodeURIComponent(`${row.source}:${row.quoteId}`)}&name=${encodeURIComponent(row.quoteId)}&days=365`);
       const days = new Map<string, number>();
       for (const point of data.series || []) {
         if (point.eur > 0) days.set(dayOf(point.at), point.eur);

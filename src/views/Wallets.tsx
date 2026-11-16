@@ -256,6 +256,7 @@ interface BookedMove {
   type: string;
   date: string;
   amount: number;
+  currency?: string;
   description?: string;
   accountId: string;
   counterAccountId?: string | null;
@@ -264,7 +265,6 @@ interface BookedMove {
 }
 
 function bookedDelta(move: BookedMove, accountId: string): number | null {
-  if (move.applyToBalances === false) return null;
   const amount = Math.abs(move.amount);
   if (!(amount > 0)) return null;
   if (move.type === 'transfer') {
@@ -280,6 +280,12 @@ function bookedDelta(move: BookedMove, accountId: string): number | null {
   if (BOOK_IN.has(move.type)) return amount;
   if (BOOK_OUT.has(move.type)) return -amount;
   return null;
+}
+
+function cashMove(move: BookedMove, currency: string): boolean {
+  if (move.applyToBalances !== false) return true;
+  if (move.type === 'buy' || move.type === 'sell' || move.type === 'fee' || move.type === 'reward' || move.type === 'transfer') return false;
+  return (move.currency || currency).toUpperCase() === currency.toUpperCase();
 }
 
 function cashPath(cash: number, events: { day: string; amount: number; absorbed?: boolean; open?: boolean }[], today: string): LinePoint[] {
@@ -381,6 +387,7 @@ export function CashChart({ points, now, hidden, base = null, spent = null, labe
   const guideId = `${fillId}-guide`;
   const [box, setBox] = useState<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(0);
+  const [draw, setDraw] = useState(false);
   const [scrub, setScrub] = useState<{ x: number; y: number; eur: number; day: string } | null>(null);
   const scrubOn = useRef(false);
   const pointerRef = useRef<number | null>(null);
@@ -460,6 +467,14 @@ export function CashChart({ points, now, hidden, base = null, spent = null, labe
     setScrub(null);
   };
   const shownDay = focus?.day || line[line.length - 1]?.day || null;
+  useEffect(() => {
+    if (!enough || draw) {
+      if (still && enough) setDraw(true);
+      return;
+    }
+    const frame = requestAnimationFrame(() => setDraw(true));
+    return () => cancelAnimationFrame(frame);
+  }, [enough, draw, still]);
   useEffect(() => { onValue?.(value); }, [onValue, value]);
   useEffect(() => { if (shownDay) onDay?.(shownDay); }, [onDay, shownDay]);
   useEffect(() => {
@@ -484,8 +499,8 @@ export function CashChart({ points, now, hidden, base = null, spent = null, labe
         const since = moved ? (focus ? formatDay(focus.day) : reference != null ? 'Desde la compra' : `Desde ${formatDay(line[0].day)}`) : '';
         if (quiet) {
           const here = showNow ? (
-            <p className={cn('text-[1.65rem] font-semibold leading-none tabular-nums', hidden ? 'text-slate-400' : toneClass(now))}>
-              {hidden ? '*****' : formatEur(now)}
+            <p className={cn('text-[1.65rem] font-semibold leading-none tabular-nums', hidden ? 'text-slate-400' : toneClass(value))}>
+              {hidden ? '*****' : formatEur(value)}
             </p>
           ) : onMove ? null : delta;
           if (!label && !here) return null;
@@ -570,7 +585,11 @@ export function CashChart({ points, now, hidden, base = null, spent = null, labe
                 strokeWidth={lined ? 1.75 : 2.5}
                 strokeLinecap="round"
                 strokeLinejoin="round"
+                pathLength={1}
+                strokeDasharray="1"
+                strokeDashoffset={still || draw ? 0 : 1}
                 clipPath={cut != null ? `url(#${pastId})` : undefined}
+                style={{ transition: still ? 'none' : 'stroke-dashoffset 1.05s cubic-bezier(0.22, 1, 0.36, 1)' }}
               />
               {cut != null && (
                 <path
@@ -1089,6 +1108,7 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
     ];
     const taken = rows.map((row) => ({ day: row.day, amount: Math.abs(row.amount), label: fold(row.label), used: false }));
     for (const move of booked) {
+      if (!cashMove(move, current.currency || 'EUR')) continue;
       const delta = bookedDelta(move, current.key);
       if (delta == null) continue;
       const day = String(move.date || '').slice(0, 10);
@@ -1512,6 +1532,7 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
                 pending={bookedFor !== current.key}
                 onValue={setLive}
                 onDay={onDay}
+                onMove={onMove}
                 hidden={hidden}
                 now={cashSide.total}
                 points={bookedFor === current.key ? cashPath(current.cash, statement.map((row) => ({ day: row.day, amount: row.amount, absorbed: row.absorbed, open: row.open })), todayKey()) : []}

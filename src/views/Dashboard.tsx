@@ -999,6 +999,7 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
   const [openWallet, setOpenWallet] = useState<string | null>(null);
   const [liveDay, setLiveDay] = useState<string | null>(null);
   const [liveMove, setLiveMove] = useState<{ amount: number; pct: number | null } | null>(null);
+  const [focusFigure, setFocusFigure] = useState<number | null>(null);
   const [paneSlot, setPaneSlot] = useState<HTMLDivElement | null>(null);
   const [error, setError] = useState('');
   const [hidden, setHidden] = useState(() => localStorage.getItem(HIDE_KEY) === '1');
@@ -1544,10 +1545,11 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
     if (!inAccount) {
       setLiveDay(null);
       setLiveMove(null);
+      setFocusFigure(null);
     }
     return () => hideChrome(false);
   }, [hideChrome, inAccount]);
-  const barValue = inAccount && openAccount ? openAccount.value : chart === 'line' && lineNow != null ? lineNow : shownWorth;
+  const barValue = inAccount && openAccount ? (focusFigure ?? openAccount.value) : chart === 'line' && lineNow != null ? lineNow : shownWorth;
   const chooseView = (next: 'general' | 'cartera') => {
     setView(next);
     setOpenWallet(null);
@@ -1773,6 +1775,7 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
             onOpen={setOpenWallet}
             onDay={setLiveDay}
             onMove={setLiveMove}
+            onFigure={setFocusFigure}
             accounts={[...ordered.map((row) => ({
               key: row.key,
               name: row.name,
