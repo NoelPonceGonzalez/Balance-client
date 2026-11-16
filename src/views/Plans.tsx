@@ -363,24 +363,30 @@ function PlanCorner({ balance, target, delta, beat }: { balance: number; target:
   return <TurnCorner frames={frames} beat={beat} />;
 }
 
-/** Lo que vale lo metido en el plan frente a lo puesto: 110 % y luego +523 €, por turnos. */
-function OutcomeCorner({ outcome, beat }: { outcome: PlanOutcome | null; beat: number }) {
+/** Cuánto del plan está comprado y, al turno siguiente, cuánto se gana o se pierde. */
+function OutcomeCorner({ outcome, fill, beat }: { outcome: PlanOutcome | null; fill: number; beat: number }) {
   if (!outcome || !(outcome.invested > 0)) return null;
   const up = outcome.result >= 0;
   const className = up ? 'text-[#16c784]' : 'text-[#ea3943]';
-  const share = `${new Intl.NumberFormat('es-ES', { maximumFractionDigits: 1 }).format(outcome.share)} %`;
+  const share = `${new Intl.NumberFormat('es-ES', { maximumFractionDigits: 1 }).format(fill)} %`;
   const money = `${up ? '+' : '−'}${wholeEur(Math.abs(outcome.result))}`;
   return <TurnCorner frames={[{ text: share, className }, { text: money, className }]} beat={beat} />;
 }
 
-function OutcomeBar({ outcome, className }: { outcome: PlanOutcome | null; className?: string }) {
+/** Parte del plan ya comprada. El color sigue siendo la ganancia o la pérdida, no este porcentaje. */
+function deployedShare(plan: PlanRow, outcome: PlanOutcome | null): number {
   const invested = outcome?.invested ?? 0;
-  const up = (outcome?.result ?? 0) >= 0;
+  const left = (plan.buys || []).reduce((sum, buy) => sum + buyLeft(buy), 0);
+  const total = invested + left;
+  return total > 0 ? (invested / total) * 100 : 0;
+}
+
+function OutcomeBar({ share, up, className }: { share: number; up: boolean; className?: string }) {
   return (
     <span className={cn('block h-1 overflow-hidden rounded-full bg-slate-900/10 dark:bg-white/15', className)}>
       <span
         className={cn('block h-full rounded-full transition-[width] duration-700 ease-out', up ? 'bg-[#16c784]' : 'bg-[#ea3943]')}
-        style={{ width: `${invested > 0 && outcome ? Math.max(0, Math.min(100, outcome.share)) : 0}%` }}
+        style={{ width: `${Math.max(0, Math.min(100, share))}%` }}
       />
     </span>
   );
@@ -1117,11 +1123,11 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
                         <MoreHorizontal size={15} />
                       </button>
                     </span>
-                    <OutcomeCorner outcome={outcome} beat={beat} />
+                    <OutcomeCorner outcome={outcome} fill={deployedShare(shown, outcome)} beat={beat} />
                   </span>
                   <span className="mt-2 block text-[11px] font-semibold text-slate-400">{kindLabel(item.plan)}</span>
                   <span className="mt-3 block whitespace-nowrap text-[1.65rem] font-semibold leading-none tabular-nums tracking-tight">{outcome ? <SoftEur value={outcome.value} whole /> : '—'}</span>
-                  <OutcomeBar outcome={outcome} className="mt-4" />
+                  <OutcomeBar share={deployedShare(shown, outcome)} up={(outcome?.result ?? 0) >= 0} className="mt-4" />
                   <span className="mt-2 block text-[13px] font-medium text-slate-400">{tandasLine(shown, outcome)}</span>
                 </div>
               );
@@ -2015,9 +2021,9 @@ function TandasHeader({ plan, outcome, loading, beat, moments, open, onToggle, o
         <p className="text-[2rem] font-semibold leading-none tabular-nums tracking-[-0.03em] text-slate-900 dark:text-white">
           {outcome ? <SoftEur value={outcome.value} whole /> : '—'}
         </p>
-        {invested > 0 ? <OutcomeCorner outcome={outcome} beat={beat} /> : <MomentTags moments={moments} onPick={onPick} />}
+        {invested > 0 ? <OutcomeCorner outcome={outcome} fill={deployedShare(plan, outcome)} beat={beat} /> : <MomentTags moments={moments} onPick={onPick} />}
       </div>
-      <HeroBar share={invested > 0 && outcome ? outcome.share : 0} tone={tone} />
+      <HeroBar share={invested > 0 ? deployedShare(plan, outcome) : 0} tone={tone} />
       <div className="mt-2.5 flex items-center justify-between gap-3 text-[12px] font-medium text-slate-400">
         <span className="min-w-0 truncate">
           {loading
