@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { ChevronRight } from 'lucide-react';
 import { PasswordReset } from '@/components/PasswordReset';
+import { PlanOffer } from '@/components/PlanOffer';
 import { Input } from '@/components/ui/Input';
 import { api } from '@/lib/api';
 import { activateCamera, activatePush, phoneStatus, type Gate } from '@/lib/device';
@@ -214,6 +215,8 @@ export function Settings({
       </div>
 
       {error && <p className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">{error}</p>}
+
+      <PlanOffer username={user.username} />
 
       <section>
         <Input
