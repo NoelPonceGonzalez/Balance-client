@@ -5,7 +5,7 @@ import { Mark } from '@/components/Mark';
 import { PasswordReset } from '@/components/PasswordReset';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { api } from '@/lib/api';
+import { api, keepGate } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import type { User as AppUser } from '@/lib/types';
 
@@ -33,8 +33,9 @@ export function LoginView({ onLogin }: { onLogin: (user: AppUser, token: string)
       }
       const path = mode === 'login' ? '/api/auth/login' : '/api/auth/register';
       const body = mode === 'login' ? { login: typedLogin, password: typedPassword } : { name, username: username.trim(), email, password };
-      const data = await api<{ token: string; user: AppUser }>(path, { method: 'POST', body: JSON.stringify(body) });
+      const data = await api<{ token: string; user: AppUser; gate?: string }>(path, { method: 'POST', body: JSON.stringify(body) });
       localStorage.setItem('pat_token', data.token);
+      keepGate(data.gate);
       onLogin(data.user, data.token);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se ha podido entrar.');
@@ -51,7 +52,7 @@ export function LoginView({ onLogin }: { onLogin: (user: AppUser, token: string)
             <Mark size={24} />
           </div>
           <h1 className="text-[1.75rem] font-semibold tracking-tight">Balance</h1>
-          <p className="mt-2 text-sm leading-6 text-slate-500">Acceso privado. La sesión permanece en este dispositivo hasta que la cierres.</p>
+          <p className="mt-2 text-sm leading-6 text-slate-500">Entras con tu usuario. Si aún no tienes código, la siguiente pantalla se queda hasta que lo guardes.</p>
           <div className="mt-5">
             <InstallApp />
           </div>

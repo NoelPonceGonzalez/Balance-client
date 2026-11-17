@@ -17,6 +17,7 @@ import type { VerbId } from '@/lib/verbs';
 import { glide, jelly, quickOut, softSpring } from '@/lib/motion';
 import { placeOnCurve, smoothPath } from '@/lib/curve';
 import { skinArtSteam } from '@/lib/skin-art';
+import { LineRangeTabs, inLineRange, type LineRangeId } from '@/components/LineRanges';
 import { cn } from '@/lib/utils';
 import type { AccountProducts, ProductSection } from '@/lib/products';
 
@@ -919,37 +920,6 @@ interface PageGroup {
 
 const SERIES_OF: Record<string, string> = { crypto: 'crypto', etf: 'valores', stock: 'valores', personal_good: 'personal_good' };
 
-type RangeId = '1S' | '1M' | '1A' | 'MAX';
-const RANGES: { id: RangeId; label: string; days: number | null }[] = [
-  { id: '1S', label: '1S', days: 7 },
-  { id: '1M', label: '1M', days: 30 },
-  { id: '1A', label: '1A', days: 365 },
-  { id: 'MAX', label: 'Máx', days: null },
-];
-
-function inRange(points: LinePoint[], range: RangeId): LinePoint[] {
-  const days = RANGES.find((item) => item.id === range)?.days;
-  if (!days || points.length < 2) return points;
-  const cutoff = new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
-  const kept = points.filter((point) => point.day.slice(0, 10) >= cutoff);
-  return kept.length >= 2 ? kept : points.slice(-2);
-}
-
-function RangeTabs({ value, onChange }: { value: RangeId; onChange: (next: RangeId) => void }) {
-  return (
-    <div className="mt-2 flex justify-between">
-      {RANGES.map((item) => {
-        const on = item.id === value;
-        return (
-          <button key={item.id} type="button" aria-pressed={on} onClick={() => onChange(item.id)} className={cn('px-1 py-1 text-[15px] transition-colors', on ? 'font-semibold text-slate-950 dark:text-white' : 'font-medium text-slate-300 dark:text-slate-600')}>
-            {item.label}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
 const card = 'rounded-[24px] border border-white/70 bg-white/80 p-4 dark:border-white/10 dark:bg-white/10';
 
 function openingPane(accounts: CarteraAccount[], openId: string | null): 0 | 1 {
@@ -974,7 +944,7 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
   const [seenOpen, setSeenOpen] = useState(openId);
   const [switching, setSwitching] = useState('');
   const [focus, setFocus] = useState('all');
-  const [range, setRange] = useState<RangeId>('MAX');
+  const [range, setRange] = useState<LineRangeId>('1A');
   const [picking, setPicking] = useState(false);
   const [searching, setSearching] = useState(false);
   const [gainMode, setGainMode] = useState<'eur' | 'pct'>('eur');
@@ -986,7 +956,7 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
     setFocus('all');
     setAsset(null);
     setLive(null);
-    setRange('MAX');
+    setRange('1A');
     setPicking(false);
     setLedger(null);
     setDetail(null);
@@ -1143,6 +1113,10 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
     });
     return walked.sort((a, b) => b.day.localeCompare(a.day) || a.label.localeCompare(b.label));
   })();
+  const cashFull = current && bookedFor === current.key
+    ? cashPath(current.cash, statement.map((row) => ({ day: row.day, amount: row.amount, absorbed: row.absorbed, open: row.open })), todayKey())
+    : [];
+  const cashRanged = inLineRange(cashFull, range);
   const cashSide = current?.sides.find((side) => side.group === 'cash') ?? null;
   const hasCash = Boolean(cashSide && current && !current.extras);
   const investmentSides = (current?.sides || []).filter((side) => side.group !== 'cash' && side.items.length > 0);
@@ -1199,20 +1173,20 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
       : pageSeries.length >= 2
         ? pageSeries
         : (ownPath && ownPath.length >= 2 ? ownPath : pageSeries);
-  const rangedPoints = pagePoints ? inRange(pagePoints, range) : null;
+  const rangedPoints = pagePoints ? inLineRange(pagePoints, range) : null;
   const assetGroup = asset ? (SERIES_OF[asset.group || ''] || pageSeriesKey || 'all') : '';
   const assetFetching = Boolean(asset && current && !current.extras);
   const assetSeries = useSeries(assetFetching && current ? current.key : null, assetGroup || 'all', asset?.id || null);
   const assetOwn = asset ? holdingPath([{ day: asset.boughtOn, cost: asset.costEur, value: asset.eur }], todayKey()) : null;
   const assetPoints = !assetFetching ? assetOwn : assetSeries == null ? null : (assetSeries.length >= 2 ? assetSeries : assetOwn);
-  const assetRanged = assetPoints ? inRange(assetPoints, range) : null;
+  const assetRanged = assetPoints ? inLineRange(assetPoints, range) : null;
   const inventory = Boolean(products?.auto);
   const skinItems = inventory ? groups.flatMap((group) => group.items) : [];
   const totalFetching = Boolean(current && !current.extras && (inventory ? !asset : !page));
   const totalSeries = useSeries(totalFetching && current ? current.key : null, inventory ? 'personal_good' : 'all');
   const totalOwn = holdingPath(investmentSides.flatMap((side) => side.items).map((item) => ({ day: item.boughtOn, cost: item.costEur, value: item.eur })), todayKey());
   const totalPoints = !totalFetching ? totalOwn : totalSeries == null ? null : (totalSeries.length >= 2 ? totalSeries : totalOwn);
-  const totalRanged = totalPoints && totalPoints.length >= 2 ? inRange(totalPoints, range) : null;
+  const totalRanged = totalPoints && totalPoints.length >= 2 ? inLineRange(totalPoints, range) : null;
   const figure = asset ? (live ?? asset.eur) : page ? (live ?? page.total) : showCash && cashSide ? (live ?? cashSide.total) : showPortfolio ? (live ?? portfolioTotal) : null;
   useEffect(() => { onFigure?.(figure); }, [figure, onFigure]);
   useEffect(() => { if (!current || ledger) onDay?.(null); }, [current, ledger, onDay]);
@@ -1525,7 +1499,7 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
           {showCash && cashSide && (
             <section className="px-1">
               <CashChart
-                key={current.key}
+                key={`${current.key}:cash:${range}`}
                 label="Disponible"
                 quiet
                 showNow
@@ -1535,7 +1509,8 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
                 onMove={onMove}
                 hidden={hidden}
                 now={cashSide.total}
-                points={bookedFor === current.key ? cashPath(current.cash, statement.map((row) => ({ day: row.day, amount: row.amount, absorbed: row.absorbed, open: row.open })), todayKey()) : []}
+                beforePlot={cashFull.length >= 2 ? <LineRangeTabs value={range} onChange={setRange} /> : undefined}
+                points={bookedFor === current.key ? cashRanged : []}
               />
             </section>
           )}
@@ -1590,6 +1565,7 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
                 onMove={onMove}
                 hidden={hidden}
                 now={asset ? asset.eur : portfolioTotal}
+                beforePlot={(asset ? assetRanged : totalRanged) ? <LineRangeTabs value={range} onChange={setRange} /> : undefined}
                 points={(asset ? assetRanged : totalRanged) || []}
                 emptyText={(asset ? assetSeries : totalSeries) ? 'La gráfica aparece cuando CSFloat mande más de un día.' : 'Cargando…'}
               />
@@ -1615,7 +1591,7 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ ...glide, delay: stillMotion() ? 0 : Math.min(index, 8) * 0.035 }}
                     >
-                      <button type="button" onClick={() => { if (!item.id) return; if (asset?.id === item.id) onEditExtra?.(item.id); else { setLive(null); setRange('MAX'); setAsset(item); } }} className="flex w-full items-center gap-3 py-3.5 text-left">
+                      <button type="button" onClick={() => { if (!item.id) return; if (asset?.id === item.id) onEditExtra?.(item.id); else { setLive(null); setRange('1A'); setAsset(item); } }} className="flex w-full items-center gap-3 py-3.5 text-left">
                         <ItemPicture round src={item.image} label={item.label} />
                         <span className="min-w-0 flex-1">
                           <span className="block truncate text-[15px] font-bold leading-tight">{item.label}</span>
@@ -1678,7 +1654,7 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
                                 <li key={option.group}>
                                   <button
                                     type="button"
-                                    onClick={() => { setFocus(option.group); setAsset(null); setLive(null); setPicking(false); setRange('MAX'); }}
+                                    onClick={() => { setFocus(option.group); setAsset(null); setLive(null); setPicking(false); setRange('1A'); }}
                                     className={cn('flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-bold', option.group === page.group ? 'bg-slate-900/[0.05] dark:bg-white/10' : '')}
                                   >
                                     <span className="truncate">{option.title}</span>
@@ -1704,7 +1680,7 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
                             hidden={hidden}
                             now={asset.eur}
                             base={range === 'MAX' ? (asset.costEur ?? null) : null}
-                            beforePlot={(assetRanged?.length || 0) >= 2 ? <RangeTabs value={range} onChange={setRange} /> : undefined}
+                            beforePlot={(assetRanged?.length || 0) >= 2 ? <LineRangeTabs value={range} onChange={setRange} /> : undefined}
                             points={assetRanged || []}
                             emptyText={assetRanged ? 'La gráfica aparece cuando haya más de un día.' : 'Cargando…'}
                           />
@@ -1722,7 +1698,7 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
                             now={page.total}
                             base={range === 'MAX' && page.gain != null && page.invested != null ? page.total - page.gain : null}
                             spent={range === 'MAX' ? page.invested : null}
-                            beforePlot={!page.empty && (pagePoints?.length || 0) >= 2 ? <RangeTabs value={range} onChange={setRange} /> : undefined}
+                            beforePlot={!page.empty && (pagePoints?.length || 0) >= 2 ? <LineRangeTabs value={range} onChange={setRange} /> : undefined}
                             points={rangedPoints || []}
                             emptyText={page.empty ? 'Todavía no hay nada aquí.' : rangedPoints ? 'La gráfica aparece cuando haya más de un día.' : 'Cargando…'}
                           />
@@ -1769,7 +1745,7 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
                               animate={{ opacity: 1, y: 0 }}
                               transition={{ ...glide, delay: stillMotion() ? 0 : Math.min(index, 8) * 0.035 }}
                             >
-                              <button type="button" onClick={() => { if (current.extras) { if (item.id) onEditExtra?.(item.id); return; } if (item.id) { setLive(null); setRange('MAX'); setAsset(item); } }} className="flex w-full items-center gap-3 py-3.5 text-left">
+                              <button type="button" onClick={() => { if (current.extras) { if (item.id) onEditExtra?.(item.id); return; } if (item.id) { setLive(null); setRange('1A'); setAsset(item); } }} className="flex w-full items-center gap-3 py-3.5 text-left">
                                 <ItemPicture round src={item.image || (current.extras ? null : page.icon)} label={item.label} />
                                 <span className="min-w-0 flex-1">
                                   <span className="block truncate text-[15px] font-bold leading-tight">{item.label}</span>
@@ -1809,7 +1785,7 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
                       now={portfolioTotal}
                       base={range === 'MAX' && portfolioInvested > 0 ? portfolioTotal - portfolioGain : null}
                       spent={range === 'MAX' && portfolioInvested > 0 ? portfolioInvested : null}
-                      beforePlot={totalRanged ? <RangeTabs value={range} onChange={setRange} /> : undefined}
+                      beforePlot={totalRanged ? <LineRangeTabs value={range} onChange={setRange} /> : undefined}
                       points={totalRanged || []}
                       emptyText={totalSeries ? 'La gráfica aparece cuando haya más de un día.' : 'Cargando…'}
                     />
@@ -1830,7 +1806,7 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
                               animate={{ opacity: 1, y: 0 }}
                               transition={{ ...glide, delay: stillMotion() ? 0 : Math.min(index, 8) * 0.04 }}
                             >
-                              <button type="button" onClick={() => { setFocus(group.group); setRange('MAX'); }} className="flex w-full items-center gap-3 py-4 text-left">
+                              <button type="button" onClick={() => { setFocus(group.group); setRange('1A'); }} className="flex w-full items-center gap-3 py-4 text-left">
                                 <span className="min-w-0 flex-1">
                                   <span className="block truncate text-[17px] font-bold leading-tight">{group.title}</span>
                                   <span className="mt-0.5 block text-sm font-medium tabular-nums text-slate-400">{money(group.total, hidden)}</span>

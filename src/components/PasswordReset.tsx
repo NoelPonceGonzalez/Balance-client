@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { Eye, EyeOff, Lock } from 'lucide-react';
-import { api } from '@/lib/api';
+import { api, keepGate } from '@/lib/api';
 import type { User } from '@/lib/types';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -44,11 +44,12 @@ export function PasswordReset({
     setLoading(true);
     setError('');
     try {
-      const data = await api<{ token: string; user: User }>('/api/auth/password/confirm', {
+      const data = await api<{ token: string; user: User; gate?: string }>('/api/auth/password/confirm', {
         method: 'POST',
         body: JSON.stringify({ email: address.trim(), code: code.trim(), password }),
       });
       localStorage.setItem('pat_token', data.token);
+      keepGate(data.gate);
       onDone?.(data.user, data.token);
       setInfo('Contraseña cambiada.');
       setPassword('');

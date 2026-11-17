@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { ChevronRight } from 'lucide-react';
+import { AppLock } from '@/components/AppLock';
 import { PasswordReset } from '@/components/PasswordReset';
 import { PlanOffer } from '@/components/PlanOffer';
 import { Input } from '@/components/ui/Input';
@@ -77,6 +78,7 @@ export function Settings({
   const [csfloat, setCsfloat] = useState(false);
   const [csfloatKey, setCsfloatKey] = useState('');
   const [csfloatNote, setCsfloatNote] = useState('');
+  const [codeOpen, setCodeOpen] = useState(false);
   const dirty = name.trim() !== user.name.trim() && name.trim().length > 0;
   const usernameClean = username.trim().toLowerCase();
   const usernameDirty = usernameClean.length > 0 && usernameClean !== (user.username || '').toLowerCase();
@@ -351,6 +353,7 @@ export function Settings({
 
       <Group title="Cuenta">
         <div className="divide-y divide-slate-100 dark:divide-white/10">
+          <Line label="Código de acceso" hint={user.lock ? 'Hace falta para ver el dinero.' : 'Cuatro números al abrir.'} onClick={() => setCodeOpen(true)} />
           <div>
             <Line
               label="Cambiar contraseña"
@@ -369,6 +372,17 @@ export function Settings({
           <Line label="Cerrar sesión" caret={false} onClick={onLogout} />
         </div>
       </Group>
+
+      {codeOpen && (
+        <div className="fixed inset-0 z-50">
+          <AppLock
+            mode={user.lock ? 'change' : 'create'}
+            onUser={onUser}
+            onOpen={() => setCodeOpen(false)}
+            onCancel={() => setCodeOpen(false)}
+          />
+        </div>
+      )}
 
       <div className="px-1">
         {erase === 'idle' ? (

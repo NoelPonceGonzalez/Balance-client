@@ -21,6 +21,7 @@ import { rankedOffers, watchListings, watchOfferSkips } from '@/components/Offer
 import { useOpenOffer } from '@/components/offer-focus';
 import type { AppNotification, DashboardData } from '@/lib/types';
 import { useHideChrome } from '@/components/Shell';
+import { LineRangeTabs, inLineRange, type LineRangeId } from '@/components/LineRanges';
 import { CashChart, Wallets, type LinePoint } from '@/views/Wallets';
 import { SkinSearch, wearName, type SkinPhase } from '@/components/SkinSearch';
 import { OriginPicker } from '@/components/OriginMark';
@@ -570,15 +571,17 @@ function useHoldingSeries(accountId: string, holdingId: string, assetClass: stri
 
 function PieceLine({ accountId, holdingId, assetClass, now }: { accountId: string; holdingId: string; assetClass: string; now: number }) {
   const points = useHoldingSeries(accountId, holdingId, assetClass);
+  const [range, setRange] = useState<LineRangeId>('1A');
   const [live, setLive] = useState<number | null>(null);
   const [day, setDay] = useState<string | null>(null);
+  const ranged = points ? inLineRange(points, range) : [];
   return (
     <div>
       <div className="flex items-baseline justify-between gap-3">
         <p className="text-[2rem] font-semibold leading-none tracking-tight tabular-nums text-slate-900 dark:text-white">{formatEur(live ?? now)}</p>
         {day && <p className="text-[13px] font-semibold text-slate-400">{formatDay(day)}</p>}
       </div>
-      <CashChart points={points ?? []} now={now} hidden={false} quiet pending={points == null} tone="ink" onValue={setLive} onDay={setDay} emptyText="" />
+      <CashChart points={ranged} now={now} hidden={false} quiet pending={points == null} tone="ink" onValue={setLive} onDay={setDay} beforePlot={points && points.length >= 2 ? <LineRangeTabs value={range} onChange={setRange} /> : undefined} emptyText="" />
     </div>
   );
 }
@@ -1004,6 +1007,7 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
   const [error, setError] = useState('');
   const [hidden, setHidden] = useState(() => localStorage.getItem(HIDE_KEY) === '1');
   const [chart, setChart] = useState<'line' | 'ring'>(() => (localStorage.getItem('pat_chart') === 'ring' ? 'ring' : 'line'));
+  const [lineRange, setLineRange] = useState<LineRangeId>('1A');
   const [lineNow, setLineNow] = useState<number | null>(null);
   const [lineDay, setLineDay] = useState<string | null>(null);
   const [lineMove, setLineMove] = useState<{ amount: number; pct: number | null } | null>(null);
@@ -1688,6 +1692,7 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
                               void api(`/api/market/skin-stars?${params}`, { method: 'DELETE' }).then(() => {
                                 setFollowedSkins((rows) => rows.filter((item) => !(item.name === row.name && item.wear === row.wear)));
                                 setFollowDrop(null);
+                                window.dispatchEvent(new Event('pat-alerts'));
                               });
                             }} className="rounded-full bg-slate-950 px-3 py-1 text-xs font-semibold text-white dark:bg-white dark:text-slate-950">Quitar</button>
                             <button type="button" onClick={() => setFollowDrop(null)} className="px-2 py-1 text-xs font-semibold text-slate-500">Cancelar</button>
@@ -1727,6 +1732,7 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
                               void api(`/api/market/tracked/${row.id}`, { method: 'DELETE' }).then(() => {
                                 setFollowedAds((rows) => rows.filter((item) => item.id !== row.id));
                                 setFollowDrop(null);
+                                window.dispatchEvent(new Event('pat-alerts'));
                               });
                             }} className="rounded-full bg-slate-950 px-3 py-1 text-xs font-semibold text-white dark:bg-white dark:text-slate-950">Quitar</button>
                             <button type="button" onClick={() => setFollowDrop(null)} className="px-2 py-1 text-xs font-semibold text-slate-500">Cancelar</button>
@@ -1928,14 +1934,16 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
 
       {chart === 'line' ? (
         <CashChart
+          key={lineRange}
           quiet
           pending={!lineReady}
           tone="ink"
           hidden={hidden}
-          points={lineReady ? (lived && lived.length >= 2 ? lived : data.series).map((point) => ({ day: point.day, eur: point.eur })) : []}
+          points={lineReady ? inLineRange((lived && lived.length >= 2 ? lived : data.series).map((point) => ({ day: point.day, eur: point.eur })), lineRange) : []}
           now={shownWorth ?? data.series[data.series.length - 1]?.eur ?? 0}
-          base={paidBase}
-          spent={paid > 0 ? paid : null}
+          base={lineRange === 'MAX' ? paidBase : null}
+          spent={lineRange === 'MAX' && paid > 0 ? paid : null}
+          beforePlot={lineReady ? <LineRangeTabs value={lineRange} onChange={setLineRange} /> : undefined}
           onValue={setLineNow}
           onDay={setLineDay}
           onMove={setLineMove}

@@ -17,6 +17,7 @@ import { formatAgo, formatDay, formatNumber, formatPct } from '@/lib/format';
 import { marketDisplay, marketMark, marketMoney, marketReady, marketToEur, MarketCurrency, useMarketCode, useRescaleAmounts } from '@/lib/marketCurrency';
 import { quickOut, softSpring } from '@/lib/motion';
 import { cn } from '@/lib/utils';
+import { LineRangeTabs, lineDays, type LineRangeId } from '@/components/LineRanges';
 import { CashChart, type LinePoint } from '@/views/Wallets';
 import type { AppNotification, MarketBoard, MarketItem, MarketPending, MarketSignal, MarketStory, MarketTapeItem, QuoteCandidate } from '@/lib/types';
 
@@ -125,15 +126,16 @@ function quoteOf(key: string): { source: 'coingecko' | 'yahoo'; externalId: stri
   return null;
 }
 
-const STORY_SPANS = [
-  { days: 7, label: '7 días' },
-  { days: 30, label: '1 mes' },
-  { days: 90, label: '3 meses' },
-  { days: 365, label: '1 año' },
-] as const;
+function inPoints(externalId?: string | null, quoteKey?: string | null): boolean {
+  return Boolean(externalId?.startsWith('^') || quoteKey?.startsWith('yahoo:^'));
+}
+
+function pointText(value: number): string {
+  return `${new Intl.NumberFormat('es-ES', { maximumFractionDigits: 2 }).format(value)} pts`;
+}
 
 function canSpan(kind: string) {
-  return kind === 'crypto' || kind === 'etf' || kind === 'stock' || kind === 'gold' || kind === 'silver' || kind === 'oil' || kind === 'copper' || kind === 'index';
+  return kind === 'crypto' || kind === 'etf' || kind === 'stock' || kind === 'gold' || kind === 'silver' || kind === 'oil' || kind === 'copper' || kind === 'index' || kind === 'cs2';
 }
 
 function stillMotion(): boolean {
@@ -540,9 +542,10 @@ function sameAlert(item: MarketSignal, note: AppNotification): boolean {
 }
 
 function ruleLine(item: MarketSignal): string {
+  const shown = (value: number) => inPoints(null, item.quoteKey) ? pointText(value) : marketMoney(value);
   const parts = [
-    item.above != null ? `Por encima de ${marketMoney(item.above)}` : '',
-    item.below != null ? `Por debajo de ${marketMoney(item.below)}` : '',
+    item.above != null ? `Por encima de ${shown(item.above)}` : '',
+    item.below != null ? `Por debajo de ${shown(item.below)}` : '',
     item.maxFloat != null ? `Float hasta ${item.maxFloat}` : '',
     item.paintSeed != null ? `Patrón ${item.paintSeed}` : '',
   ].filter(Boolean);
@@ -623,6 +626,7 @@ function AlertDesk({ items, catalog, hashes, market, onChanged }: { items: Marke
   const [pattern, setPattern] = useState('');
   const [priceWait, setPriceWait] = useState(false);
   const [dropping, setDropping] = useState<string | null>(null);
+  const [gone, setGone] = useState<Set<string>>(() => new Set());
   useRescaleAmounts(setAbove, setBelow);
 
   useEffect(() => {
@@ -651,14 +655,26 @@ function AlertDesk({ items, catalog, hashes, market, onChanged }: { items: Marke
       return;
     }
     if (createFor === 'cs2') {
-      const gloves = await api<{ results: { name: string; wears: string[]; image: string | null }[] }>(`/api/market/skins?q=${encodeURIComponent(text)}`).catch(() => ({ results: [] }));
-      setSkins(gloves.results || []);
+      try {
+        const gloves = await api<{ results: { name: string; wears: string[]; image: string | null }[] }>(`/api/market/skins?q=${encodeURIComponent(text)}`);
+        setSkins(gloves.results || []);
+        setNote('');
+      } catch (err) {
+        setSkins([]);
+        setNote(err instanceof Error ? err.message : 'La búsqueda no ha respondido.');
+      }
       setQuotes([]);
       return;
     }
-    if (createFor === 'crypto' || createFor === 'stock' || createFor === 'etf') {
-      const found = await api<{ results: QuoteCandidate[] }>(`/api/market/search?q=${encodeURIComponent(text)}&assetClass=${encodeURIComponent(createFor)}`).catch(() => ({ results: [] }));
-      setQuotes(found.results || []);
+    if (createFor === 'crypto' || createFor === 'stock' || createFor === 'etf' || createFor === 'index') {
+      try {
+        const found = await api<{ results: QuoteCandidate[] }>(`/api/market/search?q=${encodeURIComponent(text)}&assetClass=${encodeURIComponent(createFor)}`);
+        setQuotes(found.results || []);
+        setNote('');
+      } catch (err) {
+        setQuotes([]);
+        setNote(err instanceof Error ? err.message : 'La búsqueda no ha respondido.');
+      }
       setSkins([]);
       return;
     }
@@ -707,8 +723,10 @@ function AlertDesk({ items, catalog, hashes, market, onChanged }: { items: Marke
     setQuotes([]);
     setSkins([]);
     setEditing(item);
-    setAbove(item.above != null ? marketDisplay(item.above) : '');
-    setBelow(item.below != null ? marketDisplay(item.below) : '');
+    const points = inPoints(null, item.quoteKey);
+    const written = (value: number) => points ? String(Math.round(value * 100) / 100) : marketDisplay(value);
+    setAbove(item.above != null ? written(item.above) : '');
+    setBelow(item.below != null ? written(item.below) : '');
     setMaxFloat(item.maxFloat != null ? String(item.maxFloat) : '');
     setPattern(item.paintSeed != null ? String(item.paintSeed) : '');
     setDropping(null);
@@ -734,7 +752,9 @@ function AlertDesk({ items, catalog, hashes, market, onChanged }: { items: Marke
   };
 
   const save = async () => {
-    if (!picked || busy || !rateReady()) return;
+    if (!picked || busy) return;
+    const quotePoints = picked.kind === 'quote' && inPoints(picked.externalId);
+    if (!quotePoints && !rateReady()) return;
     setNote('');
     setBusy(true);
     try {
@@ -756,10 +776,10 @@ function AlertDesk({ items, catalog, hashes, market, onChanged }: { items: Marke
           body: JSON.stringify({ label: picked.name.replace(/^★\s*/, ''), marketHashName, below: price, maxFloat: cap, paintSeed: seed }),
         });
       } else {
-        const high = priced(above);
-        const low = priced(below);
+        const high = quotePoints ? amount(above) : priced(above);
+        const low = quotePoints ? amount(below) : priced(below);
         if (high == null && low == null) {
-          setNote('Pon un precio por encima, por debajo, o los dos.');
+          setNote(quotePoints ? 'Pon los puntos por encima, por debajo, o los dos.' : 'Pon un precio por encima, por debajo, o los dos.');
           return;
         }
         await api('/api/market/listen', {
@@ -776,10 +796,12 @@ function AlertDesk({ items, catalog, hashes, market, onChanged }: { items: Marke
   };
 
   const saveEdit = async () => {
-    if (!editing || busy || !rateReady()) return;
+    if (!editing || busy) return;
+    const quotePoints = editing.kind !== 'compra' && inPoints(null, editing.quoteKey);
+    if (!quotePoints && !rateReady()) return;
     setNote('');
-    const low = priced(below);
-    const high = priced(above);
+    const low = quotePoints ? amount(below) : priced(below);
+    const high = quotePoints ? amount(above) : priced(above);
     setBusy(true);
     try {
       if (editing.kind === 'compra') {
@@ -809,7 +831,7 @@ function AlertDesk({ items, catalog, hashes, market, onChanged }: { items: Marke
           return;
         }
         if (high == null && low == null) {
-          setNote('Pon un precio por encima, por debajo, o los dos.');
+          setNote(quotePoints ? 'Pon los puntos por encima, por debajo, o los dos.' : 'Pon un precio por encima, por debajo, o los dos.');
           return;
         }
         await api('/api/market/listen', {
@@ -826,10 +848,21 @@ function AlertDesk({ items, catalog, hashes, market, onChanged }: { items: Marke
   };
 
   const remove = (item: MarketSignal) => {
-    const path = item.kind === 'compra' ? `/api/market/watch/${item.id}` : `/api/market/listen/${item.id}`;
+    const key = `${item.kind}:${item.id}`;
+    setGone((current) => new Set(current).add(key));
+    setDropping(null);
+    setNote('');
+    const path = item.kind === 'compra' ? `/api/market/watch/${item.id}` : `/api/market/listen/${encodeURIComponent(item.id)}`;
     void api(path, { method: 'DELETE' }).then(() => {
       window.dispatchEvent(new Event('pat-alerts'));
       onChanged();
+    }).catch((err: Error) => {
+      setGone((current) => {
+        const next = new Set(current);
+        next.delete(key);
+        return next;
+      });
+      setNote(err.message || 'No se ha podido quitar el aviso.');
     });
   };
 
@@ -869,6 +902,11 @@ function AlertDesk({ items, catalog, hashes, market, onChanged }: { items: Marke
     setNote('');
   };
 
+  const visible = items.filter((item) => !gone.has(`${item.kind}:${item.id}`));
+  const editPoints = editing != null && inPoints(null, editing.quoteKey);
+  const editUnit = editPoints ? 'puntos' : marketMark();
+  const createPoints = picked?.kind === 'quote' && inPoints(picked.externalId);
+  const createUnit = createPoints ? 'puntos' : marketMark();
   const resultClass = 'flex w-full items-center gap-3 rounded-2xl px-2 py-2 text-left text-sm font-semibold hover:bg-slate-50 dark:hover:bg-white/5';
 
   return (
@@ -894,9 +932,9 @@ function AlertDesk({ items, catalog, hashes, market, onChanged }: { items: Marke
             <Mark image={editing.image || null} symbol={editing.name} contain={editing.kind === 'compra'} fallback={editing.kind === 'compra' ? '/platforms/cs2.svg' : null} />
             <span className="min-w-0">{editing.name}</span>
           </p>
-          <p className="text-xs font-medium text-slate-400">Ahora: {ruleLine(editing)}{editing.priceEur == null ? '' : ` · precio ${marketMoney(editing.priceEur)}`}</p>
-          {editing.kind === 'precio' && <Input label={`Avisar si pasa por encima de (${marketMark()})`} type="number" min="0" step="any" value={above} onChange={(event) => setAbove(event.target.value)} placeholder="Opcional" />}
-          <Input label={editing.kind === 'compra' ? `Avisar si alguien lo pone por debajo de (${marketMark()})` : `Avisar si baja de (${marketMark()})`} type="number" min="0" step="any" value={below} onChange={(event) => setBelow(event.target.value)} placeholder={editing.kind === 'precio' ? 'Opcional' : ''} />
+          <p className="text-xs font-medium text-slate-400">Ahora: {ruleLine(editing)}{editing.priceEur == null ? '' : ` · ${editPoints ? pointText(editing.priceEur) : `precio ${marketMoney(editing.priceEur)}`}`}</p>
+          {editing.kind === 'precio' && <Input label={`Avisar si pasa por encima de (${editUnit})`} type="number" min="0" step="any" value={above} onChange={(event) => setAbove(event.target.value)} placeholder="Opcional" />}
+          <Input label={editing.kind === 'compra' ? `Avisar si alguien lo pone por debajo de (${marketMark()})` : `Avisar si baja de (${editUnit})`} type="number" min="0" step="any" value={below} onChange={(event) => setBelow(event.target.value)} placeholder={editing.kind === 'precio' ? 'Opcional' : ''} />
           {editing.kind === 'compra' && (
             <>
               <Input label="Float máximo" type="number" min="0" max="1" step="0.0001" value={maxFloat} onChange={(event) => setMaxFloat(event.target.value)} placeholder="Opcional" />
@@ -947,14 +985,14 @@ function AlertDesk({ items, catalog, hashes, market, onChanged }: { items: Marke
 
       {pane === 'list' && !history && !editing && (
         <div className="mt-4">
-          {items.length === 0 ? (
+          {visible.length === 0 ? (
             <div className="rounded-2xl bg-slate-50 px-4 py-8 text-center dark:bg-white/5">
               <p className="text-sm font-medium text-slate-500">Todavía no tienes avisos.</p>
               <button type="button" onClick={() => openPane('create')} className="mt-3 rounded-full bg-slate-950 px-4 py-2 text-sm font-semibold text-white dark:bg-white dark:text-slate-950">Crear aviso</button>
             </div>
           ) : (
             <div className="space-y-4">
-              {groupAlerts(items, catalog).map((group) => (
+              {groupAlerts(visible, catalog).map((group) => (
                 <section key={group.id} className="space-y-2">
                   <p className="px-1 text-[13px] font-semibold text-slate-500">{group.label} · {group.items.length}</p>
                   {group.items.map((item) => {
@@ -989,6 +1027,7 @@ function AlertDesk({ items, catalog, hashes, market, onChanged }: { items: Marke
               ))}
             </div>
           )}
+          {note && <p className="mt-3 text-xs font-medium text-rose-600">{note}</p>}
           <button type="button" onClick={() => void activatePush().then(setPhone).catch((err: Error) => setPhone(err.message))} className="mt-4 text-xs font-semibold text-slate-500">Avisos en el móvil</button>
           {phone && <p className="mt-1 text-xs font-medium text-slate-500">{phone}</p>}
         </div>
@@ -1026,14 +1065,18 @@ function AlertDesk({ items, catalog, hashes, market, onChanged }: { items: Marke
                         key={item.key}
                         type="button"
                         onClick={() => {
-                          if (quote) revealPrice({ ...quote, name: item.name, symbol: item.symbol, priceEur: item.priceEur, image: item.image });
+                          if (!quote) {
+                            setNote('Ese mercado no tiene cotización todavía.');
+                            return;
+                          }
+                          revealPrice({ ...quote, name: item.name, symbol: item.symbol, priceEur: item.priceEur, image: item.image });
                         }}
                         className={resultClass}
                       >
                         <Mark image={item.image} symbol={item.symbol} />
                         <span className="min-w-0">
                           {item.name}
-                          <span className="ml-2 text-[11px] font-bold uppercase text-slate-400">{item.priceEur == null ? item.symbol : marketMoney(item.priceEur)}</span>
+                          <span className="ml-2 text-[11px] font-bold uppercase text-slate-400">{item.priceEur == null ? item.symbol : inPoints(quote?.externalId, item.key) ? pointText(item.priceEur) : marketMoney(item.priceEur)}</span>
                         </span>
                       </button>
                     );
@@ -1070,7 +1113,7 @@ function AlertDesk({ items, catalog, hashes, market, onChanged }: { items: Marke
                 <Mark image={picked.image} symbol={picked.name} contain={picked.kind === 'skin'} fallback={picked.kind === 'skin' ? '/platforms/cs2.svg' : null} />
                 <p className="min-w-0 flex-1 text-sm font-semibold">
                   {picked.name}
-                  {picked.kind === 'quote' ? <span className="mt-0.5 block text-xs font-medium text-slate-400">{picked.priceEur != null ? marketMoney(picked.priceEur) : priceWait ? 'Buscando el precio…' : 'Sin precio ahora'}</span> : null}
+                  {picked.kind === 'quote' ? <span className="mt-0.5 block text-xs font-medium text-slate-400">{picked.priceEur != null ? (createPoints ? pointText(picked.priceEur) : marketMoney(picked.priceEur)) : priceWait ? 'Buscando el precio…' : 'Sin precio ahora'}</span> : null}
                 </p>
                 {fixed.length !== 1 && (
                   <button type="button" onClick={() => setPicked(null)} className="shrink-0 text-[13px] font-semibold text-slate-500">Cambiar</button>
@@ -1083,8 +1126,8 @@ function AlertDesk({ items, catalog, hashes, market, onChanged }: { items: Marke
                   ))}
                 </div>
               )}
-              {picked.kind === 'quote' && <Input label={`Avisar si pasa por encima de (${marketMark()})`} type="number" min="0" step="any" value={above} onChange={(event) => setAbove(event.target.value)} placeholder="Opcional" />}
-              <Input label={picked.kind === 'skin' ? `Avisar si alguien lo pone por debajo de (${marketMark()})` : `Avisar si baja de (${marketMark()})`} type="number" min="0" step="any" value={below} onChange={(event) => setBelow(event.target.value)} placeholder={picked.kind === 'quote' ? 'Opcional' : ''} />
+              {picked.kind === 'quote' && <Input label={`Avisar si pasa por encima de (${createUnit})`} type="number" min="0" step="any" value={above} onChange={(event) => setAbove(event.target.value)} placeholder="Opcional" />}
+              <Input label={picked.kind === 'skin' ? `Avisar si alguien lo pone por debajo de (${marketMark()})` : `Avisar si baja de (${createUnit})`} type="number" min="0" step="any" value={below} onChange={(event) => setBelow(event.target.value)} placeholder={picked.kind === 'quote' ? 'Opcional' : ''} />
               {picked.kind === 'skin' && (
                 <>
                   <Input label="Float máximo" type="number" min="0" max="1" step="0.0001" value={maxFloat} onChange={(event) => setMaxFloat(event.target.value)} placeholder="Opcional" />
@@ -1156,7 +1199,8 @@ function PendingRow({ item, onChanged }: { item: MarketPending; onChanged: () =>
 function StoryDialog({ item, onClose }: { item: { kind: string; key: string; name: string; symbol: string; priceEur: number | null; changePct: number | null; changeLabel: string; sparkline: number[] }; onClose: () => void }) {
   const [story, setStory] = useState<MarketStory | null>(null);
   const [failed, setFailed] = useState('');
-  const [days, setDays] = useState(30);
+  const [range, setRange] = useState<LineRangeId>('1M');
+  const days = lineDays(range) ?? 365;
   const [loadedDays, setLoadedDays] = useState(30);
   const [live, setLive] = useState<number | null>(null);
   const [liveDay, setLiveDay] = useState<string | null>(null);
@@ -1198,20 +1242,7 @@ function StoryDialog({ item, onClose }: { item: { kind: string; key: string; nam
           {change != null && <span className="ml-1 text-[10px] font-bold opacity-80">{label}</span>}
         </span>
       </div>
-      {spans && (
-        <div className="mt-4 flex gap-2">
-          {STORY_SPANS.map((span) => (
-            <button
-              key={span.days}
-              type="button"
-              onClick={() => setDays(span.days)}
-              className={cn('rounded-full px-3 py-1.5 text-sm font-bold', days === span.days ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900' : 'bg-slate-100 text-slate-500 dark:bg-white/10')}
-            >
-              {span.label}
-            </button>
-          ))}
-        </div>
-      )}
+      {spans && <LineRangeTabs value={range} onChange={setRange} />}
       <div className="mt-4">
         {waiting && points.length < 2 ? <QuietLoad kind="chart" /> : points.length >= 2 ? (
           <CashChart

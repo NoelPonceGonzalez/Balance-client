@@ -78,9 +78,12 @@ export function NotificationsBell({ align = 'left', onDue, onPlan, onOffer, onLi
     };
     void tick();
     const timer = window.setInterval(() => void tick(), 20_000);
+    const onAlerts = () => { void tick(); };
+    window.addEventListener('pat-alerts', onAlerts);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
+      window.removeEventListener('pat-alerts', onAlerts);
     };
   }, [permission, open]);
 

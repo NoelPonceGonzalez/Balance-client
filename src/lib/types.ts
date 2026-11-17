@@ -5,6 +5,8 @@ export interface User {
   email: string;
   theme: 'light' | 'dark' | 'system';
   timezone: string;
+  /** El servidor ya pide código para ver el dinero. Si falta, esta versión todavía no lo tiene. */
+  lock?: boolean;
 }
 
 export interface Valued {

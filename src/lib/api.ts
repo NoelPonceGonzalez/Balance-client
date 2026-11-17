@@ -1,3 +1,9 @@
+export function keepGate(gate: string | undefined) {
+  if (!gate) return;
+  sessionStorage.setItem('pat_gate', gate);
+  sessionStorage.setItem('pat_open', '1');
+}
+
 export class ApiError extends Error {
   status: number;
   code?: string;
@@ -29,6 +35,8 @@ async function apiOnce<T>(path: string, options: RequestInit): Promise<T> {
   const headers = new Headers(options.headers);
   if (!headers.has('Content-Type') && options.body) headers.set('Content-Type', 'application/json');
   if (token) headers.set('Authorization', `Bearer ${token}`);
+  const gate = sessionStorage.getItem('pat_gate');
+  if (gate) headers.set('X-Balance-Gate', gate);
   const signal = options.signal ?? AbortSignal.timeout(options.body ? 45_000 : 20_000);
   let response: Response;
   try {
@@ -39,6 +47,10 @@ async function apiOnce<T>(path: string, options: RequestInit): Promise<T> {
   }
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
+    if (data.code === 'lock') {
+      sessionStorage.removeItem('pat_gate');
+      window.dispatchEvent(new Event('pat-lock'));
+    }
     throw new ApiError(data.error || 'No se ha podido completar.', response.status, data.code);
   }
   return data as T;

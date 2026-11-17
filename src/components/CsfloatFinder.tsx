@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { DragRow } from '@/components/DragRow';
 import { Modal } from '@/components/Modal';
 import { Input } from '@/components/ui/Input';
+import { LineRangeTabs, inLineRange, type LineRangeId } from '@/components/LineRanges';
 import { CashChart, type LinePoint } from '@/views/Wallets';
 import { api, ApiError } from '@/lib/api';
 import { formatAgo, formatDay } from '@/lib/format';
@@ -466,6 +467,7 @@ export function SkinMarket({ skin, wear }: { skin: SkinHit; wear: string }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [story, setStory] = useState<LinePoint[]>([]);
+  const [storyRange, setStoryRange] = useState<LineRangeId>('1M');
   const [storyPending, setStoryPending] = useState(true);
   const [storyNow, setStoryNow] = useState<number | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -555,13 +557,14 @@ export function SkinMarket({ skin, wear }: { skin: SkinHit; wear: string }) {
   return (
     <div className="space-y-3">
       <CashChart
-        key={`${skin.name}:${wear}`}
+        key={`${skin.name}:${wear}:${storyRange}`}
         quiet
         tall
         pending={storyPending}
         tone="ink"
         hidden={false}
-        points={storyPending ? [] : story}
+        beforePlot={<LineRangeTabs value={storyRange} onChange={setStoryRange} />}
+        points={storyPending ? [] : inLineRange(story, storyRange)}
         now={chartNow}
         onValue={setStoryNow}
         emptyText={story.length ? '' : 'La línea sale cuando CSFloat manda las ventas de esta skin.'}

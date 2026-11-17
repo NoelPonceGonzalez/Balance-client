@@ -13,6 +13,7 @@ import { Movements } from '@/views/Movements';
 import { Plans } from '@/views/Plans';
 import { Settings } from '@/views/Settings';
 import { JoinTrip } from '@/views/TripPlan';
+import { AppLock } from '@/components/AppLock';
 import { DeviceAccess } from '@/components/DeviceAccess';
 import { TicketCam } from '@/components/TicketCam';
 
@@ -43,6 +44,7 @@ export default function App() {
   const [focusTick, setFocusTick] = useState(0);
   const [focusListing, setFocusListing] = useState<string | null>(null);
   const [focusSkin, setFocusSkin] = useState<{ name: string; wear: string; label: string; image: string | null } | null>(null);
+  const [opened, setOpened] = useState(() => sessionStorage.getItem('pat_open') === '1' && Boolean(sessionStorage.getItem('pat_gate')));
 
   useEffect(() => {
     const openPlan = (event: Event) => {
@@ -125,6 +127,30 @@ export default function App() {
     sessionStorage.setItem('pat_section', section);
   }, [section]);
 
+  const bookOpen = !user || user.lock == null || (user.lock === true && opened);
+
+  useEffect(() => {
+    const lock = () => {
+      if (document.visibilityState !== 'hidden') return;
+      sessionStorage.removeItem('pat_gate');
+      sessionStorage.removeItem('pat_open');
+      setOpened(false);
+      forgetWallets();
+    };
+    const onLock = () => {
+      sessionStorage.removeItem('pat_gate');
+      sessionStorage.removeItem('pat_open');
+      setOpened(false);
+      forgetWallets();
+    };
+    document.addEventListener('visibilitychange', lock);
+    window.addEventListener('pat-lock', onLock);
+    return () => {
+      document.removeEventListener('visibilitychange', lock);
+      window.removeEventListener('pat-lock', onLock);
+    };
+  }, []);
+
   useEffect(() => {
     if (!user) {
       forgetWallets();
@@ -133,8 +159,9 @@ export default function App() {
       return;
     }
     applyTheme(user.theme || 'system');
+    if (!bookOpen) return;
     void loadWallets().catch(() => undefined);
-  }, [user]);
+  }, [user, bookOpen]);
 
   const changeHero = (ms: number) => {
     setHeroMs(ms);
@@ -144,6 +171,9 @@ export default function App() {
   const logout = () => {
     void disablePhonePush().catch(() => undefined).finally(() => {
       localStorage.removeItem('pat_token');
+      sessionStorage.removeItem('pat_gate');
+      sessionStorage.removeItem('pat_open');
+      setOpened(false);
       setUser(null);
     });
   };
@@ -171,7 +201,21 @@ export default function App() {
       </div>
     );
   }
-  if (!user) return <LoginView onLogin={(next) => { setOffline(false); setSection('dashboard'); setHome((value) => value + 1); setUser(next); }} />;
+  if (!user) return <LoginView onLogin={(next) => { setOffline(false); setOpened(sessionStorage.getItem('pat_open') === '1'); setSection('dashboard'); setHome((value) => value + 1); setUser(next); }} />;
+
+  if (user.lock === false) {
+    return <AppLock mode="create" onUser={setUser} onOpen={() => setOpened(true)} />;
+  }
+
+  if (user.lock === true && !bookOpen) {
+    return (
+      <AppLock
+        mode="open"
+        onUser={setUser}
+        onOpen={() => setOpened(true)}
+      />
+    );
+  }
 
   return (
     <Shell
