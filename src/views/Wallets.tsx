@@ -89,6 +89,7 @@ export interface CarteraAccount {
   tracking?: string;
   currency?: string;
   balance?: number;
+  pricedOn?: string | null;
 }
 
 interface WalletEntry {
@@ -1451,6 +1452,11 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
               <span className="mt-2 block text-[11px] font-semibold text-slate-400">
                 {(account.sides || []).map((side) => side.title).join(' · ') || 'Sin desglose'}
               </span>
+              {account.pricedOn && (
+                <span className="mt-1 block text-[11px] font-semibold text-slate-400">
+                  {account.tracking === 'positions' ? 'Efectivo' : 'Cifra'} del {formatDay(account.pricedOn)}
+                </span>
+              )}
             </motion.button>
           ))}
         </div>
@@ -1512,6 +1518,9 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
                 beforePlot={cashFull.length >= 2 ? <LineRangeTabs value={range} onChange={setRange} /> : undefined}
                 points={bookedFor === current.key ? cashRanged : []}
               />
+              {current.pricedOn && (
+                <p className="mt-2 text-[13px] font-medium text-slate-400">Efectivo del {formatDay(current.pricedOn)}. Un movimiento de ese día o anterior se guarda para la renta y no vuelve a restar esta cifra.</p>
+              )}
             </section>
           )}
           {showCash && cashSide && (
@@ -1849,6 +1858,7 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
             tracking: current.tracking || (current.sides.some((side) => side.group !== 'cash') ? 'positions' : 'balance'),
             currency: current.currency || 'EUR',
             balance: current.balance ?? current.cash,
+            pricedOn: current.pricedOn,
           }]}
           pieces={(page && !showCash ? page.items : current.sides.flatMap((side) => side.items)).flatMap((item) => item.id ? [{ id: item.id, accountId: current.key, name: item.label }] : [])}
           accountId={current.key}

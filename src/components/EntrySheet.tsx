@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/Button';
 import { Field, Input, fieldClass } from '@/components/ui/Input';
 import { Modal } from '@/components/Modal';
 import { api, ApiError } from '@/lib/api';
+import { formatDay } from '@/lib/format';
 import { CATEGORIES } from '@/lib/labels';
 import { verbNeedsPiece, verbsFor, type VerbId } from '@/lib/verbs';
 import { cn } from '@/lib/utils';
@@ -14,6 +15,7 @@ export interface SheetAccount {
   tracking: string;
   currency: string;
   balance: number;
+  pricedOn?: string | null;
 }
 
 export interface SheetPiece {
@@ -40,6 +42,7 @@ interface Props {
     otherHoldingId: string;
     quantity: string;
     otherQuantity: string;
+    applyToBalances?: boolean;
   };
   onClose: () => void;
   onSaved: () => Promise<void> | void;
@@ -61,6 +64,7 @@ export function EntrySheet({ accounts, pieces, accountId, verb, allowed, editing
   const [error, setError] = useState('');
   const [duplicate, setDuplicate] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [choice, setChoice] = useState<boolean | null>(editing && initial?.applyToBalances != null ? initial.applyToBalances : null);
   const site = accounts.find((item) => item.id === siteId) || accounts[0];
   const allVerbs = site ? verbsFor(site.kind, site.tracking) : [];
   const narrowed = allowed?.length ? allVerbs.filter((item) => allowed.includes(item.id)) : allVerbs;
@@ -69,6 +73,11 @@ export function EntrySheet({ accounts, pieces, accountId, verb, allowed, editing
   const mine = useMemo(() => pieces.filter((item) => item.accountId === site?.id), [pieces, site?.id]);
   const needsPiece = verbNeedsPiece(active);
   const balanceVerb = active === 'balance' && !editing;
+  const moveDay = (extra.date || today()).slice(0, 10);
+  const pricedDay = (site?.pricedOn || '').slice(0, 10);
+  const alreadyInside = Boolean(pricedDay && moveDay <= pricedDay);
+  const eur = (site?.currency || 'EUR').toUpperCase() === 'EUR';
+  const apply = eur && (active === 'balance' || (choice != null ? choice : !alreadyInside));
 
   const post = async (body: Record<string, unknown>, confirmDuplicate: boolean) => {
     const payload = { ...body, confirmDuplicate };
@@ -90,7 +99,7 @@ export function EntrySheet({ accounts, pieces, accountId, verb, allowed, editing
       description: extra.description,
       accountId: site.id,
       fee,
-      applyToBalances: (site.currency || 'EUR') === 'EUR',
+      applyToBalances: apply,
     };
     try {
       if (!(value > 0) && active !== 'add' && active !== 'remove') throw new Error('Escribe el importe.');
@@ -178,10 +187,24 @@ export function EntrySheet({ accounts, pieces, accountId, verb, allowed, editing
             </select>
           </Field>
         )}
+        <Input label="Fecha" type="date" value={extra.date} onChange={(event) => setExtra({ ...extra, date: event.target.value })} />
+        {eur && active !== 'balance' && (
+          <label className="flex items-start gap-3 rounded-[20px] bg-slate-100 px-4 py-3 text-[13px] font-medium leading-snug text-slate-600 dark:bg-white/10 dark:text-slate-300">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={apply}
+              onChange={(event) => setChoice(event.target.checked)}
+            />
+            <span>
+              {pricedDay ? `El efectivo es del ${formatDay(pricedDay)}. ` : ''}
+              {apply ? 'Se guarda para la renta y también cambia el saldo.' : 'Se guarda para la renta y no vuelve a cambiar el saldo ni la pieza.'}
+            </span>
+          </label>
+        )}
         <button type="button" onClick={() => setMore((value) => !value)} className="text-left text-sm font-semibold text-slate-400">{more ? 'Menos' : 'Más'}</button>
         {more && (
           <div className="grid gap-3">
-            <Input label="Fecha" type="date" value={extra.date} onChange={(event) => setExtra({ ...extra, date: event.target.value })} />
             <Field label="Categoría">
               <input list="entry-categories" className={fieldClass} value={extra.category} onChange={(event) => setExtra({ ...extra, category: event.target.value })} />
               <datalist id="entry-categories">{CATEGORIES.map((item) => <option key={item} value={item} />)}</datalist>

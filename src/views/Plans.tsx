@@ -16,6 +16,7 @@ import { planImageFileName, renderPlanPng } from '@/lib/plan-image';
 import { accountProducts } from '@/lib/products';
 import { cn, docId } from '@/lib/utils';
 import type { AccountRow, PlanForecast, PlanInvest, PlanMonthLine, PlanMonthView, PlanRow, TripSplit } from '@/lib/types';
+import { PlanTrial } from '@/components/PlanTrial';
 import { TripFace, TripPlan } from '@/views/TripPlan';
 import { assetLabel, buyLeft, CoinMark, coinMoments, fillPlan, InvestPlan, INVEST_ASSETS, localInvest, MOMENT_LABEL, MOMENT_TONE, planOutcome, usePlanCoins, wholeEur, type CoinMoment, type PlanOutcome } from '@/components/InvestPlan';
 
@@ -1013,6 +1014,11 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
               </HeroCard>
             )}
           </div>
+        </div>
+      )}
+      {plan && plan.kind === 'liquidez' && !tandas && (
+        <div className="flex justify-end px-1">
+          <PlanTrial id={docId(plan)} target={plan.targetAmount} arrival={forecast?.estimatedDate ?? null} />
         </div>
       )}
       {error && <p className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">{error}</p>}

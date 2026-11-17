@@ -1002,7 +1002,7 @@ export function InvestPlan({ plan, invest, serverReady, coins, focus, showCoins 
       )}
       {buying && (
         <EntrySheet
-          accounts={coins.accounts.filter((account) => !account.archived).map((account) => ({ id: String(account._id), name: account.name, kind: account.kind, tracking: account.tracking, currency: account.currency, balance: account.balance }))}
+          accounts={coins.accounts.filter((account) => !account.archived).map((account) => ({ id: String(account._id), name: account.name, kind: account.kind, tracking: account.tracking, currency: account.currency, balance: account.balance, pricedOn: account.balanceUpdatedAt || account.updatedAt || null }))}
           pieces={coins.holdings.map((item) => ({ id: String(item._id), accountId: String(item.accountId), name: item.name }))}
           accountId={accountId}
           verb="buy"

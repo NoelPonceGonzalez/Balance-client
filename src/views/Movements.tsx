@@ -310,7 +310,7 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-[15px] font-semibold">{titleOf(row)}</span>
                         <span className="mt-0.5 block truncate text-[12px] font-medium text-slate-400">
-                          {many ? `${group.rows.length} apuntes · ${nameOf(row.accountId)}` : `${nameOf(row.accountId)} · ${kindOf(row)}`}
+                          {many ? `${group.rows.length} apuntes · ${nameOf(row.accountId)}` : `${nameOf(row.accountId)} · ${kindOf(row)}${row.applyToBalances === false ? ' · guardado para la renta' : ''}`}
                         </span>
                       </span>
                       <span className={cn('shrink-0 text-right text-[15px] font-semibold tabular-nums', toneOf(row))}>
@@ -352,7 +352,7 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
       )}
       {draft && (
         <EntrySheet
-          accounts={accounts.filter((account) => !account.archived).map((account) => ({ id: docId(account), name: account.name, kind: account.kind, tracking: account.tracking, currency: account.currency, balance: account.balance }))}
+          accounts={accounts.filter((account) => !account.archived).map((account) => ({ id: docId(account), name: account.name, kind: account.kind, tracking: account.tracking, currency: account.currency, balance: account.balance, pricedOn: account.balanceUpdatedAt || account.updatedAt || null }))}
           pieces={holdings.map((item) => ({ id: docId(item), accountId: String(item.accountId), name: item.name }))}
           accountId={draft.accountId}
           verb={verbFromType(draft.type, draft.direction, draft.holdingId)}
@@ -368,6 +368,7 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
             otherHoldingId: '',
             quantity: draft.quantity,
             otherQuantity: '',
+            applyToBalances: draft.applyToBalances,
           }}
           onClose={() => { setDraft(null); setEditing(null); }}
           onSaved={load}
