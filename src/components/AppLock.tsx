@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'motion/react';
-import { Delete } from 'lucide-react';
+import { ArrowLeft, ChevronRight, Fingerprint } from 'lucide-react';
+import { startAuthentication, startRegistration } from '@simplewebauthn/browser';
+import type { AuthenticationResponseJSON, PublicKeyCredentialCreationOptionsJSON, PublicKeyCredentialRequestOptionsJSON, RegistrationResponseJSON } from '@simplewebauthn/browser';
 import { api, keepGate } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import type { User } from '@/lib/types';
@@ -34,6 +36,7 @@ export function AppLock({
   const [busy, setBusy] = useState(false);
   const [shake, setShake] = useState(0);
   const [passed, setPassed] = useState(false);
+  const [bio, setBio] = useState(false);
 
   const digitsRef = useRef('');
   const stepRef = useRef<Step>(mode === 'create' ? 'fresh' : 'pin');
@@ -42,11 +45,69 @@ export function AppLock({
   const forgotRef = useRef(false);
   const busyRef = useRef(false);
   const passedRef = useRef(false);
+  const bioRef = useRef(false);
+  const hasPasskeyRef = useRef(false);
   const openTimer = useRef(0);
   const handledAt = useRef(0);
   const pushRef = useRef<(key: string) => void>(() => undefined);
 
   useEffect(() => () => window.clearTimeout(openTimer.current), []);
+
+  useEffect(() => {
+    const platform = window.PublicKeyCredential?.isUserVerifyingPlatformAuthenticatorAvailable;
+    if (!platform) return;
+    void platform.call(window.PublicKeyCredential).then((ok) => {
+      bioRef.current = ok;
+      setBio(ok);
+    }).catch(() => undefined);
+    void api<{ user: User }>('/api/auth/me').then((data) => {
+      hasPasskeyRef.current = Boolean(data.user.passkey);
+    }).catch(() => undefined);
+  }, []);
+
+  const offerPasskey = async () => {
+    if (!bioRef.current || hasPasskeyRef.current) return;
+    try {
+      const options = await api<PublicKeyCredentialCreationOptionsJSON>('/api/auth/passkey/register/options', { method: 'POST' });
+      const credential = await startRegistration({ optionsJSON: options });
+      const saved = await api<{ user: User }>('/api/auth/passkey/register', { method: 'POST', body: JSON.stringify(credential satisfies RegistrationResponseJSON) });
+      hasPasskeyRef.current = true;
+      onUser?.(saved.user);
+    } catch {
+      // Si cancelan la huella, el código ya está aceptado.
+    }
+  };
+
+  const usePasskey = async () => {
+    if (busyRef.current || passedRef.current) return;
+    if (!hasPasskeyRef.current) {
+      setError('Entra con el código. Luego este teléfono guarda la huella.');
+      return;
+    }
+    busyRef.current = true;
+    setBusy(true);
+    setError('');
+    try {
+      const options = await api<PublicKeyCredentialRequestOptionsJSON>('/api/auth/passkey/options', { method: 'POST' });
+      const credential = await startAuthentication({ optionsJSON: options });
+      const data = await api<{ gate: string }>('/api/auth/passkey/open', {
+        method: 'POST',
+        body: JSON.stringify(credential satisfies AuthenticationResponseJSON),
+      });
+      remember(data.gate);
+      reveal();
+    } catch (err) {
+      const name = err && typeof err === 'object' && 'name' in err ? String((err as { name?: string }).name) : '';
+      if (name !== 'NotAllowedError' && name !== 'AbortError') {
+        setError(err instanceof Error ? err.message : 'No se ha podido usar la huella.');
+      }
+    } finally {
+      if (!passedRef.current) {
+        busyRef.current = false;
+        setBusy(false);
+      }
+    }
+  };
 
   const reveal = () => {
     passedRef.current = true;
@@ -86,6 +147,7 @@ export function AppLock({
       if (mode === 'open' && !forgotRef.current) {
         const data = await api<{ gate: string }>('/api/auth/lock/open', { method: 'POST', body: JSON.stringify({ pin }) });
         remember(data.gate);
+        await offerPasskey();
         reveal();
         return;
       }
@@ -96,6 +158,7 @@ export function AppLock({
         });
         remember(data.gate);
         onUser?.(data.user);
+        await offerPasskey();
         reveal();
         return;
       }
@@ -105,6 +168,7 @@ export function AppLock({
       });
       remember(data.gate);
       onUser?.(data.user);
+      await offerPasskey();
       reveal();
     } catch (err) {
       writeDigits('');
@@ -191,18 +255,17 @@ export function AppLock({
   const reduceMotion = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   const screen = (
-    <div data-lock-root className="fixed inset-0 z-[80] grid min-h-dvh place-items-center overflow-hidden bg-[#f7f4ee] px-6 text-[#1c1915] dark:bg-[#0c0b0a] dark:text-[#f6f1e8]">
-      <div aria-hidden className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(255,255,255,0.9),transparent_48%)] dark:bg-[radial-gradient(ellipse_at_top,rgba(232,214,180,0.14),transparent_46%)]" />
-      <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-48 bg-[radial-gradient(ellipse_at_bottom,rgba(28,25,21,0.05),transparent_70%)] dark:bg-[radial-gradient(ellipse_at_bottom,rgba(0,0,0,0.45),transparent_70%)]" />
-      <div className={cn('relative w-full max-w-[22rem] pb-4 transition-opacity duration-500', passed && '[&_.lock-pad]:opacity-35')}>
-        <motion.div layout className="flex items-center justify-center">
+    <div data-lock-root className="fixed inset-0 z-[80] flex min-h-dvh flex-col overflow-hidden bg-[#f6f3ee] px-7 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-[max(3.25rem,env(safe-area-inset-top))] text-[#1c1915] dark:bg-[#0c0b0a] dark:text-[#f6f1e8]">
+      <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-64 bg-[radial-gradient(ellipse_at_top,rgba(255,252,246,0.95),transparent_70%)] dark:bg-[radial-gradient(ellipse_at_top,rgba(232,214,180,0.16),transparent_62%)]" />
+      <div className={cn('relative flex min-h-0 flex-1 flex-col', passed && '[&_.lock-pad]:opacity-30')}>
+        <motion.div layout className="flex items-center gap-3">
           <motion.div
             layout
-            className="grid h-14 w-14 shrink-0 place-items-center rounded-[1.15rem] bg-[#1c1915] text-[#f6f1e8] shadow-[0_14px_30px_rgba(28,25,21,0.14)] dark:bg-[#f4efe6] dark:text-[#16140f] dark:shadow-[0_18px_40px_rgba(0,0,0,0.45)]"
+            className="grid h-12 w-12 shrink-0 place-items-center rounded-[1.15rem] bg-[#1c1915] text-[#f6f1e8] shadow-[0_12px_28px_rgba(28,25,21,0.16)] dark:bg-[#f4efe6] dark:text-[#16140f] dark:shadow-[0_16px_36px_rgba(0,0,0,0.4)]"
             animate={passed ? { scale: 1.04 } : { scale: 1 }}
             transition={reduceMotion ? { duration: 0 } : { type: 'spring', stiffness: 260, damping: 18 }}
           >
-            <Mark size={24} />
+            <Mark size={22} />
           </motion.div>
           <AnimatePresence>
             {passed && (
@@ -214,7 +277,7 @@ export function AppLock({
                 transition={reduceMotion ? { duration: 0 } : { type: 'spring', stiffness: 380, damping: 24 }}
                 aria-hidden
               >
-                <span className="absolute inset-0 -z-10 rounded-full bg-[#1c1915]/10 blur-md dark:bg-[#e6d3ae]/25" />
+                <span className="absolute inset-0 -z-10 rounded-full bg-[#1c1915]/10 blur-md dark:bg-[#e6d3ae]/30" />
                 <svg width="40" height="40" viewBox="0 0 40 40" fill="none">
                   <motion.circle
                     cx="20"
@@ -242,14 +305,48 @@ export function AppLock({
               </motion.div>
             )}
           </AnimatePresence>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-[#8a8175] dark:text-[#a89880]">Balance</p>
         </motion.div>
-        <p className="mt-7 text-center text-[11px] font-semibold uppercase tracking-[0.32em] text-[#8a8175] dark:text-[#a89880]">Balance</p>
-        <h1 className="mt-3 text-center text-[2rem] font-semibold leading-none tracking-tight">{title}</h1>
-        <p className="mx-auto mt-3 max-w-[18rem] text-center text-[15px] leading-6 text-[#8a8175] dark:text-[#9c9184]">{hint}</p>
-        <div className="lock-pad transition-opacity duration-500">
+        <h1 className="mt-8 text-left text-[2.05rem] font-semibold leading-none tracking-tight">{title}</h1>
+        <p className="mt-3 max-w-[18rem] text-left text-[15px] leading-6 text-[#8a8175] dark:text-[#9c9184]">{hint}</p>
+        <div className="lock-pad flex min-h-0 flex-1 flex-col transition-opacity duration-500">
+          <div className="flex flex-1 flex-col items-center justify-center py-8">
+            {step !== 'password' && (
+              <div key={shake} className={cn('flex justify-center gap-5', shake > 0 && error && 'lock-shake')} aria-live="polite" aria-label={`${digits.length} de 4`}>
+                {Array.from({ length: 4 }, (_, index) => (
+                  <span
+                    key={index}
+                    className={cn(
+                      'h-3 w-3 rounded-full transition-all duration-150',
+                      index < digits.length ? 'scale-100 bg-[#1c1915] dark:bg-[#f4efe6] dark:shadow-[0_0_12px_rgba(244,239,230,0.45)]' : 'scale-90 bg-[#d9d1c5] dark:bg-[#3a342c]',
+                    )}
+                  />
+                ))}
+              </div>
+            )}
+            {mode === 'open' && !forgot && !passed && step !== 'password' && (
+              <button
+                type="button"
+                onClick={() => {
+                  forgotRef.current = true;
+                  setForgot(true);
+                  setError('');
+                  freshRef.current = '';
+                  currentRef.current = '';
+                  writeDigits('');
+                  writeStep('fresh');
+                }}
+                className="mt-7 inline-flex items-center gap-1 text-[15px] text-[#8a8175] dark:text-[#9c9184]"
+              >
+                He olvidado el código
+                <ChevronRight size={16} />
+              </button>
+            )}
+            {error && <p className="mt-5 text-center text-sm font-medium text-rose-600">{error}</p>}
+          </div>
           {step === 'password' ? (
             <form
-              className="mt-9 space-y-4"
+              className="space-y-4"
               onSubmit={(event) => {
                 event.preventDefault();
                 if (passedRef.current || password.trim().length < 8 || freshRef.current.length !== 4) return;
@@ -275,89 +372,67 @@ export function AppLock({
               </button>
             </form>
           ) : (
-            <>
-              <div key={shake} className={cn('mt-9 flex justify-center gap-[1.15rem]', shake > 0 && error && 'lock-shake')} aria-live="polite" aria-label={`${digits.length} de 4`}>
-                {Array.from({ length: 4 }, (_, index) => (
-                  <span
-                    key={index}
-                    className={cn(
-                      'h-4 w-4 rounded-full transition-all duration-150',
-                      index < digits.length
-                        ? 'scale-100 bg-[#1c1915] dark:bg-[#f4efe6] dark:shadow-[0_0_12px_rgba(244,239,230,0.35)]'
-                        : 'scale-100 bg-transparent ring-1 ring-[#1c1915]/25 dark:ring-[#f4efe6]/35',
-                    )}
-                  />
-                ))}
-              </div>
-              <div className="mx-auto mt-10 grid w-fit grid-cols-3 gap-x-5 gap-y-4">
-                {KEYS.map((key) => {
-                  if (!key) return <span key="hueco" />;
-                  const erase = key === 'borrar';
+            <div className="grid grid-cols-3">
+              {KEYS.map((key) => {
+                if (!key) {
+                  if (!bio) return <span key="hueco" />;
                   return (
                     <button
-                      key={key}
+                      key="huella"
                       type="button"
-                      disabled={busy}
-                      aria-label={erase ? 'Borrar' : key}
-                      onPointerDown={(event) => {
-                        if (event.button !== 0) return;
-                        event.preventDefault();
-                        tap(key, 'pointer');
-                      }}
-                      onClick={() => tap(key, 'click')}
-                      className={cn(
-                        'grid h-[4.55rem] w-[4.55rem] touch-manipulation select-none place-items-center rounded-full text-[1.95rem] font-light tabular-nums leading-none transition-transform duration-100 active:scale-[0.94] disabled:opacity-40',
-                        erase
-                          ? 'border border-[#1c1915]/20 bg-transparent text-[#6d655c] dark:border-transparent dark:bg-[#1a1714] dark:text-[#cbbfa8] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]'
-                          : 'border-[1.5px] border-[#1c1915] bg-transparent text-[#1c1915] active:bg-[#1c1915]/5 dark:border-transparent dark:bg-[#2c2823] dark:text-[#f7f2ea] dark:shadow-[inset_0_1px_0_rgba(255,244,220,0.22),0_10px_22px_rgba(0,0,0,0.32)] dark:ring-1 dark:ring-[#f6f1e8]/18',
-                      )}
+                      disabled={busy || passed}
+                      aria-label="Huella"
+                      onClick={() => void usePasskey()}
+                      className="grid h-[4.6rem] touch-manipulation place-items-center text-[#1c1915] active:opacity-40 disabled:opacity-40 dark:text-[#e6d3ae]"
                     >
-                      {erase ? <Delete size={22} strokeWidth={1.75} /> : key}
+                      <span className="grid h-[3.35rem] w-[3.35rem] place-items-center rounded-full ring-1 ring-[#1c1915]/18 dark:ring-[#e6d3ae]/45">
+                        <Fingerprint size={26} strokeWidth={1.4} />
+                      </span>
                     </button>
                   );
-                })}
-              </div>
-            </>
+                }
+                const erase = key === 'borrar';
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    disabled={busy}
+                    aria-label={erase ? 'Borrar' : key}
+                    onPointerDown={(event) => {
+                      if (event.button !== 0) return;
+                      event.preventDefault();
+                      tap(key, 'pointer');
+                    }}
+                    onClick={() => tap(key, 'click')}
+                    className="grid h-[4.6rem] touch-manipulation select-none place-items-center text-[1.95rem] font-light tabular-nums leading-none tracking-tight text-[#1c1915] active:opacity-40 disabled:opacity-40 dark:text-[#f6f1e8]"
+                  >
+                    {erase ? <ArrowLeft size={26} strokeWidth={1.75} /> : key}
+                  </button>
+                );
+              })}
+            </div>
           )}
-          {error && <p className="mt-5 text-center text-sm font-medium text-rose-700 dark:text-[#e7a0a0]">{error}</p>}
-          <div className="mt-7 flex flex-col items-center gap-3">
-            {mode === 'open' && !forgot && !passed && (
-              <button
-                type="button"
-                onClick={() => {
-                  forgotRef.current = true;
-                  setForgot(true);
-                  setError('');
-                  freshRef.current = '';
-                  currentRef.current = '';
-                  writeDigits('');
-                  writeStep('fresh');
-                }}
-                className="text-sm font-medium text-[#8a8175] dark:text-[#9c9184]"
-              >
-                He olvidado el código
-              </button>
-            )}
-            {forgot && step === 'password' && !passed && (
-              <button
-                type="button"
-                onClick={() => {
-                  forgotRef.current = false;
-                  setForgot(false);
-                  freshRef.current = '';
-                  writeDigits('');
-                  writeStep('pin');
-                  setError('');
-                }}
-                className="text-sm font-medium text-[#8a8175] dark:text-[#9c9184]"
-              >
-                Volver al código
-              </button>
-            )}
-            {onCancel && !passed && (
-              <button type="button" onClick={onCancel} className="text-sm font-medium text-[#8a8175] dark:text-[#9c9184]">Cancelar</button>
-            )}
-          </div>
+          {onCancel && !passed && step !== 'password' && (
+            <button type="button" onClick={onCancel} aria-label="Cancelar" className="mt-1 grid h-12 w-12 place-items-center rounded-2xl bg-[#1c1915]/[0.05] text-[#1c1915] active:opacity-60 dark:bg-white/[0.06] dark:text-[#f6f1e8]">
+              <ArrowLeft size={20} strokeWidth={1.75} />
+            </button>
+          )}
+          {forgot && step === 'password' && !passed && (
+            <button
+              type="button"
+              onClick={() => {
+                forgotRef.current = false;
+                setForgot(false);
+                freshRef.current = '';
+                writeDigits('');
+                writeStep('pin');
+                setError('');
+              }}
+              className="mt-6 text-[15px] text-[#8a8175] dark:text-[#9c9184]"
+            >
+              Volver al código
+            </button>
+          )}
         </div>
       </div>
     </div>

@@ -7,6 +7,8 @@ export interface User {
   timezone: string;
   /** El servidor ya pide código para ver el dinero. Si falta, esta versión todavía no lo tiene. */
   lock?: boolean;
+  /** Este usuario ya guardó la huella en algún teléfono. */
+  passkey?: boolean;
 }
 
 export interface Valued {
