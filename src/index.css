@@ -271,9 +271,21 @@ html.dark .quiet-bone {
   50% { opacity: 1; }
 }
 
+@keyframes lock-shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-6px); }
+  50% { transform: translateX(6px); }
+  75% { transform: translateX(-3px); }
+}
+
+.lock-shake {
+  animation: lock-shake 0.34s ease-in-out;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .quiet-bone,
   .quiet-mark,
+  .lock-shake,
   .hold-pop,
   .hold-menu,
   .plan-rise,
