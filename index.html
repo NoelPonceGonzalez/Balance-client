@@ -46,9 +46,9 @@
         height: 48px;
         margin: 0 auto;
         border-radius: 1.15rem;
-        background: #1c1915;
-        color: #f6f1e8;
-        box-shadow: 0 12px 28px rgba(28, 25, 21, 0.16);
+        background: #ffffff;
+        color: #111111;
+        box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08), 0 12px 28px rgba(0, 0, 0, 0.08);
         animation: boot-breathe 2.2s ease-in-out infinite;
       }
       .boot-name {
@@ -83,12 +83,10 @@
       @media (prefers-color-scheme: dark) {
         html, body, #boot { background: #0c0b0a; color: #f6f1e8; }
         #boot::before { background: radial-gradient(ellipse at top, rgba(232, 214, 180, 0.16), transparent 62%); }
-        .boot-mark { background: #f4efe6; color: #16140f; box-shadow: 0 16px 36px rgba(0, 0, 0, 0.4); }
         .boot-name { color: #a89880; }
       }
       html.dark, html.dark body, html.dark #boot { background: #0c0b0a; color: #f6f1e8; }
       html.dark #boot::before { background: radial-gradient(ellipse at top, rgba(232, 214, 180, 0.16), transparent 62%); }
-      html.dark .boot-mark { background: #f4efe6; color: #16140f; box-shadow: 0 16px 36px rgba(0, 0, 0, 0.4); }
       html.dark .boot-name { color: #a89880; }
       @media (prefers-reduced-motion: reduce) {
         .boot-card, .boot-mark, .boot-line { animation: none; }

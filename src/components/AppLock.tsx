@@ -261,7 +261,7 @@ export function AppLock({
         <motion.div layout className="flex items-center gap-3">
           <motion.div
             layout
-            className="grid h-12 w-12 shrink-0 place-items-center rounded-[1.15rem] bg-[#1c1915] text-[#f6f1e8] shadow-[0_12px_28px_rgba(28,25,21,0.16)] dark:bg-[#f4efe6] dark:text-[#16140f] dark:shadow-[0_16px_36px_rgba(0,0,0,0.4)]"
+            className="grid h-12 w-12 shrink-0 place-items-center rounded-[1.15rem] bg-white text-black shadow-[0_0_0_1px_rgba(0,0,0,0.08),0_12px_28px_rgba(0,0,0,0.08)]"
             animate={passed ? { scale: 1.04 } : { scale: 1 }}
             transition={reduceMotion ? { duration: 0 } : { type: 'spring', stiffness: 260, damping: 18 }}
           >

@@ -25,7 +25,7 @@ export function QuietLoad({ kind = 'page' }: { kind?: 'screen' | 'page' | 'rows'
         <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-64 bg-[radial-gradient(ellipse_at_top,rgba(255,252,246,0.95),transparent_70%)] dark:bg-[radial-gradient(ellipse_at_top,rgba(232,214,180,0.16),transparent_62%)]" />
         <div className="quiet-arrive relative text-center">
           <span className="sr-only">Cargando</span>
-          <span className="quiet-mark mx-auto grid h-12 w-12 place-items-center rounded-[1.15rem] bg-[#1c1915] text-[#f6f1e8] shadow-[0_12px_28px_rgba(28,25,21,0.16)] dark:bg-[#f4efe6] dark:text-[#16140f] dark:shadow-[0_16px_36px_rgba(0,0,0,0.4)]">
+          <span className="quiet-mark mx-auto grid h-12 w-12 place-items-center rounded-[1.15rem] bg-white text-black shadow-[0_0_0_1px_rgba(0,0,0,0.08),0_12px_28px_rgba(0,0,0,0.08)]">
             <Mark size={22} />
           </span>
           <p className="mt-4 text-[11px] font-semibold uppercase tracking-[0.32em] text-[#8a8175] dark:text-[#a89880]">Balance</p>

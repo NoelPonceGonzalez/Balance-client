@@ -49,7 +49,7 @@ export function LoginView({ onLogin }: { onLogin: (user: AppUser, token: string)
     <div className="auth-scroll relative bg-white text-slate-950">
       <div className="mx-auto flex min-h-full w-full max-w-[26rem] flex-col justify-center px-6 py-14">
         <div className="mb-10">
-          <div className="mb-7 grid h-11 w-11 place-items-center rounded-xl bg-slate-950 text-white">
+          <div className="mb-7 grid h-11 w-11 place-items-center rounded-xl bg-white text-black shadow-[0_0_0_1px_rgba(0,0,0,0.08),0_12px_28px_rgba(0,0,0,0.08)]">
             <Mark size={24} />
           </div>
           <h1 className="text-[1.75rem] font-semibold tracking-tight">Balance</h1>
