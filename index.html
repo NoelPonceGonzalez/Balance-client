@@ -16,62 +16,82 @@
     <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)" />
     <meta name="color-scheme" content="light dark" />
     <style>
-      html, body { margin: 0; background: #f2f2f7; }
+      html, body { margin: 0; background: #f6f3ee; }
       #boot {
         position: fixed;
         inset: 0;
         z-index: 100;
         display: grid;
         place-items: center;
-        background: #f2f2f7;
-        color: #1c1c1e;
+        background: #f6f3ee;
+        color: #1c1915;
         font-family: ui-sans-serif, system-ui, sans-serif;
       }
-      #boot.is-done { opacity: 0; transition: opacity 420ms ease; pointer-events: none; }
-      .boot-card { text-align: center; animation: boot-in 720ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+      #boot::before {
+        content: "";
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 0;
+        height: 16rem;
+        pointer-events: none;
+        background: radial-gradient(ellipse at top, rgba(255, 252, 246, 0.95), transparent 70%);
+      }
+      #boot.is-done { opacity: 0; transition: opacity 680ms cubic-bezier(0.22, 1, 0.36, 1); pointer-events: none; }
+      .boot-card { position: relative; text-align: center; animation: boot-in 780ms cubic-bezier(0.22, 1, 0.36, 1) both; }
       .boot-mark {
         display: grid;
         place-items: center;
-        width: 44px;
-        height: 44px;
+        width: 48px;
+        height: 48px;
         margin: 0 auto;
-        border-radius: 14px;
-        background: #111;
-        color: #fff;
+        border-radius: 1.15rem;
+        background: #1c1915;
+        color: #f6f1e8;
+        box-shadow: 0 12px 28px rgba(28, 25, 21, 0.16);
+        animation: boot-breathe 2.2s ease-in-out infinite;
       }
       .boot-name {
-        margin: 14px 0 0;
-        font-size: 13px;
+        margin: 16px 0 0;
+        font-size: 11px;
         font-weight: 600;
-        letter-spacing: 0.16em;
+        letter-spacing: 0.32em;
         text-transform: uppercase;
+        color: #8a8175;
       }
       .boot-line {
         display: block;
-        width: 28px;
+        width: 36px;
         height: 1px;
-        margin: 16px auto 0;
+        margin: 18px auto 0;
         background: currentColor;
-        opacity: 0.28;
         transform-origin: center;
-        animation: boot-line 1.15s ease-in-out infinite;
+        animation: boot-line 1.8s ease-in-out infinite;
       }
       @keyframes boot-in {
         from { opacity: 0; transform: translateY(8px); }
         to { opacity: 1; transform: none; }
       }
+      @keyframes boot-breathe {
+        0%, 100% { transform: scale(0.985); }
+        50% { transform: scale(1); }
+      }
       @keyframes boot-line {
-        0%, 100% { transform: scaleX(0.35); opacity: 0.16; }
-        50% { transform: scaleX(1); opacity: 0.4; }
+        0%, 100% { transform: scaleX(0.28); opacity: 0.16; }
+        50% { transform: scaleX(1); opacity: 0.42; }
       }
       @media (prefers-color-scheme: dark) {
-        html, body, #boot { background: #000; color: #f5f5f7; }
-        .boot-mark { background: #f5f5f7; color: #111; }
+        html, body, #boot { background: #0c0b0a; color: #f6f1e8; }
+        #boot::before { background: radial-gradient(ellipse at top, rgba(232, 214, 180, 0.16), transparent 62%); }
+        .boot-mark { background: #f4efe6; color: #16140f; box-shadow: 0 16px 36px rgba(0, 0, 0, 0.4); }
+        .boot-name { color: #a89880; }
       }
-      html.dark, html.dark body, html.dark #boot { background: #000; color: #f5f5f7; }
-      html.dark .boot-mark { background: #f5f5f7; color: #111; }
+      html.dark, html.dark body, html.dark #boot { background: #0c0b0a; color: #f6f1e8; }
+      html.dark #boot::before { background: radial-gradient(ellipse at top, rgba(232, 214, 180, 0.16), transparent 62%); }
+      html.dark .boot-mark { background: #f4efe6; color: #16140f; box-shadow: 0 16px 36px rgba(0, 0, 0, 0.4); }
+      html.dark .boot-name { color: #a89880; }
       @media (prefers-reduced-motion: reduce) {
-        .boot-card, .boot-line { animation: none; }
+        .boot-card, .boot-mark, .boot-line { animation: none; }
       }
     </style>
   </head>

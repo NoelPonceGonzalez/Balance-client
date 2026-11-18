@@ -22,11 +22,15 @@ export function AppLock({
   onOpen,
   onUser,
   onCancel,
+  leaving = false,
+  onGone,
 }: {
   mode: 'open' | 'create' | 'change';
   onOpen: () => void;
   onUser?: (user: User) => void;
   onCancel?: () => void;
+  leaving?: boolean;
+  onGone?: () => void;
 }) {
   const [forgot, setForgot] = useState(false);
   const [step, setStep] = useState<Step>(mode === 'create' ? 'fresh' : 'pin');
@@ -51,7 +55,17 @@ export function AppLock({
   const handledAt = useRef(0);
   const pushRef = useRef<(key: string) => void>(() => undefined);
 
+  const onGoneRef = useRef(onGone);
+  onGoneRef.current = onGone;
+
   useEffect(() => () => window.clearTimeout(openTimer.current), []);
+
+  useEffect(() => {
+    if (!leaving) return;
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const timer = window.setTimeout(() => onGoneRef.current?.(), reduce ? 0 : 560);
+    return () => window.clearTimeout(timer);
+  }, [leaving]);
 
   useEffect(() => {
     const platform = window.PublicKeyCredential?.isUserVerifyingPlatformAuthenticatorAvailable;
@@ -255,7 +269,7 @@ export function AppLock({
   const reduceMotion = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   const screen = (
-    <div data-lock-root className="fixed inset-0 z-[80] flex min-h-dvh flex-col overflow-hidden bg-[#f6f3ee] px-7 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-[max(3.25rem,env(safe-area-inset-top))] text-[#1c1915] dark:bg-[#0c0b0a] dark:text-[#f6f1e8]">
+    <div data-lock-root className={cn('fixed inset-0 z-[80] flex min-h-dvh flex-col overflow-hidden bg-[#f6f3ee] px-7 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-[max(3.25rem,env(safe-area-inset-top))] text-[#1c1915] transition-opacity duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] dark:bg-[#0c0b0a] dark:text-[#f6f1e8]', leaving && 'pointer-events-none opacity-0')}>
       <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-64 bg-[radial-gradient(ellipse_at_top,rgba(255,252,246,0.95),transparent_70%)] dark:bg-[radial-gradient(ellipse_at_top,rgba(232,214,180,0.16),transparent_62%)]" />
       <div className={cn('relative flex min-h-0 flex-1 flex-col', passed && '[&_.lock-pad]:opacity-30')}>
         <motion.div layout className="flex items-center gap-3">

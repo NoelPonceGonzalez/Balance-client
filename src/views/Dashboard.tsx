@@ -25,7 +25,7 @@ import { LineRangeTabs, inLineRange, type LineRangeId } from '@/components/LineR
 import { CashChart, Wallets, type LinePoint } from '@/views/Wallets';
 import { SkinSearch, wearName, type SkinPhase } from '@/components/SkinSearch';
 import { OriginPicker } from '@/components/OriginMark';
-import { glide, jelly, quickOut, softSpring, SPRING_EASE } from '@/lib/motion';
+import { jelly, quickOut, silk, softSpring, SPRING_EASE } from '@/lib/motion';
 const HIDE_KEY = 'pat_hide_money';
 const SORT_KEY = 'pat_dash_sort';
 
@@ -178,7 +178,7 @@ function Flip({ id, className, children }: { id: string; className?: string; chi
   );
 }
 
-const pageMove = glide;
+const pageMove = silk;
 
 function ViewSwitch({ value, onChange }: { value: 'general' | 'cartera'; onChange: (value: 'general' | 'cartera') => void }) {
   const still = motionOff();
@@ -215,7 +215,7 @@ const ScreenSwap = forwardRef<HTMLDivElement, { className?: string; children?: R
     <motion.div
       ref={ref}
       className={className}
-      initial={still ? false : { opacity: 0, y: 14, scale: 0.985 }}
+      initial={still ? false : { opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={still ? { opacity: 0 } : { opacity: 0, y: -6, transition: quickOut }}
       transition={still ? { duration: 0 } : pageMove}
@@ -317,7 +317,7 @@ function RisingAmount({ value, hidden, signed = false, card = false, delay = 0, 
   return <>{text}</>;
 }
 
-const rise = glide;
+const rise = silk;
 
 function sliceInk(hex: string, dark: boolean): string {
   const rgb = channel(hex);
@@ -1973,7 +1973,7 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
           const frame = row.frames[beat % row.frames.length];
           const open = openKey === row.key;
           return (
-            <motion.div key={row.key} initial={prefersStill() ? false : { opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={prefersStill() ? { duration: 0 } : { ...glide, delay: Math.min(index, 5) * 0.04 }}>
+            <motion.div key={row.key} initial={prefersStill() ? false : { opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={prefersStill() ? { duration: 0 } : { ...silk, delay: Math.min(index, 5) * 0.04 }}>
               <div
                 role="button"
                 tabIndex={0}
@@ -2159,7 +2159,7 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
           onClick={() => setAdding(true)}
           initial={prefersStill() ? false : { opacity: 0, y: 18 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={prefersStill() ? { duration: 0 } : { ...glide, delay: 0.06 }}
+          transition={prefersStill() ? { duration: 0 } : { ...silk, delay: 0.06 }}
           className="flex w-full items-center gap-3 rounded-[28px] border border-dashed border-slate-300/90 bg-white/40 px-5 py-3.5 text-left text-slate-600 backdrop-blur-xl hover:bg-white/70 dark:border-white/15 dark:bg-white/5 dark:text-slate-300"
         >
           <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-slate-300/80 dark:border-white/15">

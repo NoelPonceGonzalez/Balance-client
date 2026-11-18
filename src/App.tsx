@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { motion } from 'motion/react';
 import { Shell, type Section } from '@/components/Shell';
 import { api, ApiError } from '@/lib/api';
 import { forgetWallets, loadWallets } from '@/lib/wallet-accounts';
-import { glide } from '@/lib/motion';
+import { silk } from '@/lib/motion';
 import { disablePhonePush } from '@/lib/push';
 import type { User } from '@/lib/types';
 import { Dashboard } from '@/views/Dashboard';
@@ -45,6 +45,12 @@ export default function App() {
   const [focusListing, setFocusListing] = useState<string | null>(null);
   const [focusSkin, setFocusSkin] = useState<{ name: string; wear: string; label: string; image: string | null } | null>(null);
   const [opened, setOpened] = useState(() => sessionStorage.getItem('pat_open') === '1' && Boolean(sessionStorage.getItem('pat_gate')));
+  const [dissolving, setDissolving] = useState(false);
+  const finishLock = useCallback(() => {
+    setOpened(true);
+    setDissolving(true);
+  }, []);
+  const clearLock = useCallback(() => setDissolving(false), []);
 
   useEffect(() => {
     const openPlan = (event: Event) => {
@@ -135,12 +141,14 @@ export default function App() {
       sessionStorage.removeItem('pat_gate');
       sessionStorage.removeItem('pat_open');
       setOpened(false);
+      setDissolving(false);
       forgetWallets();
     };
     const onLock = () => {
       sessionStorage.removeItem('pat_gate');
       sessionStorage.removeItem('pat_open');
       setOpened(false);
+      setDissolving(false);
       forgetWallets();
     };
     document.addEventListener('visibilitychange', lock);
@@ -174,6 +182,7 @@ export default function App() {
       sessionStorage.removeItem('pat_gate');
       sessionStorage.removeItem('pat_open');
       setOpened(false);
+      setDissolving(false);
       setUser(null);
     });
   };
@@ -183,7 +192,7 @@ export default function App() {
     const boot = document.getElementById('boot');
     if (!boot) return;
     boot.classList.add('is-done');
-    const timer = window.setTimeout(() => boot.remove(), 460);
+    const timer = window.setTimeout(() => boot.remove(), 760);
     return () => window.clearTimeout(timer);
   }, [ready]);
 
@@ -201,23 +210,24 @@ export default function App() {
       </div>
     );
   }
-  if (!user) return <LoginView onLogin={(next) => { setOffline(false); setOpened(sessionStorage.getItem('pat_open') === '1'); setSection('dashboard'); setHome((value) => value + 1); setUser(next); }} />;
+  if (!user) return <LoginView onLogin={(next) => { setOffline(false); setDissolving(false); setOpened(sessionStorage.getItem('pat_open') === '1'); setSection('dashboard'); setHome((value) => value + 1); setUser(next); }} />;
 
   if (user.lock === false) {
     return <AppLock mode="create" onUser={setUser} onOpen={() => setOpened(true)} />;
   }
 
-  if (user.lock === true && !bookOpen) {
-    return (
-      <AppLock
-        mode="open"
-        onUser={setUser}
-        onOpen={() => setOpened(true)}
-      />
-    );
-  }
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const showBook = bookOpen || dissolving;
+  const showLock = (user.lock === true && !bookOpen) || dissolving;
 
   return (
+    <>
+    {showBook && (
+    <motion.div
+      initial={dissolving || reduceMotion ? false : { opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={reduceMotion ? { duration: 0 } : silk}
+    >
     <Shell
       section={section}
       onChange={(next) => { setSection(next); if (next === 'dashboard') setHome((value) => value + 1); }}
@@ -229,9 +239,9 @@ export default function App() {
     >
       <motion.div
         key={section}
-        initial={window.matchMedia('(prefers-reduced-motion: reduce)').matches ? false : { opacity: 0, y: 8 }}
+        initial={reduceMotion ? false : { opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={glide}
+        transition={reduceMotion ? { duration: 0 } : silk}
       >
         {section === 'dashboard' && <Dashboard heroMs={heroMs} home={home} books={books} />}
         {section === 'market' && <Market focusListing={focusListing} focusTick={focusTick} focusSkin={focusSkin} />}
@@ -263,5 +273,17 @@ export default function App() {
         />
       )}
     </Shell>
+    </motion.div>
+    )}
+    {showLock && (
+      <AppLock
+        mode="open"
+        leaving={dissolving}
+        onUser={setUser}
+        onOpen={finishLock}
+        onGone={clearLock}
+      />
+    )}
+    </>
   );
 }

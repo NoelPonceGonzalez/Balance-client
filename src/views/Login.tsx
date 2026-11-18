@@ -2,6 +2,7 @@ import { useState, type ChangeEvent, type FormEvent } from 'react';
 import { Lock, Eye, EyeOff } from 'lucide-react';
 import { InstallApp } from '@/components/InstallApp';
 import { Mark } from '@/components/Mark';
+import { QuietLoad } from '@/components/QuietLoad';
 import { PasswordReset } from '@/components/PasswordReset';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -46,6 +47,7 @@ export function LoginView({ onLogin }: { onLogin: (user: AppUser, token: string)
 
   return (
     <div className="auth-scroll bg-white text-slate-950">
+      {loading && <QuietLoad kind="screen" />}
       <div className="mx-auto flex min-h-full w-full max-w-[26rem] flex-col justify-center px-6 py-14">
         <div className="mb-10">
           <div className="mb-7 grid h-11 w-11 place-items-center rounded-xl bg-slate-950 text-white">
