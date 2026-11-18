@@ -235,7 +235,7 @@ function summarySheet(report: TaxReport, owner: string, mark: Blob | null): Shee
   const outside: [string, string, number][] = ([
     ['Compras', 'Lo que entra al comprar no tributa: queda apuntado como coste para cuando vendas.', count(EFFECT.buy)],
     ['Traspasos y Earn', 'Mover monedas entre tus cuentas o a Earn: siguen siendo tuyas.', count(EFFECT.own)],
-    ['Movimientos en euros', 'Nómina, gastos y euros que metes o sacas: no son inversiones.', count(EFFECT.euros)],
+    ['Movimientos en euros', 'Gastos y euros que entran o salen. La nómina no hace falta en este informe: la declara tu empresa.', count(EFFECT.euros)],
     ['Mismo activo en otro formato', 'Por ejemplo, ETH en staking como WBETH. Detalle en la hoja «Sin efecto fiscal».', report.rewraps.length],
     ['Bienes personales', 'Skins, relojes y otros bienes que no son una inversión. No van a la renta.', count(EFFECT.personal)],
   ] as [string, string, number][]).filter(([, , n]) => n > 0);

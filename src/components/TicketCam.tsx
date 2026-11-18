@@ -78,6 +78,7 @@ interface BookHolding {
   unitMarketValue?: number | null;
   costBasis?: number | null;
   quoteSource?: string | null;
+  quoteId?: string | null;
 }
 
 function holdingFor(items: BookHolding[], name: string): BookHolding | undefined {
@@ -102,6 +103,21 @@ const COINGECKO_ID: Record<string, string> = {
   LINK: 'chainlink',
 };
 
+function coinCode(item: BookHolding): string {
+  return tickerOf(item.name) || (item.symbol || '').trim().toUpperCase() || (item.quoteId || '');
+}
+
+function sameCoin(left: BookHolding, right: BookHolding): boolean {
+  const a = coinCode(left);
+  const b = coinCode(right);
+  return Boolean(a) && a === b;
+}
+
+/** La cantidad que ha entrado cabe en una bolsa tuya de otra cuenta, con un margen por la foto. */
+function bagFits(delta: number, bag: number, price: number): boolean {
+  return Math.abs(delta - bag) * price <= Math.max(5, bag * price * 0.08);
+}
+
 /** Compra o venta apuntada como movimiento: mueve la pieza y el efectivo, y la cuentan los planes. */
 async function postTrade(accountId: string, holding: BookHolding, type: 'buy' | 'sell', eur: number, quantity: number, label: string): Promise<boolean> {
   try {
@@ -125,6 +141,73 @@ async function postTrade(accountId: string, holding: BookHolding, type: 'buy' | 
     if (err instanceof ApiError && err.status === 400) return false;
     throw err;
   }
+}
+
+function homesOf(rows: BookHolding[], coin: BookHolding, accountId: string): BookHolding[] {
+  return rows.filter((item) => item._id !== coin._id && String(item.accountId) !== accountId && item.quantity > 1e-8 && sameCoin(item, coin));
+}
+
+function homesByCode(rows: BookHolding[], code: string, accountId: string): BookHolding[] {
+  return rows.filter((item) => String(item.accountId) !== accountId && item.quantity > 1e-8 && coinCode(item) === code);
+}
+
+/** Nombres de las otras cuentas cuya bolsa explica la foto. Vacío si no hay duda. */
+function originHomes(positions: WalletLine[], mine: BookHolding[], book: BookHolding[], target: string, empty: boolean): BookHolding[] {
+  const foundHomes: BookHolding[] = [];
+  const push = (homes: BookHolding[]) => {
+    for (const home of homes) if (!foundHomes.some((item) => item._id === home._id)) foundHomes.push(home);
+  };
+  for (const line of positions) {
+    const amount = readAmount(line.amount);
+    const found = holdingFor(mine, line.name);
+    const price = found?.unitMarketValue ?? 0;
+    if (found && (found.quoteSource === 'coingecko' || found.quoteSource === 'yahoo') && price > 0) {
+      const nextQty = amount / price;
+      const extra = (nextQty - found.quantity) * price;
+      const noise = Math.max(1, amount * 0.005);
+      const homes = homesOf(book, found, target);
+      if (extra > noise) push(homes.filter((item) => bagFits(nextQty - found.quantity, item.quantity, price)));
+      else if (extra < -noise && nextQty * price <= noise) push(homes);
+      continue;
+    }
+    const ticker = line.assetClass === 'crypto' ? tickerOf(line.name) : null;
+    if (!ticker) continue;
+    const live = book.find((item) => item.quoteSource === 'coingecko' && (item.unitMarketValue ?? 0) > 0 && (tickerOf(item.name) === ticker || (item.symbol || '').toUpperCase() === ticker));
+    if (!live?.unitMarketValue) continue;
+    const quantity = amount / live.unitMarketValue;
+    push(homesByCode(book, ticker, target).filter((item) => bagFits(quantity, item.quantity, live.unitMarketValue || 0)));
+  }
+  if (empty) {
+    for (const item of mine) {
+      if (!((item.quoteSource === 'coingecko' || item.quoteSource === 'yahoo') && item.quantity > 1e-8 && (item.unitMarketValue ?? 0) > 0)) continue;
+      push(homesOf(book, item, target));
+    }
+  }
+  return foundHomes;
+}
+
+/** La moneda cambia de cuenta con su coste. El efectivo no se mueve y la renta no lo cuenta como venta. */
+async function postPass(source: BookHolding, dest: BookHolding, quantity: number, eur: number): Promise<void> {
+  if (!(quantity > 0)) return;
+  await api('/api/movements', {
+    method: 'POST',
+    body: JSON.stringify({
+      type: 'transfer',
+      date: madridDay(),
+      amount: Math.max(0.01, cents(eur)),
+      currency: 'EUR',
+      description: source.name.trim(),
+      accountId: String(source.accountId),
+      counterAccountId: String(dest.accountId),
+      holdingId: source._id,
+      counterHoldingId: dest._id,
+      quantity: Number(quantity.toFixed(8)),
+      applyToBalances: true,
+      confirmDuplicate: true,
+    }),
+  });
+  source.quantity = Math.max(0, Number((source.quantity - quantity).toFixed(8)));
+  dest.quantity = Number((dest.quantity + quantity).toFixed(8));
 }
 
 function PhotoWash({ src }: { src: string }) {
@@ -656,6 +739,8 @@ export function TicketCam({
   const [accountId, setAccountId] = useState('');
   const [error, setError] = useState('');
   const [mark, setMark] = useState<'idle' | 'spin' | 'ok' | 'bad'>('idle');
+  const [origin, setOrigin] = useState<'move' | 'new' | null>(null);
+  const [originAsk, setOriginAsk] = useState('');
 
   useEffect(() => {
     let cancel = false;
@@ -1003,6 +1088,8 @@ export function TicketCam({
     setCatalog(false);
     setQuery('');
     setWalletLines((rows) => rows.map((line) => ({ ...line, assetClass: classifyLine(line.name, group) })));
+    setOrigin(null);
+    setOriginAsk('');
     setError('');
   };
 
@@ -1019,6 +1106,8 @@ export function TicketCam({
     setCatalog(false);
     setQuery('');
     setWalletLines((rows) => rows.map((line) => ({ ...line, assetClass: classifyLine(line.name, preset.group) })));
+    setOrigin(null);
+    setOriginAsk('');
     setError('');
   };
 
@@ -1038,6 +1127,8 @@ export function TicketCam({
     const group = walletGroup();
     draftNew.current = false;
     setWalletLines((rows) => rows.map((line) => (line.key === editKey ? { ...line, ...next, assetClass: classifyLine(next.name, group) } : line)));
+    setOrigin(null);
+    setOriginAsk('');
     setEditKey(null);
     setError('');
   };
@@ -1059,7 +1150,8 @@ export function TicketCam({
     const filled = walletLines.filter((line) => line.name.trim() || line.amount.trim());
     const broken = filled.some((line) => {
       const amount = readAmount(line.amount);
-      if (!line.name.trim() || !Number.isFinite(amount) || amount === 0) return true;
+      if (!line.name.trim() || !Number.isFinite(amount)) return true;
+      if (amount === 0 && !isCashName(line.name)) return true;
       if (line.gain.trim() && !Number.isFinite(readAmount(line.gain))) return true;
       return false;
     });
@@ -1081,10 +1173,14 @@ export function TicketCam({
       let target = chosen?.id || '';
       let tracking = chosen?.tracking || fresh?.tracking || 'positions';
       let pocket = chosen?.balance ?? 0;
+      const previousCash = pocket;
       if (liquidIn.length) pocket = Math.max(...liquidIn.map((line) => readAmount(line.amount)));
       if (liquidOut.length) pocket = Math.max(0, Math.round((pocket + liquidOut.reduce((sum, line) => sum + readAmount(line.amount), 0)) * 100) / 100);
       if (flows.length) pocket = Math.max(0, Math.round((pocket + flows.reduce((sum, line) => sum + readAmount(line.amount), 0)) * 100) / 100);
-      const touchedCash = liquidIn.length > 0 || liquidOut.length > 0 || flows.length > 0;
+      const cashAtZero = cash.some((line) => readAmount(line.amount) === 0);
+      if (!liquidIn.length && !liquidOut.length && !flows.length && cashAtZero) pocket = 0;
+      const touchedCash = liquidIn.length > 0 || liquidOut.length > 0 || flows.length > 0 || cashAtZero;
+      const cashUp = touchedCash ? pocket - previousCash : 0;
       if (!chosen && fresh) {
         const onlyMoves = flows.length > 0 && positions.length === 0 && pulls.length === 0;
         const onlyBalance = (fresh.tracking === 'balance' || flows.length > 0) && positions.length === 0 && pulls.length === 0;
@@ -1197,6 +1293,19 @@ export function TicketCam({
         window.setTimeout(onSaved, 720);
         return;
       }
+      const asNew = origin === 'new';
+      const asksOrigin = Boolean(chosen) && tracking !== 'balance' && (positions.length > 0 || (positions.length === 0 && touchedCash && pocket === 0));
+      if (asksOrigin && !origin) {
+        const preview = await api<{ holdings: BookHolding[] }>('/api/holdings');
+        const previewMine = (preview.holdings || []).filter((item) => String(item.accountId) === target);
+        const homes = originHomes(positions, previewMine, preview.holdings || [], target, positions.length === 0 && touchedCash && pocket === 0);
+        if (homes.length) {
+          const names = [...new Set(homes.map((item) => accounts.find((account) => account.id === String(item.accountId))?.name || 'otra cartera'))];
+          setOriginAsk(names.length === 1 ? `La otra cartera es ${names[0]}.` : `Puede ser ${names.join(' o ')}.`);
+          setMark('idle');
+          return;
+        }
+      }
       if (tracking === 'balance') {
         await api(`/api/accounts/${target}`, { method: 'PATCH', body: JSON.stringify({ tracking: 'positions', ...(touchedCash ? { balance: pocket } : {}) }) });
       } else if (touchedCash) {
@@ -1212,12 +1321,21 @@ export function TicketCam({
         const found = holdingFor(mine, line.name);
         const price = found?.unitMarketValue ?? 0;
         if (found && (found.quoteSource === 'coingecko' || found.quoteSource === 'yahoo') && price > 0) {
-          // Con cotización en vivo la foto no pisa el precio: lo que haya de más es una compra y lo que falte, una venta.
+          // Con cotización en vivo la foto no pisa el precio. Si la diferencia es una bolsa tuya en otra cuenta, es un traspaso.
           const nextQty = amount / price;
           const extra = (nextQty - found.quantity) * price;
           const noise = Math.max(1, amount * 0.005);
           const costNow = found.costBasis ?? 0;
+          const homes = () => homesOf(book.holdings || [], found, target);
           if (extra > noise) {
+            const delta = nextQty - found.quantity;
+            const home = homes()
+              .filter((item) => bagFits(delta, item.quantity, price))
+              .sort((a, b) => Math.abs(a.quantity - delta) - Math.abs(b.quantity - delta))[0];
+            if (!asNew && home) {
+              await postPass(home, found, home.quantity, home.quantity * price);
+              return;
+            }
             const spent = cents(cost != null && cost - costNow > 0.5 ? cost - costNow : extra);
             const quantity = nextQty - found.quantity;
             if (await postTrade(target, found, 'buy', spent, quantity, found.name)) cashShift -= spent;
@@ -1228,8 +1346,17 @@ export function TicketCam({
               });
             }
           } else if (extra < -noise) {
+            const proceeds = -extra;
+            const gone = nextQty * price <= noise;
+            const cashed = touchedCash && cashUp >= proceeds * 0.5;
+            const home = !asNew && gone && !cashed ? [...homes()].sort((a, b) => b.quantity - a.quantity)[0] : undefined;
+            if (home) {
+              await postPass(found, home, found.quantity, found.quantity * price);
+              return;
+            }
+            if (!asNew && gone && !cashed) return;
             const kept = found.quantity > 0 ? nextQty / found.quantity : 0;
-            const sold = cents(-extra);
+            const sold = cents(proceeds);
             if (await postTrade(target, found, 'sell', sold, found.quantity - nextQty, found.name)) {
               cashShift += sold;
               if (cost != null) await api(`/api/holdings/${found._id}`, { method: 'PATCH', body: JSON.stringify({ costBasis: cost }) });
@@ -1264,8 +1391,31 @@ export function TicketCam({
           ? (book.holdings || []).find((item) => item.quoteSource === 'coingecko' && (item.unitMarketValue ?? 0) > 0 && (tickerOf(item.name) === ticker || (item.symbol || '').toUpperCase() === ticker))
           : undefined;
         if (ticker && coinId && live?.unitMarketValue) {
-          // Una cripto nueva en la cartera se enlaza a su precio en vivo y cuenta como compra, para que la vean los planes.
           const quantity = Number((amount / live.unitMarketValue).toFixed(8));
+          const home = homesByCode(book.holdings || [], ticker, target)
+            .filter((item) => bagFits(quantity, item.quantity, live.unitMarketValue || 0))
+            .sort((a, b) => Math.abs(a.quantity - quantity) - Math.abs(b.quantity - quantity))[0];
+          if (!asNew && home) {
+            const created = await api<{ holding: BookHolding }>('/api/holdings', {
+              method: 'POST',
+              body: JSON.stringify({
+                accountId: target,
+                name: line.name.trim(),
+                symbol: ticker,
+                assetClass: 'crypto',
+                currency: 'EUR',
+                quantity: 0,
+                quoteSource: 'coingecko',
+                quoteId: coinId,
+              }),
+            });
+            const dest = created.holding;
+            dest.accountId = String(dest.accountId);
+            book.holdings = [...(book.holdings || []), dest];
+            await postPass(home, dest, home.quantity, home.quantity * live.unitMarketValue);
+            return;
+          }
+          // Una cripto nueva en la cartera se enlaza a su precio en vivo y cuenta como compra, para que la vean los planes.
           const spent = cents(cost != null && cost > 0 ? cost : amount);
           await api('/api/holdings', {
             method: 'POST',
@@ -1299,6 +1449,17 @@ export function TicketCam({
         });
       };
       for (const line of positions) await writePosition(line, readAmount(line.amount));
+      if (positions.length === 0 && touchedCash && pocket === 0) {
+        const live = mine.filter((item) => (item.quoteSource === 'coingecko' || item.quoteSource === 'yahoo') && item.quantity > 1e-8 && (item.unitMarketValue ?? 0) > 0);
+        const worth = live.reduce((sum, item) => sum + item.quantity * (item.unitMarketValue || 0), 0);
+        const cashed = worth > 0 && cashUp >= worth * 0.5;
+        for (const item of live) {
+          const value = item.quantity * (item.unitMarketValue || 0);
+          const home = [...homesOf(book.holdings || [], item, target)].sort((a, b) => b.quantity - a.quantity)[0];
+          if (!asNew && !cashed && home) await postPass(item, home, item.quantity, value);
+          else if ((cashed || asNew) && (await postTrade(target, item, 'sell', cents(value), item.quantity, item.name))) cashShift += cents(value);
+        }
+      }
       let loose = 0;
       for (const line of pulls) {
         const amount = readAmount(line.amount);
@@ -1515,8 +1676,18 @@ export function TicketCam({
               )}
               </div>
               <div className="shrink-0 px-5 pt-3 pb-5">
+              {originAsk && (
+                <div className="mb-3">
+                  <p className="text-[13px] font-medium text-slate-500">¿Pasan de una cartera a otra, o son dinero nuevo?</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <button type="button" onClick={() => setOrigin('move')} className={cn('rounded-full px-3 py-2 text-[13px] font-semibold', origin === 'move' ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950' : 'bg-slate-100 text-slate-600 dark:bg-white/10 dark:text-slate-200')}>De una cartera a otra</button>
+                    <button type="button" onClick={() => setOrigin('new')} className={cn('rounded-full px-3 py-2 text-[13px] font-semibold', origin === 'new' ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950' : 'bg-slate-100 text-slate-600 dark:bg-white/10 dark:text-slate-200')}>Dinero nuevo</button>
+                  </div>
+                  <p className="mt-2 text-[12px] font-medium text-slate-500">{originAsk} El traspaso se lleva el coste y no tributa. El dinero nuevo es una compra o una venta.</p>
+                </div>
+              )}
               {error && <p className="mb-3 text-sm font-medium text-rose-600">{error}</p>}
-              <AcceptButton mark={mark} disabled={(!walletId && !fresh) || catalog || reading} onClick={() => void saveWallet()} />
+              <AcceptButton mark={mark} disabled={(!walletId && !fresh) || catalog || reading || (Boolean(originAsk) && !origin)} onClick={() => void saveWallet()} />
               </div>
             </motion.div>
             ) : (

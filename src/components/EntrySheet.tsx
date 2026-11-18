@@ -77,7 +77,8 @@ export function EntrySheet({ accounts, pieces, accountId, verb, allowed, editing
   const pricedDay = (site?.pricedOn || '').slice(0, 10);
   const alreadyInside = Boolean(pricedDay && moveDay <= pricedDay);
   const eur = (site?.currency || 'EUR').toUpperCase() === 'EUR';
-  const apply = eur && (active === 'balance' || (choice != null ? choice : !alreadyInside));
+  const coinPass = active === 'pass' && Boolean(extra.holdingId);
+  const apply = coinPass || (eur && (active === 'balance' || (choice != null ? choice : !alreadyInside)));
 
   const post = async (body: Record<string, unknown>, confirmDuplicate: boolean) => {
     const payload = { ...body, confirmDuplicate };
@@ -104,12 +105,28 @@ export function EntrySheet({ accounts, pieces, accountId, verb, allowed, editing
     try {
       if (!(value > 0) && active !== 'add' && active !== 'remove') throw new Error('Escribe el importe.');
       if (active === 'pass' && !extra.counterAccountId) throw new Error('Elige el otro sitio.');
+      if (coinPass && !(Number(extra.quantity) > 0)) throw new Error('Escribe la cantidad.');
       if (needsPiece && !extra.holdingId) throw new Error('Elige la pieza.');
       if ((active === 'buy' || active === 'sell' || active === 'swap') && !(Number(extra.quantity) > 0)) throw new Error('Escribe la cantidad.');
       if (active === 'swap' && (!extra.otherHoldingId || !(Number(extra.otherQuantity) > 0))) throw new Error('Elige la otra pieza y su cantidad.');
       if (active === 'in') await post({ ...base, type: 'income', amount: value }, confirmDuplicate);
       else if (active === 'out') await post({ ...base, type: 'expense', amount: value }, confirmDuplicate);
-      else if (active === 'pass') await post({ ...base, type: 'transfer', amount: value, counterAccountId: extra.counterAccountId }, confirmDuplicate);
+      else if (active === 'pass' && extra.holdingId) {
+        const piece = pieces.find((item) => item.id === extra.holdingId);
+        const dest = pieces.find((item) => item.accountId === extra.counterAccountId && item.name.trim().toLowerCase() === (piece?.name || '').trim().toLowerCase());
+        if (!dest) throw new Error('Esa moneda tiene que estar ya en el otro sitio.');
+        await post({
+          ...base,
+          type: 'transfer',
+          amount: value,
+          counterAccountId: extra.counterAccountId,
+          holdingId: extra.holdingId,
+          counterHoldingId: dest.id,
+          quantity,
+          description: extra.description || piece?.name || '',
+          applyToBalances: true,
+        }, confirmDuplicate);
+      } else if (active === 'pass') await post({ ...base, type: 'transfer', amount: value, counterAccountId: extra.counterAccountId }, confirmDuplicate);
       else if (active === 'deposit') await post({ ...base, type: 'deposit', amount: value }, confirmDuplicate);
       else if (active === 'withdraw') await post({ ...base, type: 'withdrawal', amount: value }, confirmDuplicate);
       else if (active === 'dividend') await post({ ...base, type: 'reward', amount: value, category: extra.category || 'Dividendo' }, confirmDuplicate);
@@ -156,7 +173,7 @@ export function EntrySheet({ accounts, pieces, accountId, verb, allowed, editing
             </button>
           ))}
         </div>
-        <Input label={balanceVerb ? 'El saldo es' : active === 'add' || active === 'remove' ? 'Cantidad' : 'Importe'} type="number" step="any" value={amount} onChange={(event) => setAmount(event.target.value)} />
+        <Input label={balanceVerb ? 'El saldo es' : active === 'add' || active === 'remove' ? 'Cantidad' : coinPass ? 'Valor en euros' : 'Importe'} type="number" step="any" value={amount} onChange={(event) => setAmount(event.target.value)} />
         {needsPiece && (
           <Field label="Pieza">
             <select className={fieldClass} value={extra.holdingId} onChange={(event) => setExtra({ ...extra, holdingId: event.target.value })}>
@@ -180,15 +197,27 @@ export function EntrySheet({ accounts, pieces, accountId, verb, allowed, editing
           </>
         )}
         {active === 'pass' && (
-          <Field label="Hacia">
-            <select className={fieldClass} value={extra.counterAccountId} onChange={(event) => setExtra({ ...extra, counterAccountId: event.target.value })}>
-              <option value="">Elige</option>
-              {accounts.filter((item) => item.id !== site.id).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-            </select>
-          </Field>
+          <>
+            <Field label="Hacia">
+              <select className={fieldClass} value={extra.counterAccountId} onChange={(event) => setExtra({ ...extra, counterAccountId: event.target.value })}>
+                <option value="">Elige</option>
+                {accounts.filter((item) => item.id !== site.id).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+              </select>
+            </Field>
+            {mine.length > 0 && (
+              <Field label="Moneda">
+                <select className={fieldClass} value={extra.holdingId} onChange={(event) => setExtra({ ...extra, holdingId: event.target.value })}>
+                  <option value="">Solo euros</option>
+                  {mine.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                </select>
+              </Field>
+            )}
+            {coinPass && <Input label="Cantidad" type="number" step="any" value={extra.quantity} onChange={(event) => setExtra({ ...extra, quantity: event.target.value })} />}
+            {coinPass && <p className="text-[13px] font-medium leading-snug text-slate-500">Pasa la moneda con su coste. El efectivo se queda y no tributa.</p>}
+          </>
         )}
         <Input label="Fecha" type="date" value={extra.date} onChange={(event) => setExtra({ ...extra, date: event.target.value })} />
-        {eur && active !== 'balance' && (
+        {eur && active !== 'balance' && !coinPass && (
           <label className="flex items-start gap-3 rounded-[20px] bg-slate-100 px-4 py-3 text-[13px] font-medium leading-snug text-slate-600 dark:bg-white/10 dark:text-slate-300">
             <input
               type="checkbox"

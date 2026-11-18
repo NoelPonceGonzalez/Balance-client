@@ -314,12 +314,23 @@ export async function buildTaxPdf(report: TaxReport, owner: string): Promise<JsP
   const outside: CellInput[][] = [
     ...(buys ? [['Compras', 'Lo que entra al comprar no tributa: queda apuntado como coste para cuando vendas.', String(buys)]] : []),
     ...(ownMoves ? [['Traspasos y Earn', 'Mover monedas entre tus cuentas o a Earn: siguen siendo tuyas.', String(ownMoves)]] : []),
-    ...(countEffect(EFFECT.euros) ? [['Movimientos en euros', 'Nómina, gastos y euros que metes o sacas: no son inversiones.', String(countEffect(EFFECT.euros))]] : []),
+    ...(countEffect(EFFECT.euros) ? [['Movimientos en euros', 'Gastos y euros que entran o salen. La nómina no hace falta aquí: la declara tu empresa.', String(countEffect(EFFECT.euros))]] : []),
     ...(report.rewraps.length ? [['Mismo activo en otro formato', 'Por ejemplo, ETH en staking como WBETH. Detalle debajo.', String(report.rewraps.length)]] : []),
     ...(countEffect(EFFECT.personal) ? [['Bienes personales', 'Skins, relojes y otros bienes que no son una inversión. No van a la renta.', String(countEffect(EFFECT.personal))]] : []),
   ];
   heading('Lo que no tributa', 'Movimientos revisados que no van a la declaración.');
   table(['Tipo', 'Por qué no tributa', 'Movimientos'], outside, undefined, [2], { 0: 150, 2: 70 });
+  const passes = report.lines.filter((line) => line.operation === 'Traspaso');
+  if (passes.length) {
+    heading('Traspasos entre tus cuentas', 'La moneda sigue siendo tuya. El coste de compra no cambia y no hay ganancia ni pérdida.');
+    table(
+      ['Fecha', 'Activo', 'Cantidad', 'De dónde a dónde', 'Valor'],
+      passes.map((line) => [day(line.date), line.asset, qty(Math.abs(line.quantity)), line.concept, line.eur == null ? '-' : money(line.eur)]),
+      undefined,
+      [2, 4],
+      { 0: 70, 3: 150 },
+    );
+  }
   if (report.rewraps.length) {
     heading('Cambios de formato del mismo activo', 'El coste original pasa intacto a lo recibido.');
     table(

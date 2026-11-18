@@ -11,6 +11,7 @@ import { formatDay, formatEur } from '@/lib/format';
 import { TYPE_LABEL } from '@/lib/labels';
 import { moveFaces } from '@/lib/move-faces';
 import { verbFromType } from '@/lib/verbs';
+import { flowIn, flowOut } from '@/lib/flow';
 import { cn, docId } from '@/lib/utils';
 import type { AccountRow, HoldingRow, MovementRow } from '@/lib/types';
 
@@ -47,9 +48,24 @@ function moveSign(row: MovementRow): number {
   return 1;
 }
 
-function moveTone(row: MovementRow): string {
-  if (row.type === 'transfer') return 'text-slate-500';
-  return moveSign(row) < 0 ? 'text-[#ea3943]' : 'text-[#16c784]';
+function flowOf(row: MovementRow, accountId = ''): 'in' | 'out' | 'flat' {
+  if (row.type === 'transfer') {
+    if (accountId && String(row.accountId) === accountId) return 'out';
+    if (accountId && String(row.counterAccountId || '') === accountId) return 'in';
+    return 'flat';
+  }
+  return moveSign(row) < 0 ? 'out' : 'in';
+}
+
+function moveTone(row: MovementRow, accountId = ''): string {
+  const flow = flowOf(row, accountId);
+  if (flow === 'out') return flowOut;
+  if (flow === 'in') return flowIn;
+  return 'text-slate-500';
+}
+
+function coinPass(row: MovementRow): boolean {
+  return row.type === 'transfer' && Boolean(row.holdingId) && (row.quantity ?? 0) > 0;
 }
 
 function moveTitle(row: MovementRow): string {
@@ -121,8 +137,14 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
 
   const faces = useMemo(() => moveFaces(rows), [rows]);
   const titleOf = (row: MovementRow) => faces.get(docId(row))?.title || moveTitle(row);
-  const kindOf = (row: MovementRow) => faces.get(docId(row))?.kind || TYPE_LABEL[row.type] || row.type;
-  const toneOf = (row: MovementRow) => (faces.has(docId(row)) ? 'text-slate-500' : moveTone(row));
+  const kindOf = (row: MovementRow) => {
+    if (row.type === 'transfer') {
+      const incoming = filters.accountId && String(row.counterAccountId || '') === filters.accountId;
+      return incoming ? `desde ${nameOf(row.accountId)}` : `hacia ${nameOf(row.counterAccountId)}`;
+    }
+    return faces.get(docId(row))?.kind || TYPE_LABEL[row.type] || row.type;
+  };
+  const toneOf = (row: MovementRow) => (faces.has(docId(row)) ? 'text-slate-500' : moveTone(row, filters.accountId));
 
   const sorted = useMemo(() => {
     const copy = [...rows];
@@ -170,6 +192,12 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
 
   const accountOf = (id?: string | null) => accounts.find((account) => docId(account) === id);
   const nameOf = (id?: string | null) => accountOf(id)?.name || '—';
+  const figureOf = (row: MovementRow) => {
+    if (!coinPass(row)) return '';
+    const holding = holdings.find((item) => docId(item) === String(row.holdingId));
+    const code = (holding?.symbol || '').trim().toUpperCase();
+    return formatMove(row.quantity || 0, code || '—');
+  };
 
   const save = async (confirmDuplicate = false) => {
     if (!draft) return;
@@ -310,6 +338,11 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
                 const many = group.rows.length > 1;
                 const open = openGroup === group.id;
                 const total = group.rows.reduce((sum, item) => sum + item.amount * moveSign(item), 0);
+                const flow = flowOf(row, filters.accountId);
+                const coin = figureOf(row);
+                const signed = row.type === 'transfer' ? (flow === 'out' ? -Math.abs(total) : Math.abs(total)) : total;
+                const mark = row.type === 'transfer' && flow === 'flat' ? '' : signed > 0 ? '+' : signed < 0 ? '−' : '';
+                const shown = coin ? `${mark}${coin}` : `${mark}${formatMove(Math.abs(signed), row.currency)}`;
                 return (
                   <li key={group.id} className="border-t border-slate-100 first:border-t-0 dark:border-white/10">
                     <button type="button" onClick={() => { if (many) setOpenGroup(open ? null : group.id); else openEdit(row); }} className="flex w-full items-center gap-3 px-4 py-3 text-left">
@@ -321,7 +354,7 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
                         </span>
                       </span>
                       <span className={cn('shrink-0 text-right text-[15px] font-semibold tabular-nums', toneOf(row))}>
-                        {total > 0 ? '+' : total < 0 ? '−' : ''}{formatMove(total, row.currency)}
+                        {shown}
                       </span>
                     </button>
                     {many && open && (
@@ -330,7 +363,7 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
                           <li key={docId(item)} className="border-t border-slate-100 first:border-t-0 dark:border-white/10">
                             <button type="button" onClick={() => openEdit(item)} className="flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left">
                               <span className="text-[13px] font-medium text-slate-500">{formatDay(item.date)} · {(item.description.split('·')[1] || '').trim()}</span>
-                              <span className={cn('text-xs font-semibold tabular-nums', toneOf(item))}>{moveSign(item) < 0 ? '−' : '+'}{formatMove(item.amount, item.currency)}</span>
+                              <span className={cn('text-xs font-semibold tabular-nums', toneOf(item))}>{(() => { const side = flowOf(item, filters.accountId); const prefix = item.type === 'transfer' ? (side === 'out' ? '−' : side === 'in' ? '+' : '') : (moveSign(item) < 0 ? '−' : '+'); return `${prefix}${figureOf(item) || formatMove(item.amount, item.currency)}`; })()}</span>
                             </button>
                           </li>
                         ))}

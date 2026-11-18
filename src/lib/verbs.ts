@@ -15,6 +15,7 @@ const CASH: Verb[] = [
 const BROKER: Verb[] = [
   { id: 'deposit', label: 'Meter' },
   { id: 'withdraw', label: 'Sacar' },
+  { id: 'pass', label: 'Pasar' },
   { id: 'buy', label: 'Comprar' },
   { id: 'sell', label: 'Vender' },
   { id: 'dividend', label: 'Dividendo' },
@@ -23,6 +24,7 @@ const BROKER: Verb[] = [
 const EXCHANGE: Verb[] = [
   { id: 'deposit', label: 'Meter' },
   { id: 'withdraw', label: 'Sacar' },
+  { id: 'pass', label: 'Pasar' },
   { id: 'buy', label: 'Comprar' },
   { id: 'sell', label: 'Vender' },
   { id: 'swap', label: 'Cambiar' },

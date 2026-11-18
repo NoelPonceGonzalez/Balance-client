@@ -14,6 +14,7 @@ import { jelly, quickOut, softSpring } from '@/lib/motion';
 import { formatDay, formatEur, formatSignedEur } from '@/lib/format';
 import { planImageFileName, renderPlanPng } from '@/lib/plan-image';
 import { accountProducts } from '@/lib/products';
+import { flowClass, flowIn, flowOut } from '@/lib/flow';
 import { cn, docId } from '@/lib/utils';
 import type { AccountRow, PlanForecast, PlanInvest, PlanMonthLine, PlanMonthView, PlanRow, TripSplit } from '@/lib/types';
 import { PlanTrial } from '@/components/PlanTrial';
@@ -359,7 +360,7 @@ function PlanCorner({ balance, target, delta, beat }: { balance: number; target:
   const share = target > 0 ? (balance / target) * 100 : 0;
   const frames = [{ text: formatShare(share), className: 'text-[#16c784]' }];
   if (delta != null && Math.abs(delta) > 0.5) {
-    frames.push({ text: formatSignedEur(delta), className: delta > 0 ? 'text-[#16c784]' : 'text-[#ea3943]' });
+    frames.push({ text: formatSignedEur(delta), className: flowClass(delta) });
   }
   return <TurnCorner frames={frames} beat={beat} />;
 }
@@ -454,8 +455,8 @@ function surprisePace(plan: PlanRow): { ahead: number; behind: number } {
 }
 
 function lineClass(line: PlanMonthLine): string {
-  if (line.tone === 'in' || line.tone === 'final') return 'text-[#16c784]';
-  if (line.tone === 'out') return 'text-[#ea3943]';
+  if (line.tone === 'in') return flowIn;
+  if (line.tone === 'out') return flowOut;
   return 'text-slate-900 dark:text-white';
 }
 
@@ -1417,7 +1418,7 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
                           {row.paid && <Check size={12} strokeWidth={3} className="shrink-0 text-[#16c784]" />}
                           <span className="truncate">{row.label}</span>
                         </span>
-                        <span className={cn('shrink-0 text-[13px] font-semibold tabular-nums', row.up ? 'text-[#16c784]' : 'text-[#ea3943]')}>{row.amount}</span>
+                        <span className={cn('shrink-0 text-[13px] font-semibold tabular-nums', row.up ? flowIn : flowOut)}>{row.amount}</span>
                       </div>
                     ))}
                   </div>
@@ -1478,8 +1479,8 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
                 <Input label="Fecha" type="date" min={`${extra.month}-01`} max={monthEnd(extra.month)} value={extra.date} onChange={(event) => setExtra({ ...extra, date: event.target.value })} />
               </div>
               <div className="flex gap-2">
-                <button type="button" onClick={() => setExtra({ ...extra, direction: 'out' })} className={cn('flex-1 rounded-full border py-2 text-sm font-semibold transition-colors', extra.direction === 'out' ? 'border-[#ea3943] text-[#ea3943]' : 'border-slate-200 text-slate-400')}>Sale</button>
-                <button type="button" onClick={() => setExtra({ ...extra, direction: 'in' })} className={cn('flex-1 rounded-full border py-2 text-sm font-semibold transition-colors', extra.direction === 'in' ? 'border-[#16c784] text-[#16c784]' : 'border-slate-200 text-slate-400')}>Entra</button>
+                <button type="button" onClick={() => setExtra({ ...extra, direction: 'out' })} className={cn('flex-1 rounded-full border py-2 text-sm font-semibold transition-colors', extra.direction === 'out' ? 'border-[color:var(--flow-out)] text-[color:var(--flow-out)]' : 'border-slate-200 text-slate-400')}>Sale</button>
+                <button type="button" onClick={() => setExtra({ ...extra, direction: 'in' })} className={cn('flex-1 rounded-full border py-2 text-sm font-semibold transition-colors', extra.direction === 'in' ? 'border-[color:var(--flow-in)] text-[color:var(--flow-in)]' : 'border-slate-200 text-slate-400')}>Entra</button>
               </div>
               {error && <p className="text-sm font-medium text-rose-600">{error}</p>}
               <Button onClick={() => void addExtra()}>Añadir</Button>

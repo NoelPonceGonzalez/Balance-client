@@ -415,6 +415,11 @@ export async function buildTaxReport(
       continue;
     }
 
+    if (row.type === 'transfer' && row.holdingId) {
+      effects.set(id, EFFECT.own);
+      continue;
+    }
+
     if (row.currency === 'EUR') {
       if (time && CASH_TYPES.has(row.type)) {
         addLeg(`${row.accountId}|${row.date}|${time}`, { row, kind: signOf(row) < 0 ? 'eurOut' : 'eurIn', asset: 'EUR', name: 'Euros', units: Math.abs(row.amount), eur: Math.abs(row.amount), crypto: false });
@@ -516,8 +521,27 @@ export async function buildTaxReport(
     }
   } else {
     for (const { row } of rows) {
-      if (row.date > end || row.currency === 'EUR') continue;
+      if (row.date > end) continue;
       const holding = row.holdingId ? holdingById.get(String(row.holdingId)) : undefined;
+      const crypto = holding?.assetClass === 'crypto';
+      if (crypto && row.type === 'transfer' && row.counterAccountId && (row.quantity ?? 0) > 0) {
+        const qty = Math.abs(row.quantity ?? 0);
+        const asset = assetOf(holding);
+        hold(String(row.accountId), asset, -qty);
+        hold(String(row.counterAccountId), asset, qty);
+        continue;
+      }
+      if (crypto && (row.type === 'buy' || row.type === 'sell') && (row.quantity ?? 0) > 0) {
+        const qty = Math.abs(row.quantity ?? 0);
+        hold(String(row.accountId), assetOf(holding), row.type === 'buy' ? qty : -qty);
+        continue;
+      }
+      if (crypto && row.type === 'adjustment' && (row.quantity ?? 0) > 0 && (row.direction === 'in' || row.direction === 'out')) {
+        const qty = Math.abs(row.quantity ?? 0);
+        hold(String(row.accountId), assetOf(holding), row.direction === 'in' ? qty : -qty);
+        continue;
+      }
+      if (row.currency === 'EUR') continue;
       if (holding ? holding.assetClass !== 'crypto' : FIAT.has(row.currency.toUpperCase())) continue;
       const amount = holding ? Math.abs(row.quantity ?? row.amount) : Math.abs(row.amount);
       hold(String(row.accountId), holding ? assetOf(holding) : row.currency.toUpperCase(), signOf(row) * amount);
@@ -743,16 +767,21 @@ export async function buildTaxReport(
       const holding = row.holdingId ? holdingById.get(String(row.holdingId)) : undefined;
       const leg = legOf.get(id);
       const asset = leg?.asset || (holding ? assetOf(holding) : row.currency.toUpperCase());
-      const quantity = (holding && row.quantity != null ? Math.abs(row.quantity) : Math.abs(row.amount)) * signOf(row);
-      const known = row.currency === 'EUR' && !holding ? Math.abs(row.amount) : exactEur.get(id) ?? (row.eurPerUnit && row.eurPerUnit > 0 ? Math.abs(row.amount * row.eurPerUnit) : null);
+      const coinPass = row.type === 'transfer' && Boolean(holding);
+      const quantity = coinPass ? Math.abs(row.quantity ?? 0) : (holding && row.quantity != null ? Math.abs(row.quantity) : Math.abs(row.amount)) * signOf(row);
+      const known = coinPass
+        ? Math.abs(row.amount)
+        : row.currency === 'EUR' && !holding ? Math.abs(row.amount) : exactEur.get(id) ?? (row.eurPerUnit && row.eurPerUnit > 0 ? Math.abs(row.amount * row.eurPerUnit) : null);
       const daily = known == null && asset !== 'EUR' ? pricer.get(asset, row.date, null) : null;
       const eur = known ?? (daily == null ? null : daily * Math.abs(quantity));
+      const from = platformOf(row.accountId);
+      const to = row.counterAccountId ? platformOf(row.counterAccountId) : '';
       return {
         date: row.date,
         time,
-        platform: platformOf(row.accountId),
-        operation: TYPE_LABEL[row.type] || row.type,
-        concept: conceptOf(row),
+        platform: from,
+        operation: coinPass ? 'Traspaso' : TYPE_LABEL[row.type] || row.type,
+        concept: coinPass ? `De ${from} a ${to}` : conceptOf(row),
         category: row.category || '',
         asset,
         quantity,

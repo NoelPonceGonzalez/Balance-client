@@ -18,6 +18,7 @@ import { glide, jelly, quickOut, softSpring } from '@/lib/motion';
 import { placeOnCurve, smoothPath } from '@/lib/curve';
 import { skinArtSteam } from '@/lib/skin-art';
 import { LineRangeTabs, inLineRange, type LineRangeId } from '@/components/LineRanges';
+import { flowClass } from '@/lib/flow';
 import { cn } from '@/lib/utils';
 import type { AccountProducts, ProductSection } from '@/lib/products';
 
@@ -262,8 +263,14 @@ interface BookedMove {
   description?: string;
   accountId: string;
   counterAccountId?: string | null;
+  holdingId?: string | null;
+  quantity?: number | null;
   direction?: 'in' | 'out' | null;
   applyToBalances?: boolean;
+}
+
+function coinPass(move: BookedMove): boolean {
+  return move.type === 'transfer' && Boolean(move.holdingId) && (move.quantity ?? 0) > 0;
 }
 
 function bookedDelta(move: BookedMove, accountId: string): number | null {
@@ -285,6 +292,7 @@ function bookedDelta(move: BookedMove, accountId: string): number | null {
 }
 
 function cashMove(move: BookedMove, currency: string): boolean {
+  if (coinPass(move)) return false;
   if (move.applyToBalances !== false) return true;
   if (move.type === 'buy' || move.type === 'sell' || move.type === 'fee' || move.type === 'reward' || move.type === 'transfer') return false;
   return (move.currency || currency).toUpperCase() === currency.toUpperCase();
@@ -816,7 +824,7 @@ function ActivityList({ rows, hidden, mode, autoFocus = false }: { rows: Activit
                   <span className="block truncate text-sm font-semibold">{row.label}</span>
                   <span className="block truncate text-[11px] font-medium text-slate-400">{row.note}</span>
                 </span>
-                <span className={cn('shrink-0 text-sm font-semibold tabular-nums', row.amount > 0 ? 'text-[#16c784]' : row.amount < 0 ? 'text-[#ea3943]' : 'text-slate-400')}>
+                <span className={cn('shrink-0 text-sm font-semibold tabular-nums', flowClass(row.amount))}>
                   {hidden ? '*****' : formatSignedEur(row.amount)}
                 </span>
               </>
@@ -1277,8 +1285,30 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
     ...row,
     onOpen: () => setDetail({ label: row.label, note: row.note, amount: row.amount, image: row.image }),
   }));
+  const passRows: Activity[] = current && bookedFor === current.key
+    ? booked.flatMap((move) => {
+      if (!coinPass(move)) return [];
+      const out = String(move.accountId) === current.key;
+      const into = String(move.counterAccountId || '') === current.key;
+      if (!out && !into) return [];
+      const amount = out ? -Math.abs(move.amount) : Math.abs(move.amount);
+      const label = (move.description || '').trim() || 'Traspaso';
+      const qty = move.quantity ?? 0;
+      const note = `${formatDay(move.date)} · ${out ? 'Sale' : 'Entra'}${qty > 0 ? ` · ${formatNumber(qty, 8)}` : ''} · el efectivo se queda`;
+      return [{
+        id: `pass:${move._id}:${current.key}`,
+        day: String(move.date || '').slice(0, 10),
+        label,
+        note,
+        amount,
+        onOpen: () => setDetail({ label, note, amount, image: null }),
+      }];
+    })
+    : [];
+  const passShown = asset ? passRows.filter((row) => row.label === asset.label) : passRows;
   const pageMoves = page && !current?.extras ? moveRows.filter((row) => page.items.some((item) => item.label === row.label)) : [];
-  const ledgerRows = ledger === 'cash' ? cashRows : asset ? pageMoves.filter((row) => row.label === asset.label) : page ? pageMoves : moveRows;
+  const cashView = [...passRows, ...cashRows].sort((a, b) => b.day.localeCompare(a.day) || a.label.localeCompare(b.label));
+  const ledgerRows = ledger === 'cash' ? cashView : asset ? pageMoves.filter((row) => row.label === asset.label) : page ? pageMoves : moveRows;
 
   const saveEntry = async () => {
     if (!entryDraft || !current) return;
@@ -1511,7 +1541,7 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
                 <ChevronRight size={18} className="shrink-0 text-slate-400" />
               </button>
               <div className="mt-2">
-                <ActivityList mode="peek" hidden={hidden} rows={cashRows} />
+                <ActivityList mode="peek" hidden={hidden} rows={cashView} />
               </div>
             </section>
           )}
@@ -1526,7 +1556,7 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
                       <span className="block truncate text-[15px] font-bold">{rule.label}</span>
                       <span className="block text-xs font-semibold text-slate-400">{rule.rhythm}</span>
                     </span>
-                    <span className={cn('shrink-0 text-[15px] font-semibold tabular-nums', rule.amount >= 0 ? 'text-[#16c784]' : 'text-[#ea3943]')}>{hidden ? '*****' : formatSignedEur(rule.amount)}</span>
+                    <span className={cn('shrink-0 text-[15px] font-semibold tabular-nums', flowClass(rule.amount))}>{hidden ? '*****' : formatSignedEur(rule.amount)}</span>
                     {rule.key && (
                       <button type="button" onClick={() => void removeFixed(rule.key || '')} className="shrink-0 text-[12px] font-semibold text-rose-600">Quitar</button>
                     )}
@@ -1818,6 +1848,14 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
               </motion.div>
             </AnimatePresence>
           )}
+          {showPortfolio && passShown.length > 0 && (
+            <section className="px-1 pt-4">
+              <h3 className="text-xl font-semibold tracking-tight">Movimientos</h3>
+              <div className="mt-2">
+                <ActivityList mode="peek" hidden={hidden} rows={passShown} />
+              </div>
+            </section>
+          )}
           {showPortfolio && <div aria-hidden className="h-8" />}
             </motion.div>
           </AnimatePresence>
@@ -1853,8 +1891,8 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
         <Modal title="Fijo" onClose={() => setFixedDraft(null)}>
           <div className="grid gap-3">
             <div className="flex gap-2">
-              <button type="button" onClick={() => setFixedDraft({ ...fixedDraft, direction: 'out' })} className={cn('flex-1 rounded-full border py-2 text-sm font-bold', fixedDraft.direction === 'out' ? 'border-[#ea3943] text-[#ea3943]' : 'border-slate-200 text-slate-400')}>Sale</button>
-              <button type="button" onClick={() => setFixedDraft({ ...fixedDraft, direction: 'in' })} className={cn('flex-1 rounded-full border py-2 text-sm font-bold', fixedDraft.direction === 'in' ? 'border-[#16c784] text-[#16c784]' : 'border-slate-200 text-slate-400')}>Entra</button>
+              <button type="button" onClick={() => setFixedDraft({ ...fixedDraft, direction: 'out' })} className={cn('flex-1 rounded-full border py-2 text-sm font-bold', fixedDraft.direction === 'out' ? 'border-[color:var(--flow-out)] text-[color:var(--flow-out)]' : 'border-slate-200 text-slate-400')}>Sale</button>
+              <button type="button" onClick={() => setFixedDraft({ ...fixedDraft, direction: 'in' })} className={cn('flex-1 rounded-full border py-2 text-sm font-bold', fixedDraft.direction === 'in' ? 'border-[color:var(--flow-in)] text-[color:var(--flow-in)]' : 'border-slate-200 text-slate-400')}>Entra</button>
             </div>
             <div className="flex gap-2">
               <button type="button" onClick={() => setFixedDraft({ ...fixedDraft, rhythm: 'month' })} className={cn('flex-1 rounded-full border py-2 text-sm font-bold', fixedDraft.rhythm === 'month' ? 'border-slate-900 text-slate-900 dark:border-white dark:text-white' : 'border-slate-200 text-slate-400')}>Cada mes</button>
@@ -1882,7 +1920,7 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
             <SpentMark label={detail.label} image={detail.image} />
             <div className="min-w-0">
               <p className="text-sm font-medium text-slate-500">{detail.note}</p>
-              <p className={cn('mt-1 text-2xl font-semibold tabular-nums tracking-tight', detail.amount > 0 ? 'text-[#16c784]' : detail.amount < 0 ? 'text-[#ea3943]' : 'text-slate-400')}>
+              <p className={cn('mt-1 text-2xl font-semibold tabular-nums tracking-tight', flowClass(detail.amount))}>
                 {hidden ? '*****' : formatSignedEur(detail.amount)}
               </p>
             </div>
@@ -1893,7 +1931,7 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
         <Modal title={entryDraft.name || (entryDraft.direction === 'in' ? 'Extra' : 'Gasto')} onClose={() => setEntryDraft(null)}>
           <div className="grid gap-3">
             <div className="flex gap-2">
-              {([['out', 'Sale', '#ea3943'], ['in', 'Entra', '#16c784']] as const).map(([id, label, color]) => (
+              {([['out', 'Sale', 'var(--flow-out)'], ['in', 'Entra', 'var(--flow-in)']] as const).map(([id, label, color]) => (
                 <button key={id} type="button" onClick={() => setEntryDraft({ ...entryDraft, direction: id })} className={cn('relative flex-1 overflow-hidden rounded-full border py-2 text-sm font-bold', entryDraft.direction === id ? 'text-white' : 'border-slate-200 text-slate-400')} style={entryDraft.direction === id ? { borderColor: color } : undefined}>
                   {entryDraft.direction === id && <motion.span layoutId="entry-way" transition={stillMotion() ? { duration: 0 } : jelly} className="absolute inset-0" style={{ background: color }} />}
                   <span className="relative">{label}</span>
