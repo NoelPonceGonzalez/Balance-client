@@ -5,7 +5,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { CsfloatFinder, SkinMarket, SkinSuggest, type SkinHit } from '@/components/CsfloatFinder';
 import { DragRow } from '@/components/DragRow';
 import { Modal } from '@/components/Modal';
-import { QuietLoad } from '@/components/QuietLoad';
+import { QuietLoad, markReady, arriveTokenNow } from '@/components/QuietLoad';
 import { Sparkline } from '@/components/Sparkline';
 import { useOpenOffer } from '@/components/offer-focus';
 import { Button } from '@/components/ui/Button';
@@ -1244,14 +1244,13 @@ function StoryDialog({ item, onClose }: { item: { kind: string; key: string; nam
       </div>
       {spans && <LineRangeTabs value={range} onChange={setRange} />}
       <div className="mt-4">
-        {waiting && points.length < 2 ? <QuietLoad kind="chart" /> : points.length >= 2 ? (
+        {item.key ? (
           <CashChart
-            key={`${item.key}:${loadedDays}`}
             quiet
             tall
             pending={waiting}
             points={points}
-            now={item.priceEur ?? points[points.length - 1].eur}
+            now={item.priceEur ?? points[points.length - 1]?.eur ?? 0}
             hidden={false}
             onValue={setLive}
             onDay={setLiveDay}
@@ -1337,17 +1336,22 @@ function MarketScreen({ focusListing, focusTick = 0, focusSkin = null }: { focus
   const [, setTick] = useState(0);
 
   const load = () => {
+    const token = arriveTokenNow();
     api<MarketBoard>('/api/market')
       .then((next) => {
         setData((prev) => keepSkinMoves(next, prev));
         setError('');
+        if (arriveTokenNow() === token) markReady();
         api<{ moves: { key: string; changePct: number | null; changeLabel: string; sparkline: number[] }[] }>('/api/market/moves')
           .then((pack) => {
             setData((current) => (current ? applySkinMoves(current, pack.moves) : current));
           })
           .catch(() => undefined);
       })
-      .catch((err: Error) => setError(err.message));
+      .catch((err: Error) => {
+        setError(err.message);
+        if (arriveTokenNow() === token) markReady();
+      });
   };
 
   useEffect(() => {

@@ -1,19 +1,20 @@
 import { Mark } from '@/components/Mark';
-import { cn } from '@/lib/utils';
 
-function Bone({ className }: { className?: string }) {
-  return <div className={cn('quiet-bone', className)} />;
+let arriveToken = 0;
+
+/** Abre una llegada nueva. Las páginas anteriores ya no pueden cerrarla. */
+export function beginArrive() {
+  arriveToken += 1;
+  return arriveToken;
 }
 
-function Seal() {
-  return (
-    <div className="flex items-center gap-3">
-      <span className="quiet-mark grid h-10 w-10 place-items-center rounded-[1rem] bg-[#1c1915] text-[#f6f1e8] shadow-[0_10px_24px_rgba(28,25,21,0.12)] dark:bg-[#f4efe6] dark:text-[#16140f] dark:shadow-[0_14px_30px_rgba(0,0,0,0.35)]">
-        <Mark size={18} />
-      </span>
-      <span className="text-[11px] font-semibold uppercase tracking-[0.32em] text-[#8a8175] dark:text-[#a89880]">Balance</span>
-    </div>
-  );
+export function arriveTokenNow() {
+  return arriveToken;
+}
+
+/** La página ya tiene lo suyo: la cortina puede retirarse. */
+export function markReady() {
+  window.dispatchEvent(new CustomEvent('pat-ready', { detail: arriveToken }));
 }
 
 export function QuietLoad({ kind = 'page' }: { kind?: 'screen' | 'page' | 'rows' | 'chart' }) {
@@ -34,21 +35,25 @@ export function QuietLoad({ kind = 'page' }: { kind?: 'screen' | 'page' | 'rows'
   }
   if (kind === 'chart') {
     return (
-      <div role="status" aria-live="polite" className="quiet-arrive">
+      <div role="status" aria-live="polite" className="quiet-arrive relative h-44">
         <span className="sr-only">Cargando</span>
-        <Bone className="h-44 w-full rounded-[1.6rem]" />
+        <div className="chart-hold absolute inset-0">
+          <svg viewBox="0 0 360 168" preserveAspectRatio="none" className="h-full w-full text-[#1c1915]/35 dark:text-[#f6f1e8]/35">
+            <path d="M0 118 C 48 116, 72 96, 110 92 S 168 70, 210 64 S 280 36, 360 28" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+          </svg>
+        </div>
       </div>
     );
   }
-  const lines = kind === 'rows' ? 4 : 3;
   return (
-    <div role="status" aria-live="polite" aria-busy="true" className="quiet-arrive">
+    <div role="status" aria-live="polite" aria-busy="true" className="quiet-arrive grid min-h-[52vh] place-items-center">
       <span className="sr-only">Cargando</span>
-      <Seal />
-      <div className="mt-5 space-y-3">
-        {Array.from({ length: lines }, (_, index) => (
-          <Bone key={index} className={cn(index === 0 && kind === 'page' ? 'h-32' : 'h-14', 'w-full rounded-[1.4rem]')} />
-        ))}
+      <div className="text-center text-[#1c1915] dark:text-[#f6f1e8]">
+        <span className="quiet-mark mx-auto grid h-12 w-12 place-items-center rounded-[1.15rem] bg-[#1c1915] text-[#f6f1e8] shadow-[0_12px_28px_rgba(28,25,21,0.16)] dark:bg-[#f4efe6] dark:text-[#16140f] dark:shadow-[0_16px_36px_rgba(0,0,0,0.4)]">
+          <Mark size={22} />
+        </span>
+        <p className="mt-4 text-[11px] font-semibold uppercase tracking-[0.32em] text-[#8a8175] dark:text-[#a89880]">Balance</p>
+        <span className="quiet-line" />
       </div>
     </div>
   );

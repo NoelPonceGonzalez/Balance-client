@@ -389,7 +389,6 @@ export function CashChart({ points, now, hidden, base = null, spent = null, labe
   const guideId = `${fillId}-guide`;
   const [box, setBox] = useState<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(0);
-  const [draw, setDraw] = useState(false);
   const [scrub, setScrub] = useState<{ x: number; y: number; eur: number; day: string } | null>(null);
   const scrubOn = useRef(false);
   const pointerRef = useRef<number | null>(null);
@@ -469,14 +468,6 @@ export function CashChart({ points, now, hidden, base = null, spent = null, labe
     setScrub(null);
   };
   const shownDay = focus?.day || line[line.length - 1]?.day || null;
-  useEffect(() => {
-    if (!enough || draw) {
-      if (still && enough) setDraw(true);
-      return;
-    }
-    const frame = requestAnimationFrame(() => setDraw(true));
-    return () => cancelAnimationFrame(frame);
-  }, [enough, draw, still]);
   useEffect(() => { onValue?.(value); }, [onValue, value]);
   useEffect(() => { if (shownDay) onDay?.(shownDay); }, [onDay, shownDay]);
   useEffect(() => {
@@ -544,9 +535,16 @@ export function CashChart({ points, now, hidden, base = null, spent = null, labe
         onPointerUp={(event) => { if (pointerRef.current === event.pointerId) releaseFinger(); }}
         onPointerCancel={(event) => { if (pointerRef.current === event.pointerId) releaseFinger(); }}
       >
+        {(pending || width === 0 || enough) && (
+          <div className={cn('chart-hold pointer-events-none absolute inset-0 transition-opacity duration-500', enough ? 'opacity-0' : 'opacity-100')} aria-hidden>
+            <svg viewBox="0 0 360 168" preserveAspectRatio="none" className="h-full w-full text-[#1c1915]/35 dark:text-[#f6f1e8]/35">
+              <path d="M0 118 C 48 116, 72 96, 110 92 S 168 70, 210 64 S 280 36, 360 28" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+            </svg>
+          </div>
+        )}
         {enough ? (
           <>
-            <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className={cn('absolute inset-0 overflow-visible', lined && !accent && 'text-slate-950 dark:text-white')} aria-label="Cómo ha ido el valor">
+            <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className={cn('chart-rise absolute inset-0 overflow-visible', lined && !accent && 'text-slate-950 dark:text-white')} aria-label="Cómo ha ido el valor">
               <defs>
                 <linearGradient id={fillId} x1="0" x2="0" y1="0" y2="1">
                   <stop offset="0%" stopColor={color} stopOpacity={accent ? 0.28 : 0.12} />
@@ -571,13 +569,10 @@ export function CashChart({ points, now, hidden, base = null, spent = null, labe
               </defs>
               <line x1={0} x2={width} y1={baseY} y2={baseY} stroke="currentColor" strokeOpacity={lined ? 0.16 : 0.22} strokeDasharray="1 5" strokeLinecap="round" className="text-slate-400 dark:text-white" />
               {!lined && !plain && (
-                <motion.path
+                <path
                   d={area}
                   fill={`url(#${fillId})`}
                   clipPath={cut != null ? `url(#${pastId})` : undefined}
-                  initial={still ? false : { opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ duration: still ? 0 : 0.7, delay: still ? 0 : 0.35, ease: [0.22, 1, 0.36, 1] }}
                 />
               )}
               <path
@@ -587,11 +582,7 @@ export function CashChart({ points, now, hidden, base = null, spent = null, labe
                 strokeWidth={lined ? 1.75 : 2.5}
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                pathLength={1}
-                strokeDasharray="1"
-                strokeDashoffset={still || draw ? 0 : 1}
                 clipPath={cut != null ? `url(#${pastId})` : undefined}
-                style={{ transition: still ? 'none' : 'stroke-dashoffset 1.05s cubic-bezier(0.22, 1, 0.36, 1)' }}
               />
               {cut != null && (
                 <path
@@ -620,7 +611,7 @@ export function CashChart({ points, now, hidden, base = null, spent = null, labe
                 style={{ left: mark[0], top: mark[1], background: color }}
                 initial={still ? false : { scale: 0 }}
                 animate={{ scale: 1 }}
-                transition={{ ...jelly, delay: still ? 0 : 1.05 }}
+                transition={{ ...jelly, delay: still ? 0 : 0.42 }}
               >
                 {!still && (
                   <motion.span
@@ -633,7 +624,7 @@ export function CashChart({ points, now, hidden, base = null, spent = null, labe
               </motion.span>
             )}
           </>
-        ) : (
+        ) : pending || width === 0 ? null : (
           <p className="pt-4 text-center text-xs font-medium text-slate-400">{line.length < 2 ? emptyText : ''}</p>
         )}
       </div>

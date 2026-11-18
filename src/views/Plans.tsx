@@ -6,7 +6,7 @@ import { Check, ChevronDown, ChevronLeft, ChevronRight, Copy, GripVertical, Imag
 import { ModalClose, modalPanelClass, Overlay } from '@/components/Modal';
 import { OriginGlyph, OriginPicker } from '@/components/OriginMark';
 import { PlatformLogo } from '@/components/PlatformLogo';
-import { QuietLoad } from '@/components/QuietLoad';
+import { QuietLoad, markReady, arriveTokenNow } from '@/components/QuietLoad';
 import { Button } from '@/components/ui/Button';
 import { Input, fieldClass } from '@/components/ui/Input';
 import { api } from '@/lib/api';
@@ -559,10 +559,17 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
   }, [focusId, focusTick]);
 
   useEffect(() => {
-    load().catch((err: Error) => setError(err.message)).finally(() => setReady(true));
+    let cancelled = false;
+    const token = arriveTokenNow();
+    load().catch((err: Error) => { if (!cancelled) setError(err.message); }).finally(() => {
+      if (cancelled) return;
+      setReady(true);
+      if (arriveTokenNow() === token) markReady();
+    });
     api<{ accounts: AccountRow[] }>('/api/accounts')
       .then((data) => setAccounts(data.accounts))
       .catch(() => setAccounts([]));
+    return () => { cancelled = true; };
   }, [books]);
 
   useEffect(() => {

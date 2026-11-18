@@ -1,9 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import { Shell, type Section } from '@/components/Shell';
 import { api, ApiError } from '@/lib/api';
 import { forgetWallets, loadWallets } from '@/lib/wallet-accounts';
-import { silk } from '@/lib/motion';
 import { disablePhonePush } from '@/lib/push';
 import type { User } from '@/lib/types';
 import { Dashboard } from '@/views/Dashboard';
@@ -16,6 +15,7 @@ import { JoinTrip } from '@/views/TripPlan';
 import { AppLock } from '@/components/AppLock';
 import { DeviceAccess } from '@/components/DeviceAccess';
 import { TicketCam } from '@/components/TicketCam';
+import { QuietLoad, arriveTokenNow, beginArrive } from '@/components/QuietLoad';
 
 function applyTheme(theme: User['theme']) {
   const dark = theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
@@ -45,12 +45,8 @@ export default function App() {
   const [focusListing, setFocusListing] = useState<string | null>(null);
   const [focusSkin, setFocusSkin] = useState<{ name: string; wear: string; label: string; image: string | null } | null>(null);
   const [opened, setOpened] = useState(() => sessionStorage.getItem('pat_open') === '1' && Boolean(sessionStorage.getItem('pat_gate')));
-  const [dissolving, setDissolving] = useState(false);
-  const finishLock = useCallback(() => {
-    setOpened(true);
-    setDissolving(true);
-  }, []);
-  const clearLock = useCallback(() => setDissolving(false), []);
+  const [opening, setOpening] = useState(false);
+  const welcomed = useRef(false);
 
   useEffect(() => {
     const openPlan = (event: Event) => {
@@ -134,6 +130,38 @@ export default function App() {
   }, [section]);
 
   const bookOpen = !user || user.lock == null || (user.lock === true && opened);
+  const bookLive = Boolean(user && bookOpen && user.lock !== false);
+  if (!bookLive) welcomed.current = false;
+  else if (!welcomed.current) {
+    welcomed.current = true;
+    if (section !== 'settings') {
+      beginArrive();
+      if (!opening) setOpening(true);
+    }
+  }
+
+  useEffect(() => {
+    if (!opening) return undefined;
+    let gone = false;
+    const finish = (event: Event) => {
+      if ((event as CustomEvent<number>).detail !== arriveTokenNow()) return;
+      if (gone) return;
+      gone = true;
+      document.getElementById('arrive')?.classList.add('is-done');
+      window.setTimeout(() => setOpening(false), 520);
+    };
+    const timer = window.setTimeout(() => {
+      if (gone) return;
+      gone = true;
+      document.getElementById('arrive')?.classList.add('is-done');
+      window.setTimeout(() => setOpening(false), 520);
+    }, 7000);
+    window.addEventListener('pat-ready', finish);
+    return () => {
+      window.removeEventListener('pat-ready', finish);
+      window.clearTimeout(timer);
+    };
+  }, [opening]);
 
   useEffect(() => {
     const lock = () => {
@@ -141,14 +169,12 @@ export default function App() {
       sessionStorage.removeItem('pat_gate');
       sessionStorage.removeItem('pat_open');
       setOpened(false);
-      setDissolving(false);
       forgetWallets();
     };
     const onLock = () => {
       sessionStorage.removeItem('pat_gate');
       sessionStorage.removeItem('pat_open');
       setOpened(false);
-      setDissolving(false);
       forgetWallets();
     };
     document.addEventListener('visibilitychange', lock);
@@ -182,7 +208,6 @@ export default function App() {
       sessionStorage.removeItem('pat_gate');
       sessionStorage.removeItem('pat_open');
       setOpened(false);
-      setDissolving(false);
       setUser(null);
     });
   };
@@ -192,7 +217,7 @@ export default function App() {
     const boot = document.getElementById('boot');
     if (!boot) return;
     boot.classList.add('is-done');
-    const timer = window.setTimeout(() => boot.remove(), 760);
+    const timer = window.setTimeout(() => boot.remove(), 460);
     return () => window.clearTimeout(timer);
   }, [ready]);
 
@@ -210,38 +235,49 @@ export default function App() {
       </div>
     );
   }
-  if (!user) return <LoginView onLogin={(next) => { setOffline(false); setDissolving(false); setOpened(sessionStorage.getItem('pat_open') === '1'); setSection('dashboard'); setHome((value) => value + 1); setUser(next); }} />;
+  if (!user) return <LoginView onLogin={(next) => { setOffline(false); setOpened(sessionStorage.getItem('pat_open') === '1'); setSection('dashboard'); setHome((value) => value + 1); setUser(next); }} />;
 
   if (user.lock === false) {
     return <AppLock mode="create" onUser={setUser} onOpen={() => setOpened(true)} />;
   }
 
-  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const showBook = bookOpen || dissolving;
-  const showLock = (user.lock === true && !bookOpen) || dissolving;
+  if (user.lock === true && !bookOpen) {
+    return (
+      <AppLock
+        mode="open"
+        onUser={setUser}
+        onOpen={() => setOpened(true)}
+      />
+    );
+  }
+
+  const openSection = (next: Section) => {
+    if (next !== section && next !== 'settings') {
+      beginArrive();
+      setOpening(true);
+    }
+    setSection(next);
+  };
 
   return (
     <>
-    {showBook && (
-    <motion.div
-      initial={dissolving || reduceMotion ? false : { opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={reduceMotion ? { duration: 0 } : silk}
-    >
     <Shell
       section={section}
-      onChange={(next) => { setSection(next); if (next === 'dashboard') setHome((value) => value + 1); }}
-      onPlan={(id) => { setFocusPlan(id); setFocusTick((value) => value + 1); setSection('plans'); }}
-      onListing={(id) => { setFocusListing(id); setFocusTick((value) => value + 1); setSection('market'); }}
+      onChange={(next) => {
+        openSection(next);
+        if (next === 'dashboard') setHome((value) => value + 1);
+      }}
+      onPlan={(id) => { setFocusPlan(id); setFocusTick((value) => value + 1); openSection('plans'); }}
+      onListing={(id) => { setFocusListing(id); setFocusTick((value) => value + 1); openSection('market'); }}
       onTicket={() => setTicket(true)}
       user={user}
       onSettled={() => setBooks((value) => value + 1)}
     >
       <motion.div
         key={section}
-        initial={reduceMotion ? false : { opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={reduceMotion ? { duration: 0 } : silk}
+        initial={window.matchMedia('(prefers-reduced-motion: reduce)').matches ? false : { opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
       >
         {section === 'dashboard' && <Dashboard heroMs={heroMs} home={home} books={books} />}
         {section === 'market' && <Market focusListing={focusListing} focusTick={focusTick} focusSkin={focusSkin} />}
@@ -260,7 +296,7 @@ export default function App() {
             sessionStorage.removeItem('pat_junta');
             setJunta(null);
             setFocusPlan(id);
-            setSection('plans');
+            openSection('plans');
           }}
         />
       )}
@@ -273,16 +309,10 @@ export default function App() {
         />
       )}
     </Shell>
-    </motion.div>
-    )}
-    {showLock && (
-      <AppLock
-        mode="open"
-        leaving={dissolving}
-        onUser={setUser}
-        onOpen={finishLock}
-        onGone={clearLock}
-      />
+    {opening && (
+      <div id="arrive" className="arrive-hold">
+        <QuietLoad kind="screen" />
+      </div>
     )}
     </>
   );

@@ -12,8 +12,5 @@ const SPRING_CURVE = 'linear(0, 0.06 2%, 0.24 5%, 0.53 10%, 0.82 16%, 1.02 22%, 
 /** Curva de muelle para animaciones hechas a mano (CSS o WAAPI). Sin soporte de linear(), un rebote simple. */
 export const SPRING_EASE = typeof CSS !== 'undefined' && CSS.supports('animation-timing-function', SPRING_CURVE) ? SPRING_CURVE : 'cubic-bezier(0.34, 1.4, 0.64, 1)';
 
-/** Llegada larga y sin rebote: páginas, velo y recargas. */
-export const silk = { duration: 0.62, ease: [0.22, 1, 0.36, 1] as const };
-
 /** Salida corta: lo que se va no rebota, para que lo nuevo entre enseguida. */
 export const quickOut = { duration: 0.14, ease: [0.4, 0, 1, 1] as const };

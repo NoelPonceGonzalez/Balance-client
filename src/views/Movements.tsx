@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { PlatformLogo } from '@/components/PlatformLogo';
-import { QuietLoad } from '@/components/QuietLoad';
+import { QuietLoad, markReady, arriveTokenNow } from '@/components/QuietLoad';
 import { Field, Input, fieldClass } from '@/components/ui/Input';
 import { EntrySheet } from '@/components/EntrySheet';
 import { Modal } from '@/components/Modal';
@@ -109,7 +109,14 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
   };
 
   useEffect(() => {
-    load().catch((err: Error) => setError(err.message)).finally(() => setReady(true));
+    let cancelled = false;
+    const token = arriveTokenNow();
+    load().catch((err: Error) => { if (!cancelled) setError(err.message); }).finally(() => {
+      if (cancelled) return;
+      setReady(true);
+      if (arriveTokenNow() === token) markReady();
+    });
+    return () => { cancelled = true; };
   }, [filters.q, filters.type, filters.accountId, filters.from, filters.to]);
 
   const faces = useMemo(() => moveFaces(rows), [rows]);
