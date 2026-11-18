@@ -252,10 +252,6 @@ export default function App() {
   }
 
   const openSection = (next: Section) => {
-    if (next !== section && next !== 'settings') {
-      beginArrive();
-      setOpening(true);
-    }
     setSection(next);
   };
 

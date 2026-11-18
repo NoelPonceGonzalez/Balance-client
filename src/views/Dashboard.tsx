@@ -1110,14 +1110,16 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
         return shapeLine(rows.map((item) => ({ quantity: item.quantity, source: item.quoteSource || '', quoteId: item.quoteId || '', unit: item.unitMarketValue || 0 }))).then((line) => ({ line, pricedToday }));
       })
       .then(({ line, pricedToday }) => {
-        if (cancelled || line.length < 2) return;
-        const flat = total - pricedToday;
-        const next = line.map((point) => ({ day: point.day, eur: Math.round((flat + point.eur) * 100) / 100 }));
-        next[next.length - 1] = { day: today, eur: total };
-        setLived(next);
+        if (cancelled) return;
+        if (line.length >= 2) {
+          const flat = total - pricedToday;
+          const next = line.map((point) => ({ day: point.day, eur: Math.round((flat + point.eur) * 100) / 100 }));
+          next[next.length - 1] = { day: today, eur: total };
+          setLived(next);
+        }
+        setLineReady(true);
       })
-      .catch(() => undefined)
-      .finally(() => { if (!cancelled) setLineReady(true); });
+      .catch(() => { if (!cancelled) setLineReady(true); });
     return () => { cancelled = true; };
   }, [data]);
 
@@ -1906,6 +1908,9 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
   const mask = (value: string) => (hidden ? '*****' : value);
   const slices = rows.filter((row) => row.value != null && row.value > 0).map((row) => ({ key: row.key, name: row.name, eur: row.value as number, color: row.color }));
   if (countExtras && extraWealth > 0) slices.push({ key: 'extras', name: 'Extras', eur: extraWealth, color: '#3F3A4A' });
+  const linePoints = lineReady
+    ? inLineRange((lived && lived.length >= 2 ? lived : data.series).map((point) => ({ day: point.day, eur: point.eur })), lineRange)
+    : [];
 
   return (
     <div className="mx-auto max-w-3xl space-y-4">
@@ -1939,21 +1944,28 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
       </motion.section>
 
       {chart === 'line' ? (
-        <CashChart
-          quiet
-          pending={!lineReady}
-          tone="ink"
-          hidden={hidden}
-          points={lineReady ? inLineRange((lived && lived.length >= 2 ? lived : data.series).map((point) => ({ day: point.day, eur: point.eur })), lineRange) : []}
-          now={shownWorth ?? data.series[data.series.length - 1]?.eur ?? 0}
-          base={lineRange === 'MAX' ? paidBase : null}
-          spent={lineRange === 'MAX' && paid > 0 ? paid : null}
-          beforePlot={lineReady ? <LineRangeTabs value={lineRange} onChange={setLineRange} /> : undefined}
-          onValue={setLineNow}
-          onDay={setLineDay}
-          onMove={setLineMove}
-          emptyText=""
-        />
+        <>
+          <LineRangeTabs value={lineRange} onChange={setLineRange} />
+          {linePoints.length >= 2 ? (
+            <CashChart
+              quiet
+              tone="ink"
+              hidden={hidden}
+              points={linePoints}
+              now={shownWorth ?? data.series[data.series.length - 1]?.eur ?? 0}
+              base={lineRange === 'MAX' ? paidBase : null}
+              spent={lineRange === 'MAX' && paid > 0 ? paid : null}
+              onValue={setLineNow}
+              onDay={setLineDay}
+              onMove={setLineMove}
+              emptyText=""
+            />
+          ) : (
+            <div className="mt-4 h-[168px]" role="status" aria-busy={!lineReady}>
+              <span className="sr-only">Cargando</span>
+            </div>
+          )}
+        </>
       ) : slices.length > 0 ? (
         <Donut slices={slices} hidden={hidden} />
       ) : (

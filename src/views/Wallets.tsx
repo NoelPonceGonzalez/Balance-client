@@ -404,24 +404,21 @@ export function CashChart({ points, now, hidden, base = null, spent = null, labe
   const line = [...byStamp.entries()].sort((a, b) => pointTime(a[0]) - pointTime(b[0])).map(([day, eur]) => ({ day, eur }));
   const height = plain ? 300 : tall ? 228 : 168;
   const still = stillMotion();
-  const fresh = !pending && line.length < 2 && Number.isFinite(now);
-  const enough = !pending && (fresh || line.length >= 2) && width > 0;
+  const enough = !pending && line.length >= 2 && width > 0;
   const times = line.map((point) => pointTime(point.day));
   const t0 = times[0] ?? 0;
   const tSpan = (times[times.length - 1] ?? 0) - t0 || 1;
-  const values = fresh ? [now] : line.map((point) => point.eur);
+  const values = line.map((point) => point.eur);
   const reference = base != null && base > 0 ? base : null;
   const low = Math.min(...values, ...(reference != null ? [reference] : []));
   const high = Math.max(...values, ...(reference != null ? [reference] : []));
   const pad = (high - low || Math.max(1, Math.abs(high) * 0.1)) * 0.12;
-  const top = fresh ? now + 1 : high + pad;
-  const bottom = fresh ? now - 1 : low - pad;
-  const xy: [number, number][] = fresh
-    ? [[0, height / 2], [width, height / 2]]
-    : line.map((point, index) => [
-      ((times[index] - t0) / tSpan) * width,
-      height - ((point.eur - bottom) / (top - bottom)) * height,
-    ]);
+  const top = high + pad;
+  const bottom = low - pad;
+  const xy: [number, number][] = line.map((point, index) => [
+    ((times[index] - t0) / tSpan) * width,
+    height - ((point.eur - bottom) / (top - bottom)) * height,
+  ]);
   const d = enough ? smoothPath(xy) : '';
   const area = enough ? `${d} L${width} ${height} L0 ${height} Z` : '';
   const first = reference ?? line[0]?.eur ?? now;
@@ -430,7 +427,7 @@ export function CashChart({ points, now, hidden, base = null, spent = null, labe
   const change = value - first;
   const pct = spent != null && spent > 0 ? (change / spent) * 100 : first > 0 ? (change / first) * 100 : null;
   const baseY = enough ? height - ((first - bottom) / (top - bottom)) * height : 0;
-  const ticks = enough && !fresh ? monthTicks(t0, t0 + tSpan) : [];
+  const ticks = enough ? monthTicks(t0, t0 + tSpan) : [];
   const lined = Boolean(tone);
   const accent = tone && tone !== 'ink' ? tone : null;
   const color = accent || 'var(--app-text)';
@@ -535,16 +532,9 @@ export function CashChart({ points, now, hidden, base = null, spent = null, labe
         onPointerUp={(event) => { if (pointerRef.current === event.pointerId) releaseFinger(); }}
         onPointerCancel={(event) => { if (pointerRef.current === event.pointerId) releaseFinger(); }}
       >
-        {(pending || width === 0 || enough) && (
-          <div className={cn('chart-hold pointer-events-none absolute inset-0 transition-opacity duration-500', enough ? 'opacity-0' : 'opacity-100')} aria-hidden>
-            <svg viewBox="0 0 360 168" preserveAspectRatio="none" className="h-full w-full text-[#1c1915]/35 dark:text-[#f6f1e8]/35">
-              <path d="M0 118 C 48 116, 72 96, 110 92 S 168 70, 210 64 S 280 36, 360 28" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
-            </svg>
-          </div>
-        )}
         {enough ? (
           <>
-            <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className={cn('chart-rise absolute inset-0 overflow-visible', lined && !accent && 'text-slate-950 dark:text-white')} aria-label="Cómo ha ido el valor">
+            <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className={cn('absolute inset-0 overflow-visible', lined && !accent && 'text-slate-950 dark:text-white')} aria-label="Cómo ha ido el valor">
               <defs>
                 <linearGradient id={fillId} x1="0" x2="0" y1="0" y2="1">
                   <stop offset="0%" stopColor={color} stopOpacity={accent ? 0.28 : 0.12} />
