@@ -17,6 +17,8 @@ export interface DockShiftOptions {
   /** Recorrido mínimo de scroll para que compactar tenga sentido. */
   minRoom: number;
   enabled: boolean;
+  /** Recibe una función para volver a expandir desde fuera (tocar la burbuja activa). */
+  control?: { current: (() => void) | null };
 }
 
 export function dockRoomFor(section: string): number {
@@ -24,7 +26,7 @@ export function dockRoomFor(section: string): number {
   return section === 'plans' ? 560 : 280;
 }
 
-export function useDockShift(scrollRef: RefObject<HTMLElement | null>, section: string, { minRoom, enabled }: DockShiftOptions): boolean {
+export function useDockShift(scrollRef: RefObject<HTMLElement | null>, section: string, { minRoom, enabled, control }: DockShiftOptions): boolean {
   const [compact, setCompact] = useState(false);
 
   useEffect(() => {
@@ -40,6 +42,10 @@ export function useDockShift(scrollRef: RefObject<HTMLElement | null>, section: 
       if (next === state) return;
       state = next;
       setCompact(next);
+    };
+    if (control) control.current = () => {
+      run = 0;
+      set(false);
     };
     const onScroll = () => {
       const y = scroller.scrollTop;
@@ -88,8 +94,9 @@ export function useDockShift(scrollRef: RefObject<HTMLElement | null>, section: 
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('pointercancel', onUp);
       narrow.removeEventListener('change', onNarrow);
+      if (control) control.current = null;
     };
-  }, [scrollRef, section, minRoom, enabled]);
+  }, [scrollRef, section, minRoom, enabled, control]);
 
   return enabled && compact;
 }

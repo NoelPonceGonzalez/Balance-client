@@ -20,7 +20,7 @@ import { useEffect, useId, useRef, useState } from 'react';
  *   --glass-blur                 desenfoque del fondo
  *   --glass-dispersion           separación de color en el canto (0 = ninguna)
  */
-const canRefract = (() => {
+export const canRefract = (() => {
   if (typeof navigator === 'undefined' || typeof document === 'undefined' || typeof ResizeObserver === 'undefined') return false;
   const brands = (navigator as Navigator & { userAgentData?: { brands?: { brand: string }[] } }).userAgentData?.brands;
   return Boolean(brands?.some((item) => /Chromium/i.test(item.brand)));
@@ -126,7 +126,7 @@ function encodePng(w: number, h: number, rgb: Uint8Array) {
 const mapCache = new Map<string, string>();
 
 /** Mapa de desplazamiento (R = x, G = y, 128 = sin mover) para un rectángulo redondeado w×h de radio r. */
-function displacementMap(w: number, h: number, r: number, bezel: number) {
+export function displacementMap(w: number, h: number, r: number, bezel: number) {
   const key = `${w}x${h}r${r}b${bezel}`;
   const cached = mapCache.get(key);
   if (cached) return cached;

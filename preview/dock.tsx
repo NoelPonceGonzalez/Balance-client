@@ -70,6 +70,13 @@ function MovementsScreen() {
     <div className="mx-auto max-w-3xl pb-28">
       <div className="sticky -top-2 z-20 -mx-3 bg-[var(--app-bg)] px-3 py-2">
         <h1 className="text-[28px] font-semibold tracking-tight">Movimientos</h1>
+        {/* Misma estructura que la pantalla real: el buscador vive dentro de «Buscar y fechas». */}
+        <details className="mt-1">
+          <summary className="cursor-pointer text-[13px] font-semibold text-slate-400">Buscar y fechas</summary>
+          <label className="mt-2 block text-[13px] font-semibold text-slate-500">Buscar
+            <input placeholder="Descripción o categoría" className="mt-1 h-10 w-full rounded-xl bg-slate-100 px-3 text-[15px] outline-none dark:bg-white/10" />
+          </label>
+        </details>
         <div className="mt-2 flex gap-2 text-[13px] font-semibold">
           {['Todos', 'Entradas', 'Salidas', 'Inversión'].map((label, index) => (
             <span key={label} className={`rounded-full px-3 py-1.5 ${index === 0 ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950' : 'bg-slate-100 text-slate-600 dark:bg-white/10 dark:text-slate-300'}`}>{label}</span>
