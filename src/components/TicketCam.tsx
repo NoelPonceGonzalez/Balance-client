@@ -1,15 +1,17 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import tesseractWorkerUrl from 'tesseract.js/dist/worker.min.js?url';
 import { createPortal } from 'react-dom';
-import { ChevronDown, ImagePlus, Plus, X } from 'lucide-react';
-import { motion } from 'motion/react';
+import { ChevronDown, ChevronLeft, ImagePlus, Plus, X } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
 import { modalPanelClass } from '@/components/Modal';
-import { softSpring } from '@/lib/motion';
+import { jelly, quickOut, softSpring } from '@/lib/motion';
+import { formatPct } from '@/lib/format';
 import { PlatformLogo } from '@/components/PlatformLogo';
 import { api, ApiError } from '@/lib/api';
 import { classifyLine, fold, groupForKind, isCashName, isLiquidName, looksLikeWallet, paintLine, readWalletText, type PhotoClass, type PhotoRead } from '@/lib/read-wallet';
 import { cachedWallets, loadWallets, type WalletAccount } from '@/lib/wallet-accounts';
 import { PLATFORMS, type PlatformPreset } from '@/lib/platforms';
+import { flowIn, flowOut } from '@/lib/flow';
 import { cn } from '@/lib/utils';
 import type { PlanRow } from '@/lib/types';
 
@@ -151,6 +153,41 @@ function homesByCode(rows: BookHolding[], code: string, accountId: string): Book
   return rows.filter((item) => String(item.accountId) !== accountId && item.quantity > 1e-8 && coinCode(item) === code);
 }
 
+function holdingWorth(item: BookHolding): number {
+  const price = item.unitMarketValue ?? 0;
+  if (item.quantity > 1e-8 && price > 0) return item.quantity * price;
+  return item.costBasis ?? 0;
+}
+
+/** El valor de la foto cabe en una bolsa tuya, en cantidad o en euros. */
+function eurosFit(got: number, bag: number): boolean {
+  return bag > 0 && Math.abs(got - bag) <= Math.max(5, bag * 0.08);
+}
+
+/** De dónde sale una línea nueva: de otra bolsa igual, o del efectivo de esta cartera. */
+function arrivalOf(line: WalletLine, mine: BookHolding[], book: BookHolding[], target: string): { kind: 'pass'; home: BookHolding } | { kind: 'buy'; spent: number } | { kind: 'same' } | null {
+  const amount = readAmount(line.amount);
+  if (!(amount > 0) || isCashName(line.name) || line.cash) return null;
+  const gain = line.gain.trim() ? readAmount(line.gain) : null;
+  const cost = gain != null && Number.isFinite(gain) ? cents(amount - gain) : null;
+  const found = holdingFor(mine, line.name);
+  const here = found ? holdingWorth(found) : 0;
+  const extra = found ? amount - here : amount;
+  const noise = Math.max(1, amount * 0.005);
+  if (found && Math.abs(extra) <= noise) return { kind: 'same' };
+  if (found && extra < -noise) return null;
+  const spent = !found
+    ? cents(cost != null && cost > 0 ? cost : amount)
+    : cents(cost != null && cost - (found.costBasis ?? 0) > 0.5 ? cost - (found.costBasis ?? 0) : extra);
+  const ticker = tickerOf(line.name);
+  const homes = (ticker ? homesByCode(book, ticker, target) : book.filter((item) => String(item.accountId) !== target && item.quantity > 1e-8 && fold(item.name) === fold(line.name)))
+    .filter((item) => eurosFit(found ? extra : amount, holdingWorth(item)))
+    .sort((a, b) => Math.abs(holdingWorth(a) - (found ? extra : amount)) - Math.abs(holdingWorth(b) - (found ? extra : amount)));
+  if (homes[0]) return { kind: 'pass', home: homes[0] };
+  if (!(spent > 0)) return null;
+  return { kind: 'buy', spent };
+}
+
 /** Nombres de las otras cuentas cuya bolsa explica la foto. Vacío si no hay duda. */
 function originHomes(positions: WalletLine[], mine: BookHolding[], book: BookHolding[], target: string, empty: boolean): BookHolding[] {
   const foundHomes: BookHolding[] = [];
@@ -210,13 +247,20 @@ async function postPass(source: BookHolding, dest: BookHolding, quantity: number
   dest.quantity = Number((dest.quantity + quantity).toFixed(8));
 }
 
+function otherAccount(name: string, rows: { id: string; name: string; platform?: string }[], currentId: string) {
+  const folded = fold(name);
+  const hits = rows.filter((account) => {
+    if (account.id === currentId) return false;
+    return [account.name, account.platform || ''].some((label) => {
+      const key = fold(label);
+      return key.length >= 3 && folded.includes(key);
+    });
+  });
+  return hits.sort((a, b) => fold(b.name).length - fold(a.name).length)[0] || null;
+}
+
 function PhotoWash({ src }: { src: string }) {
-  return (
-    <>
-      <img src={src} alt="" className="absolute inset-0 h-full w-full scale-110 object-cover blur-3xl" />
-      <div className="absolute inset-0 bg-white/80" />
-    </>
-  );
+  return <img src={src} alt="" className="absolute inset-0 h-full w-full scale-110 object-cover blur-2xl" />;
 }
 
 function ReadMark() {
@@ -449,6 +493,22 @@ function euros(value: number): string {
 
 function showAmount(value: number): string {
   return new Intl.NumberFormat('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
+}
+
+function coinTotal(value: number): string {
+  if (!(value > 0) || !Number.isFinite(value)) return '';
+  const digits = value >= 100 ? 2 : value >= 1 ? 4 : 8;
+  return value.toFixed(digits).replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
+}
+
+function livePrice(name: string, rows: BookHolding[]): number {
+  const ticker = tickerOf(name);
+  const hit = rows.find((item) => {
+    if (!((item.unitMarketValue ?? 0) > 0)) return false;
+    if (ticker && (tickerOf(item.name) === ticker || (item.symbol || '').trim().toUpperCase() === ticker)) return true;
+    return fold(item.name) === fold(name);
+  });
+  return hit?.unitMarketValue || 0;
 }
 
 function readAmount(raw: string): number {
@@ -741,6 +801,34 @@ export function TicketCam({
   const [mark, setMark] = useState<'idle' | 'spin' | 'ok' | 'bad'>('idle');
   const [origin, setOrigin] = useState<'move' | 'new' | null>(null);
   const [originAsk, setOriginAsk] = useState('');
+  const [counterFor, setCounterFor] = useState<Record<string, string>>({});
+  const [sidePick, setSidePick] = useState<{ key: string; side: 'out' | 'in' } | null>(null);
+  const [cameFrom, setCameFrom] = useState('');
+  const [fundPick, setFundPick] = useState(false);
+  const [giftKeys, setGiftKeys] = useState<Record<string, boolean>>({});
+  const [book, setBook] = useState<BookHolding[]>([]);
+  const [gainBeat, setGainBeat] = useState(0);
+
+  useEffect(() => {
+    if (shot !== 'cartera') return undefined;
+    let cancel = false;
+    api<{ holdings: BookHolding[] }>('/api/holdings')
+      .then((data) => {
+        if (!cancel) setBook(data.holdings || []);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancel = true;
+    };
+  }, [shot, walletId]);
+
+  useEffect(() => {
+    if (shot !== 'cartera') return undefined;
+    const saved = Number(localStorage.getItem('pat_hero_ms'));
+    const ms = Number.isFinite(saved) && saved >= 1000 ? saved : 3200;
+    const timer = window.setInterval(() => setGainBeat((value) => value + 1), ms);
+    return () => window.clearInterval(timer);
+  }, [shot]);
 
   useEffect(() => {
     let cancel = false;
@@ -816,6 +904,11 @@ export function TicketCam({
         setFresh(null);
       }
     }
+    setCounterFor({});
+    setSidePick(null);
+    setCameFrom('');
+    setFundPick(false);
+    setGiftKeys({});
     setWalletLines(read.lines.map((line, index) => {
       const tone = line.gain == null ? tones.find((item) => Math.abs(item.value - Math.abs(line.amount)) < 0.02)?.ink || '' : '';
       return {
@@ -1010,6 +1103,27 @@ export function TicketCam({
   }));
   const linked = plans.filter((plan) => plan.kind !== 'gastos' && (plan.linkedAccountIds || []).map(String).includes(accountId));
   const followed = plans.filter((plan) => plan.kind !== 'gastos' && walletId && (plan.linkedAccountIds || []).map(String).includes(walletId));
+  const movesBetween = walletLines.flatMap((line) => {
+    const amountValue = readAmount(line.amount);
+    if (!line.name.trim() || !Number.isFinite(amountValue) || amountValue === 0) return [];
+    const picked = accounts.find((account) => account.id === counterFor[line.key]);
+    const other = picked && picked.id !== walletId ? picked : otherAccount(line.name, accounts, walletId);
+    if (!other || other.id === walletId) return [];
+    return [{ line, amountValue, other }];
+  });
+  const freshLines = walletLines.flatMap((line) => {
+    const amountValue = readAmount(line.amount);
+    if (!walletId || !(amountValue > 0) || isCashName(line.name) || line.cash) return [];
+    if (movesBetween.some((item) => item.line.key === line.key)) return [];
+    const mine = book.filter((item) => String(item.accountId) === walletId);
+    const arrival = arrivalOf(line, mine, book, walletId);
+    if (arrival?.kind !== 'buy') return [];
+    return [{ line, spent: arrival.spent }];
+  });
+  const pickingSource = freshLines.length > 0 && !catalog && !sidePick && (fundPick || !cameFrom);
+  const sourceAccount = accounts.find((account) => account.id === cameFrom) || null;
+  const touchedIds = [...new Set([walletId, ...movesBetween.map((item) => item.other.id), ...(cameFrom && cameFrom !== 'new' ? [cameFrom] : [])].filter(Boolean))];
+  const followedTouch = plans.filter((plan) => plan.kind !== 'gastos' && touchedIds.some((id) => (plan.linkedAccountIds || []).map(String).includes(id)));
   const bankName = accounts.find((account) => account.id === accountId)?.name || 'ese banco';
   const other = members.find((member) => member.userId === payer);
 
@@ -1090,14 +1204,38 @@ export function TicketCam({
     setWalletLines((rows) => rows.map((line) => ({ ...line, assetClass: classifyLine(line.name, group) })));
     setOrigin(null);
     setOriginAsk('');
+    setSidePick(null);
+    setFundPick(false);
+    setCameFrom((current) => (current === id ? '' : current));
     setError('');
+  };
+
+  const assignSide = (id: string) => {
+    if (!sidePick) {
+      retitle(id);
+      return;
+    }
+    const line = walletLines.find((item) => item.key === sidePick.key);
+    const amountValue = line ? readAmount(line.amount) : 0;
+    const picksPhoto = (sidePick.side === 'out') === amountValue < 0;
+    const otherId = counterFor[sidePick.key] || otherAccount(line?.name || '', accounts, walletId)?.id || '';
+    if (picksPhoto) {
+      if (otherId && id === otherId) return;
+      retitle(id);
+      return;
+    }
+    if (id === walletId) return;
+    setCounterFor((current) => ({ ...current, [sidePick.key]: id }));
+    setSidePick(null);
+    setCatalog(false);
+    setQuery('');
   };
 
   const applyPlatform = (preset: PlatformPreset) => {
     const key = fold(preset.name);
     const existing = accounts.find((item) => fold(item.name) === key || fold(item.platform) === key);
     if (existing) {
-      retitle(existing.id);
+      assignSide(existing.id);
       return;
     }
     touched.current = true;
@@ -1248,7 +1386,9 @@ export function TicketCam({
               continue;
             }
           }
-          const type = amount < 0 ? 'withdrawal' : 'deposit';
+          const chosenOther = accounts.find((account) => account.id === counterFor[line.key]);
+          const other = chosenOther && chosenOther.id !== target ? chosenOther : otherAccount(line.name, accounts, target);
+          const type = other ? 'transfer' : amount < 0 ? 'withdrawal' : 'deposit';
           const key = flowKey(type, Math.abs(amount), line.name);
           const already = seen.get(key) || 0;
           if (already > 0) {
@@ -1264,7 +1404,8 @@ export function TicketCam({
                 amount: Math.abs(amount),
                 currency: 'EUR',
                 description: line.name.trim(),
-                accountId: target,
+                accountId: other && amount >= 0 ? other.id : target,
+                counterAccountId: other ? (amount < 0 ? other.id : target) : null,
                 applyToBalances: true,
                 confirmDuplicate: true,
               }),
@@ -1314,12 +1455,34 @@ export function TicketCam({
       const book = await api<{ holdings: BookHolding[] }>('/api/holdings');
       const mine = (book.holdings || []).filter((item) => String(item.accountId) === target);
       let cashShift = 0;
-      let cashUnbooked = 0;
       const writePosition = async (line: WalletLine, amount: number) => {
         const gain = line.gain.trim() ? readAmount(line.gain) : null;
         const cost = gain != null && Number.isFinite(gain) ? Math.round((amount - gain) * 100) / 100 : null;
         const found = holdingFor(mine, line.name);
         const price = found?.unitMarketValue ?? 0;
+        const funded = (() => {
+          const arrivalNow = arrivalOf(line, mine, book.holdings || [], target);
+          if (arrivalNow?.kind !== 'buy') return '';
+          if (giftKeys[line.key] || cameFrom === 'new') return 'new';
+          return cameFrom && cameFrom !== target ? cameFrom : '';
+        })();
+        const takeElsewhere = async (spent: number) => {
+          if (funded === 'new' || !funded || !(spent > 0)) return;
+          const there = accounts.find((account) => account.id === target)?.name || '';
+          await api('/api/movements', {
+            method: 'POST',
+            body: JSON.stringify({
+              type: 'withdrawal',
+              date: madridDay(),
+              amount: spent,
+              currency: 'EUR',
+              description: there ? `${line.name.trim()} en ${there}` : line.name.trim(),
+              accountId: funded,
+              applyToBalances: true,
+              confirmDuplicate: true,
+            }),
+          });
+        };
         if (found && (found.quoteSource === 'coingecko' || found.quoteSource === 'yahoo') && price > 0) {
           // Con cotización en vivo la foto no pisa el precio. Si la diferencia es una bolsa tuya en otra cuenta, es un traspaso.
           const nextQty = amount / price;
@@ -1338,6 +1501,14 @@ export function TicketCam({
             }
             const spent = cents(cost != null && cost - costNow > 0.5 ? cost - costNow : extra);
             const quantity = nextQty - found.quantity;
+            if (funded) {
+              await api(`/api/holdings/${found._id}`, {
+                method: 'PATCH',
+                body: JSON.stringify({ buy: { at: madridMinute(), spentEur: spent, mode: 'manual', quantity: Number(quantity.toFixed(8)) } }),
+              });
+              await takeElsewhere(spent);
+              return;
+            }
             if (await postTrade(target, found, 'buy', spent, quantity, found.name)) cashShift -= spent;
             else {
               await api(`/api/holdings/${found._id}`, {
@@ -1415,9 +1586,25 @@ export function TicketCam({
             await postPass(home, dest, home.quantity, home.quantity * live.unitMarketValue);
             return;
           }
-          // Una cripto nueva en la cartera se enlaza a su precio en vivo y cuenta como compra, para que la vean los planes.
           const spent = cents(cost != null && cost > 0 ? cost : amount);
-          await api('/api/holdings', {
+          if (funded) {
+            await api('/api/holdings', {
+              method: 'POST',
+              body: JSON.stringify({
+                accountId: target,
+                name: line.name.trim(),
+                symbol: ticker,
+                assetClass: 'crypto',
+                currency: 'EUR',
+                quoteSource: 'coingecko',
+                quoteId: coinId,
+                buy: { at: madridMinute(), spentEur: spent, mode: 'manual', quantity },
+              }),
+            });
+            await takeElsewhere(spent);
+            return;
+          }
+          const created = await api<{ holding: BookHolding }>('/api/holdings', {
             method: 'POST',
             body: JSON.stringify({
               accountId: target,
@@ -1425,28 +1612,77 @@ export function TicketCam({
               symbol: ticker,
               assetClass: 'crypto',
               currency: 'EUR',
+              quantity: 0,
               quoteSource: 'coingecko',
               quoteId: coinId,
-              buy: { at: madridMinute(), spentEur: spent, mode: 'manual', quantity },
             }),
           });
+          const bought = created.holding;
+          bought.accountId = String(bought.accountId);
+          await postTrade(target, bought, 'buy', spent, quantity, line.name.trim());
           cashShift -= spent;
-          cashUnbooked -= spent;
           return;
         }
-        await api('/api/holdings', {
+        const arrival = !asNew ? arrivalOf(line, mine, book.holdings || [], target) : null;
+        const spent = cents(cost != null && cost > 0 ? cost : amount);
+        if (arrival?.kind === 'pass') {
+          const created = await api<{ holding: BookHolding }>('/api/holdings', {
+            method: 'POST',
+            body: JSON.stringify({
+              accountId: target,
+              name: line.name.trim(),
+              symbol: ticker || '',
+              assetClass: line.assetClass,
+              currency: 'EUR',
+              quantity: 0,
+              unitMarketValue: arrival.home.quantity > 0 ? amount / arrival.home.quantity : amount,
+            }),
+          });
+          const dest = created.holding;
+          dest.accountId = String(dest.accountId);
+          book.holdings = [...(book.holdings || []), dest];
+          await postPass(arrival.home, dest, arrival.home.quantity, holdingWorth(arrival.home));
+          return;
+        }
+        if (funded) {
+          await api('/api/holdings', {
+            method: 'POST',
+            body: JSON.stringify({
+              accountId: target,
+              name: line.name.trim(),
+              symbol: ticker || '',
+              assetClass: line.assetClass,
+              currency: 'EUR',
+              quantity: 1,
+              unitMarketValue: amount,
+              ...(spent > 0 ? { costBasis: spent } : {}),
+            }),
+          });
+          await takeElsewhere(spent);
+          return;
+        }
+        const created = await api<{ holding: BookHolding }>('/api/holdings', {
           method: 'POST',
           body: JSON.stringify({
             accountId: target,
             name: line.name.trim(),
-            symbol: '',
+            symbol: ticker || '',
             assetClass: line.assetClass,
-            quantity: 1,
-            unitMarketValue: amount,
             currency: 'EUR',
-            ...(cost != null && cost >= 0 ? { costBasis: cost } : {}),
+            quantity: 0,
+            unitMarketValue: amount,
           }),
         });
+        const bought = created.holding;
+        bought.accountId = String(bought.accountId);
+        const moved = await postTrade(target, bought, 'buy', spent, 1, line.name.trim());
+        if (!moved) {
+          await api(`/api/holdings/${bought._id}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ quantity: 1, unitMarketValue: amount, ...(spent > 0 ? { costBasis: spent } : {}) }),
+          });
+        }
+        cashShift -= spent;
       };
       for (const line of positions) await writePosition(line, readAmount(line.amount));
       if (positions.length === 0 && touchedCash && pocket === 0) {
@@ -1479,10 +1715,8 @@ export function TicketCam({
       if (loose !== 0 || cashShift !== 0) {
         // Si la foto trae el efectivo, ese es el bueno; si no, las compras y ventas lo han movido ya.
         const base = touchedCash ? pocket : pocket + cashShift;
-        const next = Math.max(0, cents(base + loose));
-        if (loose !== 0 || touchedCash || next !== cents(pocket + cashShift - cashUnbooked)) {
-          await api(`/api/accounts/${target}`, { method: 'PATCH', body: JSON.stringify({ balance: next }) });
-        }
+        const next = touchedCash ? Math.max(0, cents(base + loose)) : cents(base + loose);
+        await api(`/api/accounts/${target}`, { method: 'PATCH', body: JSON.stringify({ balance: next }) });
       }
       setMark('ok');
       window.setTimeout(onSaved, 720);
@@ -1581,37 +1815,68 @@ export function TicketCam({
           <PhotoWash src={photo} />
           <div className="absolute inset-0 flex items-end justify-center p-3 sm:items-center" onClick={close}>
             {shot === 'cartera' ? (
-            <motion.div role="dialog" aria-labelledby="wallet-read" className={cn(modalPanelClass, 'flex max-h-[85dvh] max-w-md flex-col overflow-hidden p-0')} onClick={(event) => event.stopPropagation()} initial={prefersStill() ? false : sheetIn} animate={sheetOn} transition={sheetSpring}>
-              <div className="mb-4 flex shrink-0 items-start justify-between gap-3 px-5 pt-5">
-                <button type="button" aria-expanded={catalog} onClick={() => { setCatalog((open) => !open); setQuery(''); setError(''); }} className="min-w-0 text-left">
+            <motion.div role="dialog" aria-labelledby="wallet-read" className={cn(modalPanelClass, 'flex max-h-[85dvh] max-w-md flex-col overflow-hidden border-0 bg-white/70 p-0 shadow-none ring-0 backdrop-blur-xl dark:bg-white/10')} onClick={(event) => event.stopPropagation()} initial={prefersStill() ? false : sheetIn} animate={sheetOn} transition={sheetSpring}>
+              <div className="mb-4 flex shrink-0 items-start gap-1 px-2 pt-4">
+                <button type="button" onClick={close} className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-slate-800 dark:text-slate-100" aria-label="Cerrar">
+                  <ChevronLeft size={22} />
+                </button>
+                {movesBetween.length > 0 ? (
+                  <div className="min-w-0 flex-1 pt-1 text-left">
+                    <p className="text-[13px] font-medium text-slate-500">De la foto</p>
+                    <h2 id="wallet-read" className="truncate text-[22px] font-semibold tracking-tight">{(() => {
+                      const move = movesBetween[0];
+                      const hereName = accounts.find((account) => account.id === walletId)?.name || '';
+                      const fromName = move.amountValue < 0 ? hereName : move.other.name;
+                      const toName = move.amountValue < 0 ? move.other.name : hereName;
+                      return fromName && toName ? `De ${fromName} a ${toName}` : 'Traspaso';
+                    })()}</h2>
+                  </div>
+                ) : (
+                <button type="button" aria-expanded={catalog} onClick={() => { setCatalog((open) => !open); setFundPick(false); setQuery(''); setError(''); }} className="min-w-0 flex-1 pt-1 text-left">
                   <p className="text-[13px] font-medium text-slate-500">De la foto</p>
                   <h2 id="wallet-read" className="flex items-center gap-1 text-[22px] font-semibold tracking-tight">
                     <span className="truncate">{accounts.find((account) => account.id === walletId)?.name || fresh?.name || 'Elige la cartera'}</span>
                     <ChevronDown size={18} className={cn('shrink-0 text-slate-400 transition-transform', catalog && 'rotate-180')} />
                   </h2>
                 </button>
-                <button type="button" onClick={close} className="shrink-0 rounded-full border border-slate-200/90 bg-white/60 px-3 py-1 text-[13px] font-medium text-slate-600">Cerrar</button>
+                )}
               </div>
+              {(pickingSource || (movesBetween.length === 0 && freshLines.length === 0) || sidePick || catalog) && (
               <ChipRail>
-                {fresh && !accounts.some((account) => fold(account.name) === fold(fresh.name) || fold(account.platform || '') === fold(fresh.name)) && (
+                {fresh && !pickingSource && !accounts.some((account) => fold(account.name) === fold(fresh.name) || fold(account.platform || '') === fold(fresh.name)) && (
                   <button data-chip key={fresh.id} type="button" aria-pressed onClick={() => { setCatalog(false); setQuery(''); }} className="inline-flex shrink-0 snap-start items-center gap-2 rounded-full bg-slate-950 px-3 py-2 text-[13px] font-semibold text-white dark:bg-white dark:text-slate-950">
                     <PlatformLogo name={fresh.name} size={22} />
                     {fresh.name}
                   </button>
                 )}
-                {walletWait && accounts.length === 0 && (
+                {walletWait && accounts.length === 0 && !pickingSource && (
                   <span className="inline-flex shrink-0 items-center rounded-full bg-slate-100 px-3 py-2 text-[13px] font-medium text-slate-400">Buscando tus carteras…</span>
                 )}
-                {[...accounts].sort((a, b) => Number(b.id === walletId) - Number(a.id === walletId)).map((account) => {
-                  const on = walletId === account.id;
+                {pickingSource && accounts.filter((account) => account.id !== walletId).map((account) => (
+                  <button data-chip key={account.id} type="button" aria-pressed={cameFrom === account.id} onClick={() => { setCameFrom(account.id); setFundPick(false); }} className={cn('inline-flex shrink-0 snap-start items-center gap-2 rounded-full px-3 py-2 text-[13px] font-semibold', cameFrom === account.id ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950' : 'bg-slate-100 text-slate-600 dark:bg-white/10 dark:text-slate-200')}>
+                    <PlatformLogo name={account.platform || account.name} size={22} />
+                    {account.name}
+                  </button>
+                ))}
+                {pickingSource && (
+                  <button data-chip type="button" aria-pressed={cameFrom === 'new'} onClick={() => { setCameFrom('new'); setFundPick(false); }} className={cn('inline-flex shrink-0 snap-start items-center rounded-full px-3 py-2 text-[13px] font-semibold', cameFrom === 'new' ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950' : 'bg-slate-100 text-slate-600 dark:bg-white/10 dark:text-slate-200')}>
+                    Es nuevo
+                  </button>
+                )}
+                {!pickingSource && [...accounts].sort((a, b) => Number(b.id === walletId) - Number(a.id === walletId)).map((account) => {
+                  const move = sidePick ? movesBetween.find((item) => item.line.key === sidePick.key) : null;
+                  const outgoing = (move?.amountValue || 0) < 0;
+                  const sideId = !move || !sidePick ? walletId : ((sidePick.side === 'out') === outgoing ? walletId : move.other.id);
+                  const on = account.id === sideId;
                   return (
-                    <button data-chip key={account.id} type="button" aria-pressed={on} onClick={() => retitle(account.id)} className={cn('inline-flex shrink-0 snap-start items-center gap-2 rounded-full px-3 py-2 text-[13px] font-semibold', on ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950' : 'bg-slate-100 text-slate-600 dark:bg-white/10 dark:text-slate-200')}>
+                    <button data-chip key={account.id} type="button" aria-pressed={on} onClick={() => assignSide(account.id)} className={cn('inline-flex shrink-0 snap-start items-center gap-2 rounded-full px-3 py-2 text-[13px] font-semibold', on ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950' : 'bg-slate-100 text-slate-600 dark:bg-white/10 dark:text-slate-200')}>
                       <PlatformLogo name={account.platform || account.name} size={22} />
                       {account.name}
                     </button>
                   );
                 })}
               </ChipRail>
+              )}
               {catalog ? (
                 <input
                   value={query}
@@ -1625,8 +1890,14 @@ export function TicketCam({
               ) : !walletId && !fresh && !reading ? (
                 <p className="mt-3 px-5 text-sm font-medium text-slate-500">Pulsa el nombre para ver todas.</p>
               ) : null}
-              {(walletId || fresh) && !catalog && !reading && (
-                <p className="mt-3 px-5 text-sm font-medium text-slate-500">{walletId && followed.length ? `Se actualiza en ${followed.map((plan) => plan.name).join(', ')}.` : 'Ningún plan sigue esta cartera.'}</p>
+              {sidePick && !catalog && (
+                <p className="mt-3 px-5 text-sm font-medium text-slate-500">{sidePick.side === 'out' ? 'Elige de qué cartera.' : 'Elige a qué cartera.'}</p>
+              )}
+              {pickingSource && (
+                <p className="mt-3 px-5 text-sm font-medium text-slate-500">Elige de qué cartera, o si es nuevo.</p>
+              )}
+              {(walletId || fresh) && !catalog && !reading && !sidePick && !pickingSource && (
+                <p className="mt-3 px-5 text-sm font-medium text-slate-500">{(movesBetween.length || (cameFrom && cameFrom !== 'new') ? followedTouch : followed).length ? `Se actualiza en ${(movesBetween.length || (cameFrom && cameFrom !== 'new') ? followedTouch : followed).map((plan) => plan.name).join(', ')}.` : 'Ningún plan sigue esta cartera.'}</p>
               )}
               <div className="sheet-scroll mt-3 min-h-0 flex-auto overflow-y-auto px-5">
               {catalog ? (
@@ -1643,29 +1914,107 @@ export function TicketCam({
                 <p className="py-2 text-sm font-medium text-slate-500">Estoy leyendo los importes.</p>
               ) : (
                 <div className="space-y-1">
+                  {freshLines.length > 0 && (
+                    <button type="button" onClick={() => { setCatalog(false); setSidePick(null); setFundPick((open) => (cameFrom ? !open : true)); }} className={cn('flex w-full items-center gap-3 rounded-2xl px-1 py-2 text-left', pickingSource && 'bg-black/5 dark:bg-white/10')} aria-expanded={pickingSource} aria-label="De qué cartera sale">
+                      {sourceAccount ? (
+                        <PlatformLogo name={sourceAccount.platform || sourceAccount.name} size={32} />
+                      ) : (
+                        <span className="h-8 w-8 shrink-0 rounded-full bg-slate-100 dark:bg-white/10" />
+                      )}
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-[12px] font-medium text-slate-500">De</span>
+                        <span className="block truncate text-[16px] font-semibold">{cameFrom === 'new' ? 'Nuevo' : sourceAccount?.name || 'Elige la cartera'}</span>
+                      </span>
+                    </button>
+                  )}
                   {walletLines.length === 0 && <p className="py-2 text-sm font-medium text-slate-500">No he visto importes. Añádelos tú.</p>}
-                  {walletLines.map((line, index) => {
+                  {movesBetween.map(({ line, amountValue, other }) => {
+                    const here = accounts.find((account) => account.id === walletId) || null;
+                    const outgoing = amountValue < 0;
+                    const from = outgoing ? here : other;
+                    const to = outgoing ? other : here;
+                    const abs = showAmount(Math.abs(amountValue));
+                    const picked = sidePick?.key === line.key ? sidePick.side : null;
+                    return (
+                      <div key={line.key} className="py-1">
+                        <button type="button" onClick={() => setSidePick(picked === 'out' ? null : { key: line.key, side: 'out' })} className={cn('flex w-full items-center gap-3 rounded-2xl px-1 py-2 text-left', picked === 'out' && 'bg-black/5 dark:bg-white/10')} aria-label="Cambiar la cartera de origen">
+                          <PlatformLogo name={from?.platform || from?.name || ''} size={36} />
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-[12px] font-medium text-slate-500">De</span>
+                            <span className="block truncate text-[16px] font-semibold">{from?.name || 'Elige la cartera'}</span>
+                          </span>
+                          <span className={cn('shrink-0 text-[16px] font-semibold tabular-nums', flowOut)}>−{abs} €</span>
+                        </button>
+                        <button type="button" onClick={() => setSidePick(picked === 'in' ? null : { key: line.key, side: 'in' })} className={cn('flex w-full items-center gap-3 rounded-2xl px-1 py-2 text-left', picked === 'in' && 'bg-black/5 dark:bg-white/10')} aria-label="Cambiar la cartera de destino">
+                          <PlatformLogo name={to?.platform || to?.name || ''} size={36} />
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-[12px] font-medium text-slate-500">A</span>
+                            <span className="block truncate text-[16px] font-semibold">{to?.name || 'Elige la cartera'}</span>
+                          </span>
+                          <span className={cn('shrink-0 text-[16px] font-semibold tabular-nums', flowIn)}>+{abs} €</span>
+                        </button>
+                      </div>
+                    );
+                  })}
+                  {walletLines.filter((line) => !movesBetween.some((item) => item.line.key === line.key)).map((line, index) => {
                     const gainValue = readAmount(line.gain);
                     const hasGain = line.gain.trim() !== '' && Number.isFinite(gainValue);
                     const amountValue = readAmount(line.amount);
                     const tintUp = !hasGain && (line.tone === 'up' || (!!line.cash && amountValue > 0));
                     const tintDown = !hasGain && (line.tone === 'down' || amountValue < 0);
                     const prefix = tintUp && !/^[+−-]/.test(line.amount.trim()) ? '+' : tintDown && line.tone === 'down' && amountValue >= 0 ? '−' : '';
+                    const mine = book.filter((item) => String(item.accountId) === walletId);
+                    const arrival = walletId ? arrivalOf(line, mine, book, walletId) : null;
+                    const fromName = arrival?.kind === 'pass' ? accounts.find((account) => account.id === String(arrival.home.accountId))?.name || 'otra cartera' : '';
+                    const other = otherAccount(line.name, accounts, walletId);
+                    const pair = other ? (amountValue < 0 ? `A ${other.name}` : `De ${other.name}`) : '';
+                    const bought = freshLines.find((item) => item.line.key === line.key);
+                    const price = livePrice(line.name, book);
+                    const qty = !line.cash && !isCashName(line.name) && amountValue > 0 && price > 0 ? coinTotal(amountValue / price) : '';
+                    const leaves = pair || (arrival?.kind === 'pass' ? `De ${fromName}` : qty);
+                    const leaveTone = pair ? (amountValue < 0 ? flowIn : flowOut) : arrival?.kind === 'pass' ? flowOut : 'text-slate-400';
+                    const gainEuro = hasGain ? `${gainValue < 0 ? '−' : '+'}${showAmount(Math.abs(gainValue))} €` : '';
+                    const gainBase = hasGain ? amountValue - gainValue : 0;
+                    const gainFrames = gainEuro ? [gainEuro, ...(Math.abs(gainBase) > 0.5 ? [formatPct((gainValue / gainBase) * 100)] : [])] : [];
+                    const gainText = gainFrames.length ? gainFrames[gainBeat % gainFrames.length] : '';
                     return (
-                      <button key={line.key} type="button" onClick={() => { draftNew.current = false; setEditKey(line.key); }} className="flex w-full items-start gap-3 rounded-2xl px-1 py-2 text-left active:bg-slate-50" aria-label={`Editar línea ${index + 1}`}>
+                      <div key={line.key} className="flex items-start gap-1">
+                      <button type="button" onClick={() => { draftNew.current = false; setEditKey(line.key); }} className="flex min-w-0 flex-1 items-start gap-3 rounded-2xl px-1 py-2 text-left active:bg-slate-50" aria-label={`Editar línea ${index + 1}`}>
                         <LineMark name={line.name} />
-                        <span className="min-w-0 flex-1 break-words text-[16px] font-semibold leading-snug tracking-tight">{line.name || 'Sin nombre'}</span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block break-words text-[16px] font-semibold leading-snug tracking-tight">{line.name || 'Sin nombre'}</span>
+                          {leaves && <span className={cn('mt-0.5 block text-[12px] font-semibold tabular-nums', leaveTone)}>{leaves}</span>}
+                        </span>
                         <span className="shrink-0 text-right">
-                          <span className={cn('block text-[16px] font-semibold tabular-nums', tintUp && 'text-emerald-600', tintDown && 'text-rose-600')}>
+                          <span className={cn('block text-[16px] font-semibold tabular-nums', tintUp && flowIn, tintDown && flowOut)}>
                             {prefix}{line.amount || '0,00'} €
                           </span>
-                          {hasGain && (
-                            <span className={cn('block text-[13px] font-bold tabular-nums', gainValue < 0 ? 'text-rose-600' : 'text-emerald-600')}>
-                              {gainValue < 0 ? '−' : '+'}{showAmount(Math.abs(gainValue))} €
-                            </span>
+                          {gainText && (
+                            prefersStill() ? (
+                              <span className={cn('block text-[13px] font-bold tabular-nums', gainValue < 0 ? 'text-rose-600' : 'text-emerald-600')}>{gainText}</span>
+                            ) : (
+                              <AnimatePresence mode="wait" initial={false}>
+                                <motion.span
+                                  key={gainText}
+                                  initial={{ opacity: 0, y: 6 }}
+                                  animate={{ opacity: 1, y: 0 }}
+                                  exit={{ opacity: 0, y: -6, transition: quickOut }}
+                                  transition={jelly}
+                                  className={cn('block text-[13px] font-bold tabular-nums', gainValue < 0 ? 'text-rose-600' : 'text-emerald-600')}
+                                >
+                                  {gainText}
+                                </motion.span>
+                              </AnimatePresence>
+                            )
                           )}
                         </span>
                       </button>
+                      {bought && cameFrom && cameFrom !== 'new' && (
+                        <button type="button" aria-pressed={!!giftKeys[line.key]} onClick={() => setGiftKeys((current) => ({ ...current, [line.key]: !current[line.key] }))} className={cn('mt-3 shrink-0 rounded-full px-2.5 py-1 text-[12px] font-semibold', giftKeys[line.key] ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950' : 'text-slate-400')}>
+                          Nuevo
+                        </button>
+                      )}
+                      </div>
                     );
                   })}
                   <button type="button" onClick={addWalletLine} className="mt-1 inline-flex items-center gap-1 rounded-full px-2 py-2 text-[13px] font-semibold text-slate-500">
@@ -1687,7 +2036,7 @@ export function TicketCam({
                 </div>
               )}
               {error && <p className="mb-3 text-sm font-medium text-rose-600">{error}</p>}
-              <AcceptButton mark={mark} disabled={(!walletId && !fresh) || catalog || reading || (Boolean(originAsk) && !origin)} onClick={() => void saveWallet()} />
+              <AcceptButton mark={mark} disabled={(!walletId && !fresh) || catalog || reading || (Boolean(originAsk) && !origin) || (freshLines.length > 0 && !cameFrom)} onClick={() => void saveWallet()} />
               </div>
             </motion.div>
             ) : (
