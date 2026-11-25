@@ -9,7 +9,9 @@
     "dev:keep": "node scripts/keep-dev.mjs",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --port 4174",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "pretest": "node scripts/ensure-platform.mjs",
+    "test": "node --experimental-strip-types --no-warnings --import ./scripts/ts-register.mjs --test \"src/**/*.test.ts\""
   },
   "dependencies": {
     "@simplewebauthn/browser": "^14.0.0",
