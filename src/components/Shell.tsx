@@ -1,8 +1,10 @@
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { motion, useReducedMotion } from 'motion/react';
 import { LayoutDashboard, Target, Settings, ArrowLeftRight, LineChart, Camera } from 'lucide-react';
 import { FixedCheck } from '@/components/FixedCheck';
 import { OfferNotice } from '@/components/OfferNotice';
 import { InstallApp } from '@/components/InstallApp';
+import { GlassLens } from '@/components/LiquidGlass';
 import { NotificationsBell } from '@/components/NotificationsBell';
 import { OfferFocusContext } from '@/components/offer-focus';
 import { cn } from '@/lib/utils';
@@ -16,6 +18,11 @@ const ITEMS = [
 ] as const;
 
 export type Section = (typeof ITEMS)[number]['id'] | 'settings';
+
+/** Muelle del indicador de la pestaña activa: rápido y sin rebotes exagerados. */
+const INDICATOR_SPRING = { type: 'spring', stiffness: 380, damping: 30, mass: 0.8 } as const;
+/** Muelle de la pulsación: se hunde un poco y recupera con algo de elasticidad. */
+const PRESS_SPRING = { type: 'spring', stiffness: 520, damping: 22, mass: 0.6 } as const;
 
 const ChromeHidden = createContext<(hidden: boolean) => void>(() => {});
 
@@ -48,6 +55,17 @@ export function Shell({
   const [bare, setBare] = useState(false);
   const hideChrome = useCallback((hidden: boolean) => setBare(hidden), []);
   const scrollRef = useRef<HTMLElement>(null);
+  const reduceMotion = useReducedMotion();
+  // Dirección del último cambio de pestaña (para deformar el indicador hacia donde viaja).
+  const [shownSection, setShownSection] = useState(section);
+  const [travel, setTravel] = useState(0);
+  if (shownSection !== section) {
+    const from = ITEMS.findIndex((item) => item.id === shownSection);
+    const to = ITEMS.findIndex((item) => item.id === section);
+    setShownSection(section);
+    setTravel(from >= 0 && to >= 0 ? Math.sign(to - from) : 0);
+  }
+  const [pressed, setPressed] = useState(false);
   const bandRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -176,48 +194,82 @@ export function Shell({
         </div>
       </main>
       <div className="pointer-events-none absolute inset-x-0 bottom-0 z-40">
-        <div aria-hidden className="absolute inset-x-0 bottom-0 h-36 bg-gradient-to-t from-[var(--app-bg)]/50 via-[var(--app-bg)]/15 to-transparent" />
+        <div aria-hidden className="absolute inset-x-0 bottom-0 h-36 bg-gradient-to-t from-[var(--app-bg)]/25 via-[var(--app-bg)]/5 to-transparent" />
         <div data-dock className="pointer-events-auto relative flex justify-center px-4 pb-[max(0.85rem,env(safe-area-inset-bottom))] pt-2">
-        <div className="relative w-full max-w-md sm:w-auto">
-          <div aria-hidden className="dock-glass pointer-events-none absolute inset-0 rounded-full border border-white/35 shadow-[0_10px_36px_rgba(15,23,42,0.06)] dark:border-white/10" />
-          <nav className="relative flex h-14 items-center px-1">
-            {ITEMS.map((item) => {
-              const Icon = item.icon;
-              const active = section === item.id;
-              const button = (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => onChange(item.id)}
-                  className={cn(
-                    'relative flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-full px-1 py-1 text-[10px] font-semibold leading-none sm:flex-none sm:flex-row sm:gap-2 sm:px-3.5 sm:py-2 sm:text-[13px]',
-                    active
-                      ? 'text-slate-950 dark:text-white'
-                      : 'text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-200',
-                  )}
-                >
-                  <Icon size={18} strokeWidth={active ? 2.25 : 1.75} className="relative" />
-                  <span className="relative truncate sm:hidden">{item.short}</span>
-                  <span className="relative hidden sm:inline">{item.label}</span>
-                </button>
-              );
-              if (item.id !== 'market') return button;
-              return (
-                <span key={item.id} className="contents">
-                  {button}
-                  <span className="w-11 shrink-0 sm:w-16" aria-hidden />
-                </span>
-              );
-            })}
-          </nav>
-          <button
-            type="button"
-            onClick={onTicket}
-            aria-label="Hacer una foto"
-            className="absolute left-1/2 top-1/2 z-10 grid h-10 w-10 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-slate-950 text-white dark:bg-white dark:text-slate-950"
-          >
-            <Camera size={18} strokeWidth={1.75} />
-          </button>
+        <div className="relative flex w-full max-w-md items-center justify-center sm:w-auto">
+          <div className="relative w-full rounded-full sm:w-auto">
+            {/* Material de cristal en su propia capa: el contenido va encima, nítido y sin refractar. */}
+            <motion.div
+              aria-hidden
+              className={cn('liquid-glass pointer-events-none absolute inset-0 rounded-full', pressed && 'is-pressed')}
+              animate={reduceMotion ? undefined : { scaleX: pressed ? 0.985 : 1, scaleY: pressed ? 0.965 : 1 }}
+              transition={PRESS_SPRING}
+            >
+              <GlassLens />
+            </motion.div>
+            <nav
+              className="relative z-[1] flex h-14 items-center px-1"
+              onPointerDown={() => setPressed(true)}
+              onPointerUp={() => setPressed(false)}
+              onPointerCancel={() => setPressed(false)}
+              onPointerLeave={() => setPressed(false)}
+            >
+              {ITEMS.map((item) => {
+                const Icon = item.icon;
+                const active = section === item.id;
+                const button = (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => onChange(item.id)}
+                    className={cn(
+                      'glass-label relative flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-full px-1 py-1 text-[10px] font-semibold leading-none sm:flex-none sm:flex-row sm:gap-2 sm:px-3.5 sm:py-2 sm:text-[13px]',
+                      active
+                        ? 'text-slate-950 dark:text-white'
+                        : 'text-slate-600 hover:text-slate-800 dark:text-slate-300 dark:hover:text-white',
+                    )}
+                  >
+                    {active && (
+                      // Un único indicador compartido: Motion lo lleva de una pestaña a otra (layoutId).
+                      <motion.span
+                        aria-hidden
+                        layoutId="dock-indicator"
+                        transition={reduceMotion ? { duration: 0 } : INDICATOR_SPRING}
+                        style={{ borderRadius: 999 }}
+                        className="pointer-events-none absolute inset-0.5"
+                      >
+                        <motion.span
+                          className="glass-indicator absolute inset-0 rounded-full"
+                          style={{ originX: travel > 0 ? 0 : 1 }}
+                          animate={reduceMotion || !travel ? undefined : { scaleX: [1, 1.16, 1], scaleY: [1, 0.86, 1] }}
+                          transition={{ duration: 0.46, times: [0, 0.38, 1], ease: 'easeOut' }}
+                        />
+                      </motion.span>
+                    )}
+                    <Icon size={18} strokeWidth={active ? 2.25 : 1.75} className="relative" />
+                    <span className="relative truncate sm:hidden">{item.short}</span>
+                    <span className="relative hidden sm:inline">{item.label}</span>
+                  </button>
+                );
+                if (item.id !== 'market') return button;
+                return (
+                  <span key={item.id} className="contents">
+                    {button}
+                    <span className="grid w-11 shrink-0 place-items-center sm:w-16">
+                      <button
+                        type="button"
+                        onClick={onTicket}
+                        aria-label="Hacer una foto"
+                        className="relative z-10 grid h-10 w-10 place-items-center rounded-full bg-slate-950 text-white dark:bg-white dark:text-slate-950"
+                      >
+                        <Camera size={18} strokeWidth={1.75} />
+                      </button>
+                    </span>
+                  </span>
+                );
+              })}
+            </nav>
+          </div>
         </div>
         </div>
       </div>
