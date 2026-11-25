@@ -7,3 +7,9 @@ dist/
 .vite/
 *.log
 .DS_Store
+
+# Balance docs media
+../docs/references/video/
+../docs/references/apple-wwdc25/
+
+*.traineddata
