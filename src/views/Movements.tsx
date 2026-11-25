@@ -3,6 +3,7 @@ import { PlatformLogo } from '@/components/PlatformLogo';
 import { QuietLoad, markReady, arriveTokenNow } from '@/components/QuietLoad';
 import { Field, Input, fieldClass } from '@/components/ui/Input';
 import { EntrySheet } from '@/components/EntrySheet';
+import { LimitOrders } from '@/components/LimitOrders';
 import { Modal } from '@/components/Modal';
 import { TaxReportPanel } from '@/components/TaxReportPanel';
 import { api, ApiError } from '@/lib/api';
@@ -268,6 +269,7 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
           <button type="button" onClick={() => { setEditing(null); setDuplicate(false); setFormMore(false); setDraft(emptyDraft(accounts[0] ? docId(accounts[0]) : '')); }} className="rounded-full bg-slate-950 px-4 py-2 text-sm font-semibold text-white dark:bg-white dark:text-slate-950">Nuevo</button>
         </div>
       </div>
+      {ready && <LimitOrders holdings={holdings} onBooked={() => { void load(); }} />}
       {error && <p className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">{error}</p>}
       {cut && <p className="rounded-2xl bg-white px-4 py-3 text-sm font-medium text-slate-500">Faltan los movimientos más antiguos.</p>}
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
