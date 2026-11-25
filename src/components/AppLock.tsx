@@ -133,7 +133,7 @@ export function AppLock({
     : step === 'repeat'
       ? 'Los mismos 4 números.'
       : step === 'pin' && mode === 'open' && !forgot
-        ? 'Hace falta para ver el dinero.'
+        ? 'Los 4 números.'
         : mode === 'create'
           ? 'Te quedas aquí hasta guardarlo. Luego, al volver, solo se piden estos 4 números.'
           : 'Cuatro números. Se piden otra vez al salir.';
@@ -312,12 +312,13 @@ export function AppLock({
         <div className="lock-pad flex min-h-0 flex-1 flex-col transition-opacity duration-500">
           <div className="flex flex-1 flex-col items-center justify-center py-8">
             {step !== 'password' && (
-              <div key={shake} className={cn('flex justify-center gap-5', shake > 0 && error && 'lock-shake')} aria-live="polite" aria-label={`${digits.length} de 4`}>
+              <div key={shake} className={cn('flex justify-center gap-5', shake > 0 && error && 'lock-shake', busy && !passed && 'lock-think')} aria-live="polite" aria-label={busy && !passed ? 'Comprobando el código' : `${digits.length} de 4`}>
                 {Array.from({ length: 4 }, (_, index) => (
                   <span
                     key={index}
                     className={cn(
-                      'h-3 w-3 rounded-full transition-all duration-150',
+                      'h-3 w-3 rounded-full',
+                      busy && !passed ? '' : 'transition-all duration-150',
                       index < digits.length ? 'scale-100 bg-[#1c1915] dark:bg-[#f4efe6] dark:shadow-[0_0_12px_rgba(244,239,230,0.45)]' : 'scale-90 bg-[#d9d1c5] dark:bg-[#3a342c]',
                     )}
                   />

@@ -353,7 +353,7 @@ export function Settings({
 
       <Group title="Cuenta">
         <div className="divide-y divide-slate-100 dark:divide-white/10">
-          <Line label="Código de acceso" hint={user.lock ? 'Hace falta para ver el dinero.' : 'Cuatro números al abrir.'} onClick={() => setCodeOpen(true)} />
+          <Line label="Código de acceso" hint="Los 4 números al abrir." onClick={() => setCodeOpen(true)} />
           <div>
             <Line
               label="Cambiar contraseña"

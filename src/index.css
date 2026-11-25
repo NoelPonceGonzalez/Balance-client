@@ -320,6 +320,19 @@ html.dark .quiet-bone {
   animation: lock-shake 0.34s ease-in-out;
 }
 
+@keyframes lock-think {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(0.7); opacity: 0.35; }
+}
+
+.lock-think > span {
+  animation: lock-think 1.05s ease-in-out infinite;
+}
+
+.lock-think > span:nth-child(2) { animation-delay: 0.12s; }
+.lock-think > span:nth-child(3) { animation-delay: 0.24s; }
+.lock-think > span:nth-child(4) { animation-delay: 0.36s; }
+
 @media (prefers-reduced-motion: reduce) {
   .quiet-bone,
   .quiet-mark,
@@ -327,6 +340,7 @@ html.dark .quiet-bone {
   .quiet-line,
   .chart-rise,
   .lock-shake,
+  .lock-think > span,
   .hold-pop,
   .hold-menu,
   .plan-rise,
