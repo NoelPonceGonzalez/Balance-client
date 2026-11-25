@@ -1,6 +1,6 @@
-import { forwardRef, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type PointerEvent as ReactPointerEvent, type ReactNode, type SetStateAction } from 'react';
+import { forwardRef, memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type PointerEvent as ReactPointerEvent, type ReactNode, type SetStateAction } from 'react';
 import { bindHold, HoldMenu, holdItemClass, placeMenu } from '@/components/HoldMenu';
-import { AnimatePresence, motion } from 'motion/react';
+import { AnimatePresence, motion, useReducedMotion, useTransform, type MotionValue } from 'motion/react';
 import { ArrowUpDown, ChevronLeft, ChevronRight, Eye, EyeOff, Pencil, Plus, Search, Star, Tag, Trash2 } from 'lucide-react';
 import { PlatformLogo } from '@/components/PlatformLogo';
 import { HomeGlance } from '@/components/HomeGlance';
@@ -26,6 +26,7 @@ import { CashChart, Wallets, type LinePoint } from '@/views/Wallets';
 import { SkinSearch, wearName, type SkinPhase } from '@/components/SkinSearch';
 import { OriginPicker } from '@/components/OriginMark';
 import { glide, jelly, quickOut, softSpring, SPRING_EASE } from '@/lib/motion';
+import { ChartToggle, RangeBar, ScopeTabs, createScrub, useResumenSurface, useScrub, useShellScroll, type ScrubStore } from '@/components/ResumenParts';
 const HIDE_KEY = 'pat_hide_money';
 const SORT_KEY = 'pat_dash_sort';
 
@@ -149,10 +150,6 @@ function isLight(hex: string): boolean {
   return (rgb.r * 299 + rgb.g * 587 + rgb.b * 114) / 1000 > 210;
 }
 
-function narrowScreen(): boolean {
-  return window.matchMedia('(max-width: 767px)').matches;
-}
-
 function prefersStill(): boolean {
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
@@ -180,45 +177,16 @@ function Flip({ id, className, children }: { id: string; className?: string; chi
 
 const pageMove = { duration: 0.55, ease: [0.22, 1, 0.36, 1] as const };
 
-function ViewSwitch({ value, onChange }: { value: 'general' | 'cartera'; onChange: (value: 'general' | 'cartera') => void }) {
-  const still = motionOff();
-  return (
-    <div className="grid shrink-0 grid-cols-2 rounded-full bg-slate-900/5 p-0.5 dark:bg-white/10">
-      {(['general', 'cartera'] as const).map((item) => {
-        const on = value === item;
-        return (
-          <button
-            key={item}
-            type="button"
-            aria-pressed={on}
-            onClick={() => onChange(item)}
-            className={cn('relative rounded-full px-3 py-1 text-[13px] font-bold', on ? 'text-white dark:text-slate-900' : 'text-slate-500')}
-          >
-            {on && (
-              <motion.span
-                layoutId="dash-view-pill"
-                transition={still ? { duration: 0 } : softSpring}
-                className="pointer-events-none absolute inset-0 rounded-full bg-slate-900 dark:bg-white"
-              />
-            )}
-            <span className="relative z-10">{item === 'general' ? 'General' : 'Cartera'}</span>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-const ScreenSwap = forwardRef<HTMLDivElement, { className?: string; children?: ReactNode }>(function ScreenSwap({ className, children, ...rest }, ref) {
+const ScreenSwap = forwardRef<HTMLDivElement, { className?: string; children?: ReactNode; dir?: number }>(function ScreenSwap({ className, children, dir = 0, ...rest }, ref) {
   const still = motionOff();
   return (
     <motion.div
       ref={ref}
       className={className}
-      initial={still ? false : { opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={still ? { opacity: 0 } : { opacity: 0, transition: { duration: 0.28, ease: [0.4, 0, 1, 1] } }}
-      transition={still ? { duration: 0 } : pageMove}
+      initial={still ? false : { opacity: 0, x: dir * 28 }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={still ? { opacity: 0 } : { opacity: 0, x: dir * -14, transition: { duration: 0.28, ease: [0.4, 0, 1, 1] } }}
+      transition={still ? { duration: 0 } : dir ? { opacity: pageMove, x: softSpring } : pageMove}
       {...rest}
     >
       {children}
@@ -994,6 +962,88 @@ function pendingMonth(data: DashboardData | null): number {
   return data.accounts.reduce((sum, account) => sum + (account.flows || []).filter((flow) => flow.open).reduce((inner, flow) => inner + Math.abs(flow.amount), 0), 0);
 }
 
+/** La gráfica no cambia con el latido de heroMs ni con el dedo: CashChart se queda igual, solo deja de repintarse sin motivo. */
+const StillChart = memo(CashChart);
+
+const CHIP = 'inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full bg-slate-100/80 px-3 text-[13px] font-medium text-slate-600 transition-[background-color,transform] duration-150 active:scale-[0.96] active:bg-slate-200/80 dark:bg-white/[0.08] dark:text-slate-300 dark:active:bg-white/[0.14]';
+const CHIP_COUNT = 'inline-flex items-center gap-1 font-semibold tabular-nums text-slate-950 dark:text-white';
+
+function moveTone(amount: number, hidden: boolean): string {
+  return hidden || amount === 0 ? 'text-slate-400' : amount > 0 ? 'text-[#16c784]' : 'text-[#ea3943]';
+}
+
+/** Barra fija: General / Cartera y, al bajar, el total pequeño. Fondo y raya aparecen con el scroll. */
+function ResumenBar({ scroll, view, onView, worth, hidden }: { scroll: MotionValue<number>; view: 'general' | 'cartera'; onView: (next: 'general' | 'cartera') => void; worth: number | null; hidden: boolean }) {
+  const still = useReducedMotion();
+  const veil = useTransform(scroll, [0, 20], [0, 1]);
+  const line = useTransform(scroll, [64, 104], [0, 1]);
+  const small = useTransform(scroll, [64, 104], [0, 1]);
+  const rise = useTransform(scroll, [64, 104], [still ? 0 : 8, 0]);
+  return (
+    <div className="sticky -top-2 z-30 -mx-3 px-3 sm:-mx-4 sm:px-4 md:-mx-8 md:px-8">
+      <motion.div aria-hidden style={{ opacity: veil }} className="pointer-events-none absolute inset-0 bg-[var(--resumen-bg)]" />
+      <motion.div aria-hidden style={{ opacity: line }} className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-slate-200/80 dark:bg-white/10" />
+      <div className="relative flex h-12 items-center justify-between gap-3">
+        <ScopeTabs value={view} onChange={onView} />
+        <motion.span aria-hidden style={{ opacity: small, y: rise }} className="whitespace-nowrap text-[15px] font-semibold tabular-nums tracking-tight text-slate-950 dark:text-white">
+          {worth == null ? '' : hidden ? '*****' : formatEur(worth)}
+        </motion.span>
+      </div>
+    </div>
+  );
+}
+
+/** El importe protagonista. Lee el scrub directamente: el dedo solo repinta esta cifra. */
+function ResumenHero({ scrub, live, worth, hidden, beat, today, variation, scroll, onToggleHidden }: {
+  scrub: ScrubStore;
+  live: boolean;
+  worth: number | null;
+  hidden: boolean;
+  beat: number;
+  today: string | null;
+  variation: DashboardData['variation'] | null;
+  scroll: MotionValue<number>;
+  onToggleHidden: () => void;
+}) {
+  const state = useScrub(scrub);
+  const still = useReducedMotion();
+  const scale = useTransform(scroll, [0, 110], [1, still ? 1 : 0.88]);
+  const fade = useTransform(scroll, [16, 100], [1, 0]);
+  const value = live && state.value != null ? state.value : worth;
+  const move = live ? state.move : null;
+  const day = live && state.day ? state.day : today;
+  const total = variation?.available && variation.amount != null ? variation : null;
+  return (
+    <motion.div style={{ scale, opacity: fade, transformOrigin: '0% 0%' }} className="pt-2">
+      <div className="flex items-center gap-2.5">
+        <p className="whitespace-nowrap text-[clamp(2.35rem,10.5vw,3.25rem)] font-semibold leading-[1.04] tabular-nums tracking-[-0.035em] text-slate-950 dark:text-white">
+          {value == null ? '—' : <RisingAmount value={value} hidden={hidden} card stick />}
+        </p>
+        <button
+          type="button"
+          onClick={onToggleHidden}
+          aria-pressed={hidden}
+          aria-label={hidden ? 'Mostrar importes' : 'Ocultar importes'}
+          className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-slate-300 transition-colors hover:text-slate-500 dark:text-slate-600 dark:hover:text-slate-400"
+        >
+          {hidden ? <EyeOff size={17} /> : <Eye size={17} />}
+        </button>
+      </div>
+      <div className="mt-2 flex min-h-5 items-center gap-1.5 text-[14px] font-semibold leading-none tabular-nums">
+        {move ? (
+          <Turn amount={move.amount} pct={move.pct} beat={beat} hidden={hidden} className={moveTone(move.amount, hidden)} />
+        ) : total ? (
+          <span className={moveTone(total.amount ?? 0, hidden)}>
+            <RisingAmount value={total.amount ?? 0} hidden={hidden} signed delay={120} />
+            {total.percent != null && <span className="ml-1.5">{hidden ? '*****' : formatPct(total.percent)}</span>}
+          </span>
+        ) : null}
+        {day && <span className="font-medium text-slate-400 dark:text-slate-500">{move || total ? '· ' : ''}{formatDay(day)}</span>}
+      </div>
+    </motion.div>
+  );
+}
+
 export function Dashboard({ heroMs, home, books }: { heroMs: number; home: number; books: number }) {
   const [data, setData] = useState<DashboardData | null>(null);
   const [lived, setLived] = useState<{ day: string; eur: number }[] | null>(null);
@@ -1008,9 +1058,10 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
   const [hidden, setHidden] = useState(() => localStorage.getItem(HIDE_KEY) === '1');
   const [chart, setChart] = useState<'line' | 'ring'>(() => (localStorage.getItem('pat_chart') === 'ring' ? 'ring' : 'line'));
   const [lineRange, setLineRange] = useState<LineRangeId>('1A');
-  const [lineNow, setLineNow] = useState<number | null>(null);
-  const [lineDay, setLineDay] = useState<string | null>(null);
-  const [lineMove, setLineMove] = useState<{ amount: number; pct: number | null } | null>(null);
+  const [scrub] = useState(createScrub);
+  const topRef = useRef<HTMLDivElement>(null);
+  const scroll = useShellScroll(topRef);
+  useResumenSurface();
   const [dueLine, setDueLine] = useState<{ label: string; amount: number; direction: 'in' | 'out' } | null>(null);
   const [markLine, setMarkLine] = useState<{ planId: string; label: string; amount: number } | null>(null);
   const [offerNotes, setOfferNotes] = useState<AppNotification[]>([]);
@@ -1560,7 +1611,20 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
     }
     return () => hideChrome(false);
   }, [hideChrome, inAccount]);
-  const barValue = inAccount && openAccount ? (focusFigure ?? openAccount.value) : chart === 'line' && lineNow != null ? lineNow : shownWorth;
+  const barValue = inAccount && openAccount ? (focusFigure ?? openAccount.value) : shownWorth;
+  const chooseChart = (next: 'line' | 'ring') => {
+    setChart(next);
+    localStorage.setItem('pat_chart', next);
+  };
+  const toggleExtras = () => setCountExtras((value) => {
+    const next = !value;
+    localStorage.setItem('pat_count_extras', next ? '1' : '0');
+    return next;
+  });
+  const linePoints = useMemo(
+    () => (data && lineReady ? inLineRange((lived && lived.length >= 2 ? lived : data.series).map((point) => ({ day: point.day, eur: point.eur })), lineRange) : []),
+    [data, lived, lineReady, lineRange],
+  );
   const chooseView = (next: 'general' | 'cartera') => {
     setView(next);
     setOpenWallet(null);
@@ -1572,13 +1636,102 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
       return next;
     });
   };
-  const pin = (
-    <div className="sticky -top-2 z-30 -mx-4 flex min-w-0 flex-col gap-2 bg-[var(--app-bg)] px-4 py-2 md:-mx-8 md:px-8">
+  const followModal = followOpen ? (
+    <Modal title="Sigues" onClose={() => setFollowOpen(false)}>
+      <div className="space-y-4">
+        {followedSkins.length > 0 && (
+          <div className="space-y-2">
+            <p className="px-1 text-[13px] font-semibold text-slate-500">Skins · {followedSkins.length}</p>
+            {followedSkins.map((row) => {
+              const key = `skin:${row.name}:${row.wear}`;
+              return (
+                <article key={key} className="rounded-2xl bg-slate-50 px-3 py-3 dark:bg-white/5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFollowOpen(false);
+                      window.dispatchEvent(new CustomEvent('pat-skin', { detail: { name: row.name, wear: row.wear, label: row.label, image: row.image } }));
+                    }}
+                    className="flex w-full items-center gap-3 text-left"
+                  >
+                    {row.image && <img src={row.image} alt="" referrerPolicy="no-referrer" className="h-10 w-14 shrink-0 object-contain" />}
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-semibold">{row.label}</span>
+                      <span className="block text-xs font-medium text-slate-500">{row.wear || 'Cualquier desgaste'}{row.lastBestEur == null || hidden ? '' : ` · ${formatEur(row.lastBestEur)}`}</span>
+                    </span>
+                  </button>
+                  {followDrop === key ? (
+                    <div className="mt-2 flex items-center gap-2">
+                      <button type="button" onClick={() => {
+                        const params = new URLSearchParams({ name: row.name, wear: row.wear });
+                        void api(`/api/market/skin-stars?${params}`, { method: 'DELETE' }).then(() => {
+                          setFollowedSkins((rows) => rows.filter((item) => !(item.name === row.name && item.wear === row.wear)));
+                          setFollowDrop(null);
+                          window.dispatchEvent(new Event('pat-alerts'));
+                        });
+                      }} className="rounded-full bg-slate-950 px-3 py-1 text-xs font-semibold text-white dark:bg-white dark:text-slate-950">Quitar</button>
+                      <button type="button" onClick={() => setFollowDrop(null)} className="px-2 py-1 text-xs font-semibold text-slate-500">Cancelar</button>
+                    </div>
+                  ) : (
+                    <button type="button" onClick={() => setFollowDrop(key)} className="mt-2 text-xs font-semibold text-slate-400">Quitar</button>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+        )}
+        {followedAds.length > 0 && (
+          <div className="space-y-2">
+            <p className="px-1 text-[13px] font-semibold text-slate-500">Anuncios · {followedAds.length}</p>
+            {followedAds.map((row) => {
+              const key = `ad:${row.id}`;
+              return (
+                <article key={key} className="rounded-2xl bg-slate-50 px-3 py-3 dark:bg-white/5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFollowOpen(false);
+                      window.dispatchEvent(new CustomEvent('pat-listing', { detail: row.id }));
+                    }}
+                    className="flex w-full items-center gap-3 text-left"
+                  >
+                    {row.image && <img src={row.image} alt="" referrerPolicy="no-referrer" className="h-10 w-14 shrink-0 object-contain" />}
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-semibold">{row.label}</span>
+                      <span className="block text-xs font-medium text-slate-500">{row.priceEur == null || hidden ? 'Anuncio seguido' : formatEur(row.priceEur)}</span>
+                    </span>
+                  </button>
+                  {followDrop === key ? (
+                    <div className="mt-2 flex items-center gap-2">
+                      <button type="button" onClick={() => {
+                        void api(`/api/market/tracked/${row.id}`, { method: 'DELETE' }).then(() => {
+                          setFollowedAds((rows) => rows.filter((item) => item.id !== row.id));
+                          setFollowDrop(null);
+                          window.dispatchEvent(new Event('pat-alerts'));
+                        });
+                      }} className="rounded-full bg-slate-950 px-3 py-1 text-xs font-semibold text-white dark:bg-white dark:text-slate-950">Quitar</button>
+                      <button type="button" onClick={() => setFollowDrop(null)} className="px-2 py-1 text-xs font-semibold text-slate-500">Cancelar</button>
+                    </div>
+                  ) : (
+                    <button type="button" onClick={() => setFollowDrop(key)} className="mt-2 text-xs font-semibold text-slate-400">Quitar</button>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+        )}
+        {followCount === 0 && <p className="text-sm font-medium text-slate-500">Ya no sigues ninguna skin ni anuncio.</p>}
+      </div>
+    </Modal>
+  ) : null;
+
+  const accountPin = (
+    <div className="sticky -top-2 z-30 -mx-4 flex min-w-0 flex-col gap-2 bg-[var(--resumen-bg)] px-4 py-2 md:-mx-8 md:px-8">
       <div className="order-2 min-w-0">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <div className="flex shrink-0 items-center gap-2">
             <p className="whitespace-nowrap text-[clamp(1.65rem,7.2vw,2.15rem)] font-semibold leading-none tabular-nums tracking-tight text-slate-900 dark:text-white">
-              {barValue == null ? '—' : inAccount ? (hidden ? '*****' : formatEur(barValue)) : <RisingAmount value={barValue} hidden={hidden} card stick />}
+              {barValue == null ? '—' : hidden ? '*****' : formatEur(barValue)}
             </p>
             <button
               type="button"
@@ -1589,34 +1742,13 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
             >
               {hidden ? <EyeOff size={16} /> : <Eye size={16} />}
             </button>
-            {inAccount && liveMove && (
-              <Turn amount={liveMove.amount} pct={liveMove.pct} beat={beat} hidden={hidden} className={cn('text-[13px] font-semibold tabular-nums', hidden || liveMove.amount === 0 ? 'text-slate-400' : liveMove.amount > 0 ? 'text-[#16c784]' : 'text-[#ea3943]')} />
+            {liveMove && (
+              <Turn amount={liveMove.amount} pct={liveMove.pct} beat={beat} hidden={hidden} className={cn('text-[13px] font-semibold tabular-nums', moveTone(liveMove.amount, hidden))} />
             )}
           </div>
-          {!inAccount && <div className="ml-auto"><ViewSwitch value={view} onChange={chooseView} /></div>}
-          {inAccount && <div ref={setPaneSlot} className="ml-auto shrink-0" />}
+          <div ref={setPaneSlot} className="ml-auto shrink-0" />
         </div>
-        {!inAccount && view === 'general' && (
-          <div className="mt-2.5">
-            <div className="inline-grid grid-cols-2 rounded-full bg-slate-200/90 p-1 dark:bg-white/10">
-              {([['line', 'Línea'], ['ring', 'Reparto']] as const).map(([id, label]) => (
-                <button
-                  key={id}
-                  type="button"
-                  aria-pressed={chart === id}
-                  onClick={() => {
-                    setChart(id);
-                    localStorage.setItem('pat_chart', id);
-                  }}
-                  className={cn('rounded-full px-4 py-1 text-center text-[13px] font-semibold', chart === id ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950' : 'text-slate-600 dark:text-slate-300')}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-        {inAccount && liveDay && (
+        {liveDay && (
           <motion.p
             className="mt-1.5 text-[13px] font-semibold text-slate-400"
             initial={window.matchMedia('(prefers-reduced-motion: reduce)').matches ? false : { opacity: 0, y: 8 }}
@@ -1626,138 +1758,8 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
             {formatDay(liveDay)}
           </motion.p>
         )}
-        {!inAccount && (
-          <div className="no-scrollbar mt-2 flex w-full min-w-0 snap-x snap-proximity gap-1.5 overflow-x-auto overflow-y-hidden overscroll-x-contain scroll-pe-5 pe-1 empty:hidden max-md:[mask-image:linear-gradient(to_right,#000_0,#000_calc(100%-1.75rem),transparent)]">
-            {offerLine && (
-              <button type="button" onClick={() => openOffer(offerLine)} className="inline-flex shrink-0 snap-start items-center gap-1.5 whitespace-nowrap rounded-full bg-white py-1 pl-1 pr-3 text-[13px] font-semibold text-slate-700 ring-1 ring-slate-200/80 transition active:scale-[0.97] dark:bg-slate-900 dark:text-slate-200 dark:ring-white/10">
-                <span className="inline-flex items-center gap-1 rounded-full bg-slate-950 px-2 py-0.5 text-[12px] font-bold tabular-nums text-white dark:bg-white dark:text-slate-950">
-                  <Tag size={12} strokeWidth={2.4} />
-                  {hidden ? null : offerCount}
-                </span>
-                {hidden ? 'Ofertas' : offerLine.priceEur == null ? 'Ofertas' : offerCount > 1 ? `desde ${formatEur(offerLine.priceEur)}` : formatEur(offerLine.priceEur)}
-              </button>
-            )}
-            {followCount > 0 && (
-              <button type="button" onClick={() => { setFollowDrop(null); setFollowOpen(true); }} className="inline-flex shrink-0 snap-start items-center gap-1.5 whitespace-nowrap rounded-full bg-white py-1 pl-1 pr-3 text-[13px] font-semibold text-slate-700 ring-1 ring-slate-200/80 transition active:scale-[0.97] dark:bg-slate-900 dark:text-slate-200 dark:ring-white/10">
-                <span className="inline-flex items-center gap-1 rounded-full bg-slate-950 px-2 py-0.5 text-[12px] font-bold tabular-nums text-white dark:bg-white dark:text-slate-950">
-                  <Star size={12} strokeWidth={2.4} />
-                  {hidden ? null : followCount}
-                </span>
-                Sigues
-              </button>
-            )}
-            {dueLine && (
-              <button type="button" onClick={() => window.dispatchEvent(new Event('pat-due'))} className="inline-flex shrink-0 snap-start items-center whitespace-nowrap rounded-full bg-white px-3 py-1 text-[13px] font-semibold text-slate-600 ring-1 ring-slate-200/80 transition active:scale-[0.97] dark:bg-slate-900 dark:text-slate-300 dark:ring-white/10">
-                <span>{dueLine.direction === 'in' ? 'Ha entrado' : 'Confirmar'} {dueLine.label}{hidden ? '' : ` ${formatEur(dueLine.amount)}`}</span>
-              </button>
-            )}
-            {markLine && markLine.label !== dueLine?.label && (
-              <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('pat-plan', { detail: markLine.planId }))} className="inline-flex shrink-0 snap-start items-center whitespace-nowrap rounded-full bg-white px-3 py-1 text-[13px] font-semibold text-slate-600 ring-1 ring-slate-200/80 transition active:scale-[0.97] dark:bg-slate-900 dark:text-slate-300 dark:ring-white/10">
-                <span>Hoy {markLine.label}{hidden ? '' : ` ${formatEur(markLine.amount)}`}</span>
-              </button>
-            )}
-            {pendingMonth(data) > 0 && (
-              <p className="inline-flex shrink-0 snap-start items-center whitespace-nowrap rounded-full bg-white px-3 py-1 text-[13px] font-semibold text-slate-600 ring-1 ring-slate-200/80 transition active:scale-[0.97] dark:bg-slate-900 dark:text-slate-300 dark:ring-white/10">
-                {hidden ? 'Por confirmar' : `Por confirmar ${formatEur(pendingMonth(data))}`}
-              </p>
-            )}
-            {data?.variation.available && data.variation.amount != null && data.contributions.complete && (
-              <p className="inline-flex shrink-0 snap-start items-center whitespace-nowrap rounded-full bg-white px-3 py-1 text-[13px] font-semibold text-slate-500 ring-1 ring-slate-200/80 dark:bg-slate-900 dark:text-slate-400 dark:ring-white/10">
-                {hidden ? 'Aportado' : `Aportado ${formatSignedEur(data.contributions.eur)}`}
-              </p>
-            )}
-          </div>
-        )}
-        {followOpen && (
-          <Modal title="Sigues" onClose={() => setFollowOpen(false)}>
-            <div className="space-y-4">
-              {followedSkins.length > 0 && (
-                <div className="space-y-2">
-                  <p className="px-1 text-[13px] font-semibold text-slate-500">Skins · {followedSkins.length}</p>
-                  {followedSkins.map((row) => {
-                    const key = `skin:${row.name}:${row.wear}`;
-                    return (
-                      <article key={key} className="rounded-2xl bg-slate-50 px-3 py-3 dark:bg-white/5">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setFollowOpen(false);
-                            window.dispatchEvent(new CustomEvent('pat-skin', { detail: { name: row.name, wear: row.wear, label: row.label, image: row.image } }));
-                          }}
-                          className="flex w-full items-center gap-3 text-left"
-                        >
-                          {row.image && <img src={row.image} alt="" referrerPolicy="no-referrer" className="h-10 w-14 shrink-0 object-contain" />}
-                          <span className="min-w-0 flex-1">
-                            <span className="block truncate text-sm font-semibold">{row.label}</span>
-                            <span className="block text-xs font-medium text-slate-500">{row.wear || 'Cualquier desgaste'}{row.lastBestEur == null || hidden ? '' : ` · ${formatEur(row.lastBestEur)}`}</span>
-                          </span>
-                        </button>
-                        {followDrop === key ? (
-                          <div className="mt-2 flex items-center gap-2">
-                            <button type="button" onClick={() => {
-                              const params = new URLSearchParams({ name: row.name, wear: row.wear });
-                              void api(`/api/market/skin-stars?${params}`, { method: 'DELETE' }).then(() => {
-                                setFollowedSkins((rows) => rows.filter((item) => !(item.name === row.name && item.wear === row.wear)));
-                                setFollowDrop(null);
-                                window.dispatchEvent(new Event('pat-alerts'));
-                              });
-                            }} className="rounded-full bg-slate-950 px-3 py-1 text-xs font-semibold text-white dark:bg-white dark:text-slate-950">Quitar</button>
-                            <button type="button" onClick={() => setFollowDrop(null)} className="px-2 py-1 text-xs font-semibold text-slate-500">Cancelar</button>
-                          </div>
-                        ) : (
-                          <button type="button" onClick={() => setFollowDrop(key)} className="mt-2 text-xs font-semibold text-slate-400">Quitar</button>
-                        )}
-                      </article>
-                    );
-                  })}
-                </div>
-              )}
-              {followedAds.length > 0 && (
-                <div className="space-y-2">
-                  <p className="px-1 text-[13px] font-semibold text-slate-500">Anuncios · {followedAds.length}</p>
-                  {followedAds.map((row) => {
-                    const key = `ad:${row.id}`;
-                    return (
-                      <article key={key} className="rounded-2xl bg-slate-50 px-3 py-3 dark:bg-white/5">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setFollowOpen(false);
-                            window.dispatchEvent(new CustomEvent('pat-listing', { detail: row.id }));
-                          }}
-                          className="flex w-full items-center gap-3 text-left"
-                        >
-                          {row.image && <img src={row.image} alt="" referrerPolicy="no-referrer" className="h-10 w-14 shrink-0 object-contain" />}
-                          <span className="min-w-0">
-                            <span className="block truncate text-sm font-semibold">{row.label}</span>
-                            <span className="block text-xs font-medium text-slate-500">{row.priceEur == null || hidden ? 'Anuncio seguido' : formatEur(row.priceEur)}</span>
-                          </span>
-                        </button>
-                        {followDrop === key ? (
-                          <div className="mt-2 flex items-center gap-2">
-                            <button type="button" onClick={() => {
-                              void api(`/api/market/tracked/${row.id}`, { method: 'DELETE' }).then(() => {
-                                setFollowedAds((rows) => rows.filter((item) => item.id !== row.id));
-                                setFollowDrop(null);
-                                window.dispatchEvent(new Event('pat-alerts'));
-                              });
-                            }} className="rounded-full bg-slate-950 px-3 py-1 text-xs font-semibold text-white dark:bg-white dark:text-slate-950">Quitar</button>
-                            <button type="button" onClick={() => setFollowDrop(null)} className="px-2 py-1 text-xs font-semibold text-slate-500">Cancelar</button>
-                          </div>
-                        ) : (
-                          <button type="button" onClick={() => setFollowDrop(key)} className="mt-2 text-xs font-semibold text-slate-400">Quitar</button>
-                        )}
-                      </article>
-                    );
-                  })}
-                </div>
-              )}
-              {followCount === 0 && <p className="text-sm font-medium text-slate-500">Ya no sigues ninguna skin ni anuncio.</p>}
-            </div>
-          </Modal>
-        )}
       </div>
-      {inAccount && openAccount && (
+      {openAccount && (
         <div className="order-1 flex items-center gap-2">
           <button type="button" onClick={() => setOpenWallet(null)} className="inline-flex items-center gap-0.5 text-sm font-semibold text-slate-500" aria-label="Volver a carteras">
             <ChevronLeft size={16} /> Carteras
@@ -1769,12 +1771,81 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
     </div>
   );
 
+  const resumenTop = (
+    <>
+      <ResumenBar scroll={scroll} view={view} onView={chooseView} worth={shownWorth} hidden={hidden} />
+      <ResumenHero
+        scrub={scrub}
+        live={view === 'general' && chart === 'line'}
+        worth={shownWorth}
+        hidden={hidden}
+        beat={beat}
+        today={data?.today ?? null}
+        variation={data?.variation ?? null}
+        scroll={scroll}
+        onToggleHidden={toggleHidden}
+      />
+      <div className="no-scrollbar -mx-3 flex min-w-0 gap-2 overflow-x-auto overflow-y-hidden overscroll-x-contain px-3 pb-1 pt-4 empty:hidden sm:-mx-4 sm:px-4 md:-mx-8 md:px-8">
+        {offerLine && (
+          <button type="button" onClick={() => openOffer(offerLine)} className={CHIP}>
+            <span className={CHIP_COUNT}>
+              <Tag size={13} strokeWidth={2.2} />
+              {hidden ? null : offerCount}
+            </span>
+            {hidden ? 'Ofertas' : offerLine.priceEur == null ? 'Ofertas' : offerCount > 1 ? `desde ${formatEur(offerLine.priceEur)}` : formatEur(offerLine.priceEur)}
+          </button>
+        )}
+        {followCount > 0 && (
+          <button type="button" onClick={() => { setFollowDrop(null); setFollowOpen(true); }} className={CHIP}>
+            <span className={CHIP_COUNT}>
+              <Star size={13} strokeWidth={2.2} />
+              {hidden ? null : followCount}
+            </span>
+            Sigues
+          </button>
+        )}
+        {dueLine && (
+          <button type="button" onClick={() => window.dispatchEvent(new Event('pat-due'))} className={CHIP}>
+            <span>{dueLine.direction === 'in' ? 'Ha entrado' : 'Confirmar'} {dueLine.label}{hidden ? '' : ` ${formatEur(dueLine.amount)}`}</span>
+          </button>
+        )}
+        {markLine && markLine.label !== dueLine?.label && (
+          <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('pat-plan', { detail: markLine.planId }))} className={CHIP}>
+            <span>Hoy {markLine.label}{hidden ? '' : ` ${formatEur(markLine.amount)}`}</span>
+          </button>
+        )}
+        {pendingMonth(data) > 0 && (
+          <p className={CHIP}>
+            {hidden ? 'Por confirmar' : `Por confirmar ${formatEur(pendingMonth(data))}`}
+          </p>
+        )}
+        {data?.variation.available && data.variation.amount != null && data.contributions.complete && (
+          <p className={CHIP}>
+            {hidden ? 'Aportado' : `Aportado ${formatSignedEur(data.contributions.eur)}`}
+          </p>
+        )}
+        {data && (
+          <button type="button" aria-pressed={countExtras} onClick={toggleExtras} className={cn(CHIP, !countExtras && 'text-slate-400 dark:text-slate-500')}>
+            {countExtras ? 'Con extras' : 'Sin extras'}
+          </button>
+        )}
+      </div>
+    </>
+  );
+
+  const pin = (
+    <div ref={topRef}>
+      {inAccount ? accountPin : resumenTop}
+      {followModal}
+    </div>
+  );
+
   if (view === 'cartera') {
     return (
-      <div className="mx-auto max-w-3xl space-y-4">
+      <div className="mx-auto max-w-3xl space-y-5">
         {pin}
         <AnimatePresence mode="wait" initial={false}>
-          <ScreenSwap key={openWallet || 'carteras'} className="space-y-4">
+          <ScreenSwap key={openWallet || 'carteras'} dir={openWallet ? 0 : 1} className="space-y-4">
         {error ? (
           <p className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">{error}</p>
         ) : !data ? (
@@ -1890,7 +1961,7 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
   }
   if (error) {
     return (
-      <div className="mx-auto max-w-3xl space-y-4">
+      <div className="mx-auto max-w-3xl space-y-5">
         {pin}
         <p className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">{error}</p>
       </div>
@@ -1898,7 +1969,7 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
   }
   if (!data) {
     return (
-      <div className="mx-auto max-w-3xl space-y-4">
+      <div className="mx-auto max-w-3xl space-y-5">
         {pin}
         <QuietLoad />
       </div>
@@ -1908,90 +1979,91 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
   const mask = (value: string) => (hidden ? '*****' : value);
   const slices = rows.filter((row) => row.value != null && row.value > 0).map((row) => ({ key: row.key, name: row.name, eur: row.value as number, color: row.color }));
   if (countExtras && extraWealth > 0) slices.push({ key: 'extras', name: 'Extras', eur: extraWealth, color: '#3F3A4A' });
-  const linePoints = lineReady
-    ? inLineRange((lived && lived.length >= 2 ? lived : data.series).map((point) => ({ day: point.day, eur: point.eur })), lineRange)
-    : [];
 
+
+  const still = prefersStill();
   return (
-    <div className="mx-auto max-w-3xl space-y-4">
+    <div className="mx-auto max-w-3xl space-y-5">
       {pin}
       <AnimatePresence mode="wait" initial={false}>
-        <ScreenSwap key="general" className="space-y-6">
-      <motion.section initial={prefersStill() ? false : { opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={prefersStill() ? { duration: 0 } : rise}>
-        <div className="flex items-center justify-between gap-3">
-          <p className="text-[13px] font-semibold leading-none text-slate-400">{formatDay(chart === 'line' && lineDay ? lineDay : data.today)}</p>
-          {chart === 'line' && lineMove ? (
-            <Turn amount={lineMove.amount} pct={lineMove.pct} beat={beat} hidden={hidden} className={cn('shrink-0 text-[13px] font-semibold leading-none tabular-nums', hidden || lineMove.amount === 0 ? 'text-slate-400' : lineMove.amount > 0 ? 'text-[#16c784]' : 'text-[#ea3943]')} />
-          ) : data.variation.available && data.variation.amount != null ? (
-            <p className={cn('shrink-0 text-[13px] font-semibold leading-none tabular-nums', hidden ? 'text-slate-400' : totalClass)}>
-              <RisingAmount value={data.variation.amount} hidden={hidden} signed delay={120} />
-              {data.variation.percent != null && <span className="ml-1.5">{hidden ? '*****' : formatPct(data.variation.percent)}</span>}
-            </p>
-          ) : null}
+        <ScreenSwap key="general" dir={-1} className="space-y-8 pb-6">
+      <section aria-label="Gráfica">
+        <div className="relative -mx-1">
+          <AnimatePresence mode="popLayout" initial={false}>
+            <motion.div
+              key={chart}
+              initial={still ? false : { opacity: 0, scale: 0.97, y: 6 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={still ? { opacity: 0 } : { opacity: 0, scale: 0.985, transition: quickOut }}
+              transition={still ? { duration: 0 } : softSpring}
+              className="origin-top"
+            >
+              {chart === 'line' ? (
+                linePoints.length >= 2 ? (
+                  <StillChart
+                    quiet
+                    tone="ink"
+                    hidden={hidden}
+                    points={linePoints}
+                    now={shownWorth ?? data.series[data.series.length - 1]?.eur ?? 0}
+                    base={lineRange === 'MAX' ? paidBase : null}
+                    spent={lineRange === 'MAX' && paid > 0 ? paid : null}
+                    onValue={scrub.onValue}
+                    onDay={scrub.onDay}
+                    onMove={scrub.onMove}
+                    emptyText=""
+                  />
+                ) : (
+                  <div className="mt-4 h-[168px]" role="status" aria-busy={!lineReady}>
+                    <span className="sr-only">Cargando</span>
+                  </div>
+                )
+              ) : slices.length > 0 ? (
+                <Donut slices={slices} hidden={hidden} />
+              ) : (
+                <p className="py-16 text-center text-[13px] font-medium text-slate-400">El reparto aparece cuando haya saldo en algún sitio.</p>
+              )}
+            </motion.div>
+          </AnimatePresence>
         </div>
-        <button
-          type="button"
-          aria-pressed={countExtras}
-          onClick={() => setCountExtras((value) => {
-            const next = !value;
-            localStorage.setItem('pat_count_extras', next ? '1' : '0');
-            return next;
-          })}
-          className={cn('mt-3 text-xs font-medium', countExtras ? 'text-slate-500' : 'text-slate-300')}
-        >
-          {countExtras ? 'Con extras' : 'Sin extras'}
-        </button>
-      </motion.section>
+        <div className="mt-3 flex min-h-9 items-center justify-between gap-2">
+          <AnimatePresence initial={false} mode="popLayout">
+            {chart === 'line' ? (
+              <motion.div key="ranges" initial={still ? false : { opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -8, transition: quickOut }} transition={still ? { duration: 0 } : softSpring}>
+                <RangeBar value={lineRange} onChange={setLineRange} />
+              </motion.div>
+            ) : (
+              <motion.p key="ring" initial={still ? false : { opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -8, transition: quickOut }} transition={still ? { duration: 0 } : softSpring} className="text-[13px] font-medium text-slate-400">
+                Reparto por sitio
+              </motion.p>
+            )}
+          </AnimatePresence>
+          <ChartToggle value={chart} onChange={chooseChart} />
+        </div>
+      </section>
 
-      {chart === 'line' ? (
-        <>
-          <LineRangeTabs value={lineRange} onChange={setLineRange} />
-          {linePoints.length >= 2 ? (
-            <CashChart
-              quiet
-              tone="ink"
-              hidden={hidden}
-              points={linePoints}
-              now={shownWorth ?? data.series[data.series.length - 1]?.eur ?? 0}
-              base={lineRange === 'MAX' ? paidBase : null}
-              spent={lineRange === 'MAX' && paid > 0 ? paid : null}
-              onValue={setLineNow}
-              onDay={setLineDay}
-              onMove={setLineMove}
-              emptyText=""
-            />
-          ) : (
-            <div className="mt-4 h-[168px]" role="status" aria-busy={!lineReady}>
-              <span className="sr-only">Cargando</span>
-            </div>
-          )}
-        </>
-      ) : slices.length > 0 ? (
-        <Donut slices={slices} hidden={hidden} />
-      ) : (
-        <p className="text-center text-[13px] font-medium text-slate-400">El reparto aparece cuando haya saldo en algún sitio.</p>
-      )}
-
-      <HomeGlance data={data} hidden={hidden} notes={offerNotes} />
-
-      <section className="space-y-3">
-        {ordered.length > 0 && (
-          <div className="flex justify-end">
-            <button type="button" onClick={cycleSort} className="inline-flex items-center gap-1.5 px-1 py-1 text-xs font-medium text-slate-400">
+      <section aria-label="Sitios">
+        <div className="mb-1 flex items-end justify-between gap-3">
+          <h2 className="text-[19px] font-semibold tracking-[-0.02em] text-slate-950 dark:text-white">Sitios</h2>
+          {ordered.length > 0 && (
+            <button type="button" onClick={cycleSort} className="inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-[13px] font-medium text-slate-400 transition-colors hover:text-slate-600 dark:hover:text-slate-300">
               <ArrowUpDown size={13} />
               {SORTS.find((item) => item.id === sort)?.label}
             </button>
-          </div>
-        )}
-        {(ordered.length > 0 || (countExtras && extraWealth > 0)) && <div className="divide-y divide-slate-100 overflow-hidden rounded-[28px] bg-white ring-1 ring-slate-200/70 dark:divide-white/10 dark:bg-slate-900 dark:ring-white/10">
+          )}
+        </div>
+        {(ordered.length > 0 || (countExtras && extraWealth > 0)) && <div className="divide-y divide-slate-100 dark:divide-white/[0.08]">
         {ordered.map((row, index) => {
           const frame = row.frames[beat % row.frames.length];
           const open = openKey === row.key;
+          const held = row.sides.filter((side) => side.group !== 'cash').reduce((sum, side) => sum + side.items.length, 0);
+          const caption = row.tracking === 'positions' && held > 0 ? `${held} ${held === 1 ? 'posición' : 'posiciones'}` : 'Saldo';
           return (
-            <motion.div key={row.key} initial={prefersStill() ? false : { opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={prefersStill() ? { duration: 0 } : { ...glide, delay: Math.min(index, 5) * 0.04 }}>
+            <motion.div key={row.key} initial={still ? false : { opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={still ? { duration: 0 } : { ...glide, delay: Math.min(index, 5) * 0.04 }}>
               <div
                 role="button"
                 tabIndex={0}
+                aria-expanded={open}
                 onPointerDown={(event) => holdAccount(row, event)}
                 onContextMenu={(event) => {
                   event.preventDefault();
@@ -2012,56 +2084,37 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
                     setOpenKey(open ? null : row.key);
                   }
                 }}
-                className="hold-target flex w-full cursor-pointer items-center gap-3 px-4 py-3.5 text-left"
+                className="hold-target -mx-2 flex w-[calc(100%+1rem)] cursor-pointer items-center gap-3 rounded-2xl px-2 py-3.5 text-left transition-colors duration-150 active:bg-slate-50 dark:active:bg-white/[0.04]"
               >
-                <PlatformLogo name={row.logoName} size={32} />
+                <PlatformLogo name={row.logoName} size={38} />
                 <span className="min-w-0 flex-1">
-                  <span className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onPointerDown={(event) => event.stopPropagation()}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        setView('cartera');
-                        setOpenWallet(row.key);
-                      }}
-                      className="inline-flex min-w-0 items-center gap-0.5 text-sm font-semibold text-slate-900 dark:text-white"
-                      aria-label={`Entrar en ${row.name}`}
-                    >
-                      <span className="truncate">{row.name}</span>
-                      <ChevronRight size={14} className="shrink-0 opacity-50" />
-                    </button>
-                    {narrowScreen() && (
-                      <Flip id={hidden ? 'hidden' : frame.text} className={cn('ml-auto shrink-0 text-[11px] font-semibold tabular-nums sm:hidden', hidden ? 'text-slate-400' : frame.className)}>
-                        {mask(frame.text)}
-                      </Flip>
-                    )}
-                  </span>
-                  <span className="mt-0.5 block whitespace-nowrap text-lg font-semibold leading-none tabular-nums tracking-tight text-slate-900 dark:text-white">
+                  <button
+                    type="button"
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setView('cartera');
+                      setOpenWallet(row.key);
+                    }}
+                    className="inline-flex max-w-full min-w-0 items-center gap-0.5 text-[15px] font-semibold leading-tight text-slate-950 dark:text-white"
+                    aria-label={`Entrar en ${row.name}`}
+                  >
+                    <span className="truncate">{row.name}</span>
+                    <ChevronRight size={14} className="shrink-0 opacity-40" />
+                  </button>
+                  <span className="mt-0.5 block truncate text-[13px] font-medium text-slate-400 dark:text-slate-500">{caption}</span>
+                </span>
+                <span className="shrink-0 text-right">
+                  <span className="block whitespace-nowrap text-[15px] font-semibold leading-tight tabular-nums tracking-tight text-slate-950 dark:text-white">
                     {row.value == null ? '—' : <RisingAmount value={row.value} hidden={hidden} card delay={40} />}
                   </span>
-                </span>
-                {narrowScreen() ? (
-                  <Flip id={hidden ? 'hidden' : frame.text} className={cn('hidden shrink-0 text-right text-xs font-semibold tabular-nums leading-tight sm:inline sm:text-base', hidden ? 'text-slate-400' : frame.className)}>
+                  <Flip id={hidden ? 'hidden' : frame.text} className={cn('mt-0.5 text-[13px] font-semibold tabular-nums', hidden ? 'text-slate-400' : frame.className)}>
                     {mask(frame.text)}
                   </Flip>
-                ) : (
-                  <AnimatePresence mode="wait">
-                    <motion.span
-                      key={hidden ? 'hidden' : frame.text}
-                      initial={{ opacity: 0, y: 8, scale: 0.85 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{ opacity: 0, y: -8, scale: 0.9, transition: quickOut }}
-                      transition={jelly}
-                      className={cn('inline-block shrink-0 text-sm font-semibold tabular-nums sm:text-base', hidden ? 'text-slate-400' : frame.className)}
-                    >
-                      {mask(frame.text)}
-                    </motion.span>
-                  </AnimatePresence>
-                )}
+                </span>
               </div>
               <AccountFold open={open}>
-                <ul className="border-t border-slate-100 px-4 dark:border-white/10">
+                <ul className="mb-2 rounded-2xl bg-slate-50/80 px-4 dark:bg-white/[0.04]">
                     {row.sides.length > 1 && (
                       <li className="pt-4 pb-1">
                         <FoldShare sides={row.sides} color={row.color} />
@@ -2160,8 +2213,8 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
           );
         })}
         {countExtras && extraWealth > 0 && (
-          <button type="button" onClick={() => { setView('cartera'); setOpenWallet('extras'); }} className="flex w-full items-center gap-3 px-4 py-3.5 text-left">
-            <img src="/extras/objeto.svg" alt="" className="h-8 w-8 rounded-xl" />
+          <button type="button" onClick={() => { setView('cartera'); setOpenWallet('extras'); }} className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-3 rounded-2xl px-2 py-3.5 text-left transition-colors active:bg-slate-50 dark:active:bg-white/[0.04]">
+            <img src="/extras/objeto.svg" alt="" className="h-[38px] w-[38px] rounded-xl" />
             <span className="min-w-0 flex-1">
               <span className="block text-sm font-semibold">Extras</span>
               <span className="mt-0.5 block text-lg font-semibold leading-none tabular-nums tracking-tight"><RisingAmount value={extraWealth} hidden={hidden} card /></span>
@@ -2172,17 +2225,19 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
         <motion.button
           type="button"
           onClick={() => setAdding(true)}
-          initial={prefersStill() ? false : { opacity: 0, y: 18 }}
+          initial={still ? false : { opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={prefersStill() ? { duration: 0 } : { ...glide, delay: 0.06 }}
-          className="flex w-full items-center gap-3 rounded-[28px] border border-dashed border-slate-300/90 bg-white/40 px-5 py-3.5 text-left text-slate-600 backdrop-blur-xl hover:bg-white/70 dark:border-white/15 dark:bg-white/5 dark:text-slate-300"
+          transition={still ? { duration: 0 } : { ...glide, delay: 0.06 }}
+          className="-mx-2 mt-1 flex w-[calc(100%+1rem)] items-center gap-3 rounded-2xl px-2 py-3 text-left text-slate-500 transition-colors hover:text-slate-700 active:bg-slate-50 dark:text-slate-400 dark:hover:text-slate-200 dark:active:bg-white/[0.04]"
         >
-          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-slate-300/80 dark:border-white/15">
-            <Plus size={15} />
+          <span className="grid h-[38px] w-[38px] shrink-0 place-items-center rounded-full bg-slate-100 dark:bg-white/[0.08]">
+            <Plus size={16} />
           </span>
-          <span className="text-sm font-semibold">Añadir sitio</span>
+          <span className="text-[15px] font-semibold">Añadir sitio</span>
         </motion.button>
       </section>
+
+      <HomeGlance data={data} hidden={hidden} notes={offerNotes} />
         </ScreenSwap>
       </AnimatePresence>
       {adding && <QuickSplit onClose={() => setAdding(false)} onSaved={load} />}

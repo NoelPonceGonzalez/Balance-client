@@ -91,7 +91,7 @@ export function HomeGlance({ data, hidden, notes }: { data: DashboardData; hidde
   const money = (value: number) => (hidden ? '*****' : formatEur(value));
 
   return (
-    <section className="overflow-hidden rounded-[28px] bg-white ring-1 ring-slate-200/70 dark:bg-slate-900 dark:ring-white/10">
+    <section aria-label="Hoy" className="overflow-hidden rounded-[24px] bg-slate-50 dark:bg-white/[0.05]">
       <div className="px-4 py-4">
         <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">Hoy</div>
         {lines.length ? (
@@ -105,7 +105,7 @@ export function HomeGlance({ data, hidden, notes }: { data: DashboardData; hidde
         )}
       </div>
 
-      <div className="border-t border-slate-100 px-4 py-4 dark:border-white/10">
+      <div className="border-t border-slate-200/60 px-4 py-4 dark:border-white/10">
         <div className="flex items-baseline justify-between gap-3">
           <span className="text-[13px] font-medium text-slate-500">Base de liquidez</span>
           <span className="text-[15px] font-semibold tabular-nums">{money(cushion)}</span>
@@ -119,7 +119,7 @@ export function HomeGlance({ data, hidden, notes }: { data: DashboardData; hidde
       </div>
 
       {abroad > 0 && (
-        <div className={cn('border-t px-4 py-4', over ? 'border-amber-100 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/30' : 'border-slate-100 dark:border-white/10')}>
+        <div className={cn('border-t px-4 py-4', over ? 'border-amber-100 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/30' : 'border-slate-200/60 dark:border-white/10')}>
           <div className="flex items-baseline justify-between gap-3">
             <span className={cn('text-[13px] font-medium', over ? 'text-amber-800 dark:text-amber-200' : 'text-slate-500')}>Modelo 721</span>
             <span className={cn('text-[15px] font-semibold tabular-nums', over ? 'text-amber-900 dark:text-amber-100' : '')}>{money(abroad)}</span>
