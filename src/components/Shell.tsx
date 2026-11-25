@@ -1,5 +1,6 @@
-import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { motion, useReducedMotion } from 'motion/react';
+import { dockRoomFor, useDockShift, useKeyboardOpen } from '@/components/dock-shift';
 import { LayoutDashboard, Target, Settings, ArrowLeftRight, LineChart, Camera } from 'lucide-react';
 import { FixedCheck } from '@/components/FixedCheck';
 import { OfferNotice } from '@/components/OfferNotice';
@@ -55,17 +56,6 @@ export function Shell({
   const [bare, setBare] = useState(false);
   const hideChrome = useCallback((hidden: boolean) => setBare(hidden), []);
   const scrollRef = useRef<HTMLElement>(null);
-  const reduceMotion = useReducedMotion();
-  // Dirección del último cambio de pestaña (para deformar el indicador hacia donde viaja).
-  const [shownSection, setShownSection] = useState(section);
-  const [travel, setTravel] = useState(0);
-  if (shownSection !== section) {
-    const from = ITEMS.findIndex((item) => item.id === shownSection);
-    const to = ITEMS.findIndex((item) => item.id === section);
-    setShownSection(section);
-    setTravel(from >= 0 && to >= 0 ? Math.sign(to - from) : 0);
-  }
-  const [pressed, setPressed] = useState(false);
   const bandRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -193,88 +183,170 @@ export function Shell({
           {children}
         </div>
       </main>
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-40">
-        <div aria-hidden className="absolute inset-x-0 bottom-0 h-36 bg-gradient-to-t from-[var(--app-bg)]/25 via-[var(--app-bg)]/5 to-transparent" />
-        <div data-dock className="pointer-events-auto relative flex justify-center px-4 pb-[max(0.85rem,env(safe-area-inset-bottom))] pt-2">
-        <div className="relative flex w-full max-w-md items-center justify-center sm:w-auto">
-          <div className="relative w-full rounded-full sm:w-auto">
-            {/* Material de cristal en su propia capa: el contenido va encima, nítido y sin refractar. */}
-            <motion.div
-              aria-hidden
-              className={cn('liquid-glass pointer-events-none absolute inset-0 rounded-full', pressed && 'is-pressed')}
-              animate={reduceMotion ? undefined : { scaleX: pressed ? 0.985 : 1, scaleY: pressed ? 0.965 : 1 }}
-              transition={PRESS_SPRING}
-            >
-              <GlassLens />
-            </motion.div>
-            <nav
-              className="relative z-[1] flex h-14 items-center px-1"
-              onPointerDown={() => setPressed(true)}
-              onPointerUp={() => setPressed(false)}
-              onPointerCancel={() => setPressed(false)}
-              onPointerLeave={() => setPressed(false)}
-            >
-              {ITEMS.map((item) => {
-                const Icon = item.icon;
-                const active = section === item.id;
-                const button = (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => onChange(item.id)}
-                    className={cn(
-                      'glass-label relative flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-full px-1 py-1 text-[10px] font-semibold leading-none sm:flex-none sm:flex-row sm:gap-2 sm:px-3.5 sm:py-2 sm:text-[13px]',
-                      active
-                        ? 'text-slate-950 dark:text-white'
-                        : 'text-slate-600 hover:text-slate-800 dark:text-slate-300 dark:hover:text-white',
-                    )}
-                  >
-                    {active && (
-                      // Un único indicador compartido: Motion lo lleva de una pestaña a otra (layoutId).
-                      <motion.span
-                        aria-hidden
-                        layoutId="dock-indicator"
-                        transition={reduceMotion ? { duration: 0 } : INDICATOR_SPRING}
-                        style={{ borderRadius: 999 }}
-                        className="pointer-events-none absolute inset-0.5"
-                      >
-                        <motion.span
-                          className="glass-indicator absolute inset-0 rounded-full"
-                          style={{ originX: travel > 0 ? 0 : 1 }}
-                          animate={reduceMotion || !travel ? undefined : { scaleX: [1, 1.16, 1], scaleY: [1, 0.86, 1] }}
-                          transition={{ duration: 0.46, times: [0, 0.38, 1], ease: 'easeOut' }}
-                        />
-                      </motion.span>
-                    )}
-                    <Icon size={18} strokeWidth={active ? 2.25 : 1.75} className="relative" />
-                    <span className="relative truncate sm:hidden">{item.short}</span>
-                    <span className="relative hidden sm:inline">{item.label}</span>
-                  </button>
-                );
-                if (item.id !== 'market') return button;
-                return (
-                  <span key={item.id} className="contents">
-                    {button}
-                    <span className="grid w-11 shrink-0 place-items-center sm:w-16">
-                      <button
-                        type="button"
-                        onClick={onTicket}
-                        aria-label="Hacer una foto"
-                        className="relative z-10 grid h-10 w-10 place-items-center rounded-full bg-slate-950 text-white dark:bg-white dark:text-slate-950"
-                      >
-                        <Camera size={18} strokeWidth={1.75} />
-                      </button>
-                    </span>
-                  </span>
-                );
-              })}
-            </nav>
-          </div>
-        </div>
-        </div>
-      </div>
+      <Dock section={section} onChange={onChange} onTicket={onTicket} scrollRef={scrollRef} />
     </div>
     </OfferFocusContext.Provider>
     </ChromeHidden.Provider>
+  );
+}
+
+/** Muelle de la geometría del dock (expandido ↔ compacto): firme, sin rebote visible. */
+const DOCK_SPRING = { type: 'spring', stiffness: 420, damping: 36, mass: 0.9 } as const;
+/** Las etiquetas se van rápido antes de que encoja la superficie y vuelven cuando ya ha llegado. */
+const LABEL_OUT = { duration: 0.12, ease: [0.4, 0, 1, 1] } as const;
+const LABEL_IN = { duration: 0.24, ease: [0.22, 1, 0.36, 1], delay: 0.14 } as const;
+
+/**
+ * Continuidad espacial: al compactar, la cápsula se desplaza para que la pestaña activa quede
+ * casi donde estaba (como en el vídeo, la barra encoge anclada a la pestaña activa).
+ * Cálculo aritmético con las medidas del propio dock (sin leer el DOM). Devuelve px respecto al centro.
+ */
+function anchorShift(section: Section): number {
+  const index = ITEMS.findIndex((item) => item.id === section);
+  if (index < 0 || typeof window === 'undefined') return 0;
+  const camera = 44;
+  const wide = Math.min(window.innerWidth - 32, 448);
+  const cell = (wide - 8 - camera) / ITEMS.length;
+  const before = (k: number, size: number, slot: number) => 4 + (k < 2 ? (k + 0.5) * size : 2 * size + slot + (k - 2 + 0.5) * size);
+  const fromCenterWide = before(index, cell, camera) - wide / 2;
+  const narrow = 8 + ITEMS.length * 48 + 48;
+  const fromCenterNarrow = before(index, 48, 48) - narrow / 2;
+  return Math.round(fromCenterWide - fromCenterNarrow);
+}
+
+/**
+ * Dock flotante. F6 (prototipo): se compacta al bajar con intención y se expande al subir.
+ * Material, refracción, iconos, indicador y pulsación son los del dock aprobado (dock-approved-2026-11-25).
+ * La geometría cambia con animaciones de layout (transform), así el cristal no se re-mide en cada fotograma.
+ */
+function Dock({ section, onChange, onTicket, scrollRef }: { section: Section; onChange: (section: Section) => void; onTicket: () => void; scrollRef: RefObject<HTMLElement | null> }) {
+  const reduceMotion = useReducedMotion();
+  const compact = useDockShift(scrollRef, section, { minRoom: dockRoomFor(section), enabled: !reduceMotion });
+  const keyboard = useKeyboardOpen();
+  // Dirección del último cambio de pestaña (para deformar el indicador hacia donde viaja).
+  const [shownSection, setShownSection] = useState(section);
+  const [travel, setTravel] = useState(0);
+  if (shownSection !== section) {
+    const from = ITEMS.findIndex((item) => item.id === shownSection);
+    const to = ITEMS.findIndex((item) => item.id === section);
+    setShownSection(section);
+    setTravel(from >= 0 && to >= 0 ? Math.sign(to - from) : 0);
+  }
+  const [pressed, setPressed] = useState(false);
+  const geometry = reduceMotion ? { duration: 0 } : { ...DOCK_SPRING, delay: compact ? 0.06 : 0 };
+  const label = compact ? LABEL_OUT : LABEL_IN;
+  const anchor = compact ? anchorShift(section) : 0;
+  return (
+    <div className="pointer-events-none absolute inset-x-0 bottom-0 z-40">
+      <div aria-hidden className="absolute inset-x-0 bottom-0 h-36 bg-gradient-to-t from-[var(--app-bg)]/25 via-[var(--app-bg)]/5 to-transparent" />
+      <motion.div
+        data-dock
+        data-compact={compact ? '' : undefined}
+        className="pointer-events-auto relative flex justify-center px-4 pb-[max(0.85rem,env(safe-area-inset-bottom))] pt-2"
+        animate={keyboard ? { y: '130%', opacity: 0 } : { y: 0, opacity: 1 }}
+        transition={reduceMotion ? { duration: 0 } : DOCK_SPRING}
+        aria-hidden={keyboard || undefined}
+      >
+      <div className="relative flex w-full max-w-md items-center justify-center sm:w-auto">
+        <motion.div layout transition={geometry} style={{ borderRadius: 999, marginLeft: anchor * 2 }} className={cn('relative rounded-full sm:w-auto', compact ? 'w-auto' : 'w-full')}>
+          {/* Material de cristal en su propia capa: el contenido va encima, nítido y sin refractar. */}
+          <motion.div
+            aria-hidden
+            className={cn('liquid-glass pointer-events-none absolute inset-0 rounded-full', pressed && 'is-pressed')}
+            layout
+            style={{ borderRadius: 999 }}
+            animate={reduceMotion ? undefined : { scaleX: pressed ? 0.985 : 1, scaleY: pressed ? 0.965 : 1 }}
+            transition={{ ...PRESS_SPRING, layout: geometry }}
+          >
+            <GlassLens />
+          </motion.div>
+          <motion.nav
+            layout
+            transition={geometry}
+            className={cn('relative z-[1] flex items-center px-1', compact ? 'h-12' : 'h-14')}
+            onPointerDown={() => setPressed(true)}
+            onPointerUp={() => setPressed(false)}
+            onPointerCancel={() => setPressed(false)}
+            onPointerLeave={() => setPressed(false)}
+          >
+            {ITEMS.map((item) => {
+              const Icon = item.icon;
+              const active = section === item.id;
+              const button = (
+                <motion.button
+                  key={item.id}
+                  layout
+                  transition={geometry}
+                  type="button"
+                  aria-label={item.label}
+                  onClick={() => onChange(item.id)}
+                  className={cn(
+                    compact ? 'h-10 w-12 flex-none' : 'min-w-0 flex-1',
+                    'glass-label relative flex flex-col items-center justify-center gap-0.5 rounded-full px-1 py-1 text-[10px] font-semibold leading-none sm:flex-none sm:flex-row sm:gap-2 sm:px-3.5 sm:py-2 sm:text-[13px]',
+                    active
+                      ? 'text-slate-950 dark:text-white'
+                      : 'text-slate-600 hover:text-slate-800 dark:text-slate-300 dark:hover:text-white',
+                  )}
+                >
+                  {active && (
+                    // Un único indicador compartido: Motion lo lleva de una pestaña a otra (layoutId).
+                    <motion.span
+                      aria-hidden
+                      layoutId="dock-indicator"
+                      transition={reduceMotion ? { duration: 0 } : INDICATOR_SPRING}
+                      style={{ borderRadius: 999 }}
+                      className="pointer-events-none absolute inset-0.5"
+                    >
+                      <motion.span
+                        className="glass-indicator absolute inset-0 rounded-full"
+                        style={{ originX: travel > 0 ? 0 : 1 }}
+                        animate={reduceMotion || !travel ? undefined : { scaleX: [1, 1.16, 1], scaleY: [1, 0.86, 1] }}
+                        transition={{ duration: 0.46, times: [0, 0.38, 1], ease: 'easeOut' }}
+                      />
+                    </motion.span>
+                  )}
+                  <motion.span layout="position" transition={geometry} className="relative grid place-items-center">
+                    <Icon size={18} strokeWidth={active ? 2.25 : 1.75} />
+                  </motion.span>
+                  <motion.span
+                    layout="position"
+                    aria-hidden={compact || undefined}
+                    initial={false}
+                    animate={{ opacity: compact ? 0 : 1, scale: compact ? 0.7 : 1, y: compact ? 4 : 0 }}
+                    transition={reduceMotion ? { duration: 0 } : { ...label, layout: geometry }}
+                    className={cn('relative truncate sm:hidden', compact && 'pointer-events-none absolute inset-x-0 bottom-0 text-center')}
+                  >
+                    {item.short}
+                  </motion.span>
+                  <span className="relative hidden sm:inline">{item.label}</span>
+                </motion.button>
+              );
+              if (item.id !== 'market') return button;
+              return (
+                <span key={item.id} className="contents">
+                  {button}
+                  <motion.span layout transition={geometry} className={cn('grid shrink-0 place-items-center sm:w-16', compact ? 'w-12' : 'w-11')}>
+                    <motion.button
+                      layout
+                      transition={geometry}
+                      type="button"
+                      onClick={onTicket}
+                      aria-label="Hacer una foto"
+                      style={{ borderRadius: 999 }}
+                      className={cn('relative z-10 grid place-items-center rounded-full bg-slate-950 text-white dark:bg-white dark:text-slate-950', compact ? 'h-9 w-9' : 'h-10 w-10')}
+                    >
+                      <motion.span layout="position" transition={geometry} className="grid place-items-center">
+                        <Camera size={18} strokeWidth={1.75} />
+                      </motion.span>
+                    </motion.button>
+                  </motion.span>
+                </span>
+              );
+            })}
+          </motion.nav>
+        </motion.div>
+      </div>
+      </motion.div>
+    </div>
   );
 }
