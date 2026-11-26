@@ -1,5 +1,6 @@
 import { ChartBone } from '@/components/Skeleton';
 import { cachedApi, ensureOwner, onCacheReset, peek } from '@/lib/query';
+import { captureFlip } from '@/lib/flip';
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { matchesSearch, useDockSearch, useOpenDockSearch } from '@/components/dock/dock-search';
 import { AnimatePresence, motion } from 'motion/react';
@@ -1441,31 +1442,39 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
     <div className="space-y-4">
       {error && <p className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">{error}</p>}
       {!current && (
-        <div className="grid grid-cols-1 gap-3 min-[480px]:grid-cols-2">
-          {accounts.map((account, index) => (
-            <motion.button
-              key={account.key}
-              type="button"
-              onClick={() => onOpen(account.key)}
-              initial={window.matchMedia('(prefers-reduced-motion: reduce)').matches ? false : { opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ ...glide, delay: Math.min(index, 5) * 0.04 }}
-              className="rounded-[28px] bg-white p-4 text-left ring-1 ring-slate-200/70 dark:bg-slate-900 dark:ring-white/10"
-            >
-              <span className="flex items-start justify-between gap-2">
-                <span className="flex min-w-0 items-center gap-2">
-                  {account.image ? <img src={account.image} alt="" className="h-[22px] w-[22px] rounded-lg object-cover" /> : <PlatformLogo name={account.logoName} size={22} />}
-                  <span className="min-w-0 truncate text-sm font-semibold">{account.name}</span>
+        <section aria-label="Carteras">
+          <h2 className="mb-1 text-[19px] font-semibold tracking-[-0.02em] text-slate-950 dark:text-white">Carteras</h2>
+          <div className="divide-y divide-slate-100 dark:divide-white/[0.08]">
+          {accounts.map((account, index) => {
+            const frames = [
+              ...(account.gainPct != null ? [{ text: formatPct(account.gainPct), tone: toneClass(account.gainPct) }] : []),
+              ...(account.gainEur != null ? [{ text: formatSignedEur(account.gainEur), tone: toneClass(account.gainEur) }] : []),
+            ];
+            const frame = frames.length ? frames[beat % frames.length] : { text: '—', tone: 'text-slate-300' };
+            const text = hidden && frames.length ? '*****' : frame.text;
+            const caption = [(account.sides || []).map((side) => side.title).join(' · ') || 'Sin desglose', account.pricedOn ? `${account.tracking === 'positions' ? 'efectivo' : 'cifra'} del ${formatDay(account.pricedOn)}` : ''].filter(Boolean).join(' · ');
+            return (
+              <motion.button
+                key={account.key}
+                type="button"
+                onClick={(event) => { captureFlip(event.currentTarget); onOpen(account.key); }}
+                initial={stillMotion() || index > 11 ? false : { opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ ...glide, delay: Math.min(index, 5) * 0.04 }}
+                className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-3 rounded-2xl px-2 py-3.5 text-left transition-colors duration-150 active:bg-slate-50 dark:active:bg-white/[0.04]"
+              >
+                <span data-flip="logo" className="shrink-0">
+                  {account.image ? <img src={account.image} alt="" className="h-[38px] w-[38px] rounded-xl object-cover" /> : <PlatformLogo name={account.logoName} size={38} />}
                 </span>
-                {(() => {
-                  const frames = [
-                    ...(account.gainPct != null ? [{ text: formatPct(account.gainPct), tone: toneClass(account.gainPct) }] : []),
-                    ...(account.gainEur != null ? [{ text: formatSignedEur(account.gainEur), tone: toneClass(account.gainEur) }] : []),
-                  ];
-                  const frame = frames.length ? frames[beat % frames.length] : { text: '—', tone: 'text-slate-300' };
-                  const text = hidden && frames.length ? '*****' : frame.text;
-                  if (stillMotion()) return <span className={cn('shrink-0 text-[13px] font-semibold tabular-nums', frame.tone)}>{text}</span>;
-                  return (
+                <span className="min-w-0 flex-1">
+                  <span data-flip="name" className="block truncate text-[15px] font-semibold leading-tight text-slate-950 dark:text-white">{account.name}</span>
+                  <span className="mt-0.5 block truncate text-[13px] font-medium text-slate-400 dark:text-slate-500">{caption}</span>
+                </span>
+                <span className="shrink-0 text-right">
+                  <span data-flip="value" className="block whitespace-nowrap text-[15px] font-semibold leading-tight tabular-nums tracking-tight text-slate-950 dark:text-white">{account.value == null ? '—' : money(account.value, hidden)}</span>
+                  {stillMotion() ? (
+                    <span className={cn('mt-0.5 block text-[13px] font-semibold tabular-nums', frame.tone)}>{text}</span>
+                  ) : (
                     <AnimatePresence mode="wait" initial={false}>
                       <motion.span
                         key={text}
@@ -1473,26 +1482,18 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
                         animate={{ opacity: 1, y: 0, scale: 1 }}
                         exit={{ opacity: 0, y: -6, scale: 0.9, transition: quickOut }}
                         transition={jelly}
-                        className={cn('inline-block shrink-0 text-[13px] font-semibold tabular-nums', frame.tone)}
+                        className={cn('mt-0.5 block text-[13px] font-semibold tabular-nums', frame.tone)}
                       >
                         {text}
                       </motion.span>
                     </AnimatePresence>
-                  );
-                })()}
-              </span>
-              <span className="mt-3 block whitespace-nowrap text-[1.65rem] font-semibold leading-none tabular-nums tracking-tight">{account.value == null ? '—' : money(account.value, hidden)}</span>
-              <span className="mt-2 block text-[11px] font-semibold text-slate-400">
-                {(account.sides || []).map((side) => side.title).join(' · ') || 'Sin desglose'}
-              </span>
-              {account.pricedOn && (
-                <span className="mt-1 block text-[11px] font-semibold text-slate-400">
-                  {account.tracking === 'positions' ? 'Efectivo' : 'Cifra'} del {formatDay(account.pricedOn)}
+                  )}
                 </span>
-              )}
-            </motion.button>
-          ))}
-        </div>
+              </motion.button>
+            );
+          })}
+          </div>
+        </section>
       )}
       <AnimatePresence mode="wait" initial={false}>
       {current && ledger && (
