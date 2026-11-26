@@ -12,14 +12,14 @@
  * desde cualquier punto. React solo vuelve a pintar al cruzar umbrales; cada fotograma va por MotionValues.
  */
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
-import { motion, useReducedMotion, useSpring, useTransform, type MotionValue } from 'motion/react';
+import { motion, useMotionValue, useReducedMotion, useSpring, useTransform, type MotionValue } from 'motion/react';
 import { ArrowLeftRight, Camera, LayoutDashboard, LineChart, Search, Target, X } from 'lucide-react';
 import { dockRoomFor, useDockShift } from '@/components/dock-shift';
 import { GlassCapsule } from '@/components/dock/GlassCapsule';
 import { useDockSearchControl } from '@/components/dock/dock-search';
 import {
-  CAPSULE_W, GLASS_H, INDICATOR, MORPH_SPRING, NAV_SPRING, PRESS_SPRING,
-  bell, clamp01, dockFrame, lerp, searchMax, slotCenter, smooth, span,
+  GLASS_H, INDICATOR, MORPH_SPRING, NAV_SPRING, PRESS_SPRING,
+  bell, capsuleWidth, clamp01, dockFrame, lerp, searchMax, slotCenter, smooth, span,
 } from '@/components/dock/dock-motion';
 import { cn } from '@/lib/utils';
 
@@ -96,16 +96,10 @@ export function Dock<S extends DockSection>({ section, onChange, onTicket, scrol
   const morph = useSpring(0, MORPH_SPRING);
   const slot = useSpring(Math.max(0, active), NAV_SPRING);
   const press = useSpring(0, PRESS_SPRING);
-  const boxW = useSpring(0, NAV_SPRING);
-  const search = useSpring(withSearch ? 1 : 0, NAV_SPRING);
+  const boxW = useMotionValue(0);
+  const search = useMotionValue(withSearch ? 1 : 0);
   const travelFrom = useRef(Math.max(0, active));
-  const firstWidth = useRef(true);
-  useEffect(() => {
-    if (!width) return;
-    if (reduceMotion || firstWidth.current) boxW.jump(width);
-    else boxW.set(width);
-    firstWidth.current = false;
-  }, [width, reduceMotion, boxW]);
+  useLayoutEffect(() => { if (width) boxW.set(width); }, [width, boxW]);
   useEffect(() => {
     if (active < 0) return;
     travelFrom.current = slot.get();
@@ -116,7 +110,7 @@ export function Dock<S extends DockSection>({ section, onChange, onTicket, scrol
     if (reduceMotion) morph.jump(shown ? 1 : 0);
     else morph.set(shown ? 1 : 0);
   }, [shown, reduceMotion, morph]);
-  useEffect(() => { search.jump(withSearch ? 1 : 0); }, [withSearch, search]);
+  useLayoutEffect(() => { search.set(withSearch ? 1 : 0); }, [withSearch, search]);
 
   const [pressed, setPressed] = useState(false);
   useEffect(() => { press.set(pressed && !reduceMotion ? 1 : 0); }, [pressed, reduceMotion, press]);
@@ -129,24 +123,25 @@ export function Dock<S extends DockSection>({ section, onChange, onTicket, scrol
   const aw = frame((f) => f.aw);
   const bx = frame((f) => f.bx);
   const bw = frame((f) => f.bw);
-  const bGlass = frame((f) => f.bOpacity);
-  const bContent = frame((f, t) => f.bOpacity * smooth(span(t, 0.5, 0.95)));
+  const typing = useTransform(morph, (p) => smooth(span(p, 0.45, 0.95)));
   const camD = frame((f) => f.camD);
   const camX = frame((f) => f.camX - f.camD / 2);
   const camY = frame((f) => (GLASS_H - f.camD) / 2);
   const camScale = useTransform(camD, (d) => d / GLASS_H);
   const camIcon = useTransform(camD, (d) => GLASS_H / d);
   const camShadow = useTransform(morph, (p) => `0 10px 24px -10px rgb(15 23 42 / ${(0.5 * clamp01(p)).toFixed(3)})`);
-  const contentClip = useTransform(aw, (w) => roundClip(CAPSULE_W - w));
+  const capW = capsuleWidth(width || 390, withSearch);
   const bMax = searchMax(width || 390);
-  const bClip = useTransform(bw, (w) => roundClip(bMax - w));
+  const contentClip = frame((f) => f.capW - f.aw);
+  const contentClipPath = useTransform(contentClip, roundClip);
+  const bClip = useTransform([bw, boxW] as MotionValue<number>[], ([w, cw]: number[]) => roundClip(searchMax(cw) - w));
 
   // Deformación sutil y determinista: campana durante la separación, hundimiento al pulsar.
   const glassScaleX = useTransform([press, morph] as MotionValue<number>[], ([pr, p]: number[]) => (1 - 0.015 * pr) * (1 + 0.018 * bell(p)));
   const glassScaleY = useTransform([press, morph] as MotionValue<number>[], ([pr, p]: number[]) => (1 - 0.035 * pr) * (1 - 0.03 * bell(p)));
 
   // Indicador: viaja con el muelle de referencia y se estira en campana según el recorrido.
-  const indX = useTransform([slot, morph] as MotionValue<number>[], ([s, p]: number[]) => lerp(slotCenter(s), HALF, clamp01(p)) - INDICATOR / 2);
+  const indX = useTransform([slot, morph, boxW, search] as MotionValue<number>[], ([s, p, cw, q]: number[]) => lerp(slotCenter(s, capsuleWidth(cw, q > 0.5)), HALF, clamp01(p)) - INDICATOR / 2);
   const indOpacity = useTransform(morph, (p) => (active < 0 ? 0 : 1 - smooth(span(p, 0.5, 1))));
   const travel = useTransform(slot, (s) => {
     const total = Math.abs(active - travelFrom.current);
@@ -214,12 +209,12 @@ export function Dock<S extends DockSection>({ section, onChange, onTicket, scrol
           {width > 0 && (
             <>
               {/* Cristal B (buscador) debajo de la cápsula: nace de su canto al separarse. */}
-              <SearchGlass x={bx} width={bw} opacity={bGlass} span={bMax} />
+              <SearchGlass x={bx} width={bw} opacity={search} span={bMax} />
               {/* Cristal A: cápsula → burbuja. Mismo material en todo el recorrido. */}
-              <GlassCapsule x={ax} width={aw} height={GLASS_H} span={CAPSULE_W} scaleX={glassScaleX} scaleY={glassScaleY} pressed={pressed} />
+              <GlassCapsule x={ax} width={aw} height={GLASS_H} span={capW} scaleX={glassScaleX} scaleY={glassScaleY} pressed={pressed} />
 
               {/* Contenido de A: recortado a su forma (clip-path, sin cambiar de tamaño). Nunca se deforma. */}
-              <motion.div className="absolute left-0 top-0" style={{ x: ax, width: CAPSULE_W, height: GLASS_H, clipPath: contentClip }} {...pressHandlers}>
+              <motion.div className="absolute left-0 top-0" style={{ x: ax, width: capW, height: GLASS_H, clipPath: contentClipPath }} {...pressHandlers}>
                 {active >= 0 && (
                   <motion.span aria-hidden className="pointer-events-none absolute left-0" style={{ x: indX, top: (GLASS_H - INDICATOR) / 2, width: INDICATOR, height: INDICATOR, opacity: indOpacity, scaleX: indScaleX, scaleY: indScaleY }}>
                     <span className="glass-indicator absolute inset-0 rounded-full" />
@@ -232,20 +227,23 @@ export function Dock<S extends DockSection>({ section, onChange, onTicket, scrol
                     isActive={tab.slot === active}
                     compact={shown}
                     morph={morph}
+                    boxW={boxW}
+                    search={search}
                     onPress={() => {
                       if (tab.slot !== active) onChange(tab.id as S);
                       else if (searching) closeSearch();
                       else if (shown) expandRef.current?.();
-                      else openSearch();
+                      else scrollRef.current?.scrollTo({ top: 0, behavior: reduceMotion ? 'auto' : 'smooth' });
                     }}
                   />
                 ))}
               </motion.div>
 
-              {/* Contenido de B: el buscador real de la pantalla visible. */}
-              <motion.div className="absolute left-0 top-0" style={{ x: bx, width: bMax, height: GLASS_H, clipPath: bClip, opacity: bContent }}>
-                <label className={cn('flex h-full items-center gap-2.5 pl-5 pr-2', shown && withSearch ? 'pointer-events-auto' : 'pointer-events-none')} style={{ width: bMax }}>
+              {/* Contenido de B: lupa en reposo; al abrirse, el campo del buscador único. Tocarla enfoca el campo (mismo gesto). */}
+              <motion.div className="absolute left-0 top-0" style={{ x: bx, width: bMax, height: GLASS_H, clipPath: bClip, opacity: search }}>
+                <label aria-label={shown ? undefined : 'Buscar'} className={cn('flex h-full cursor-text items-center gap-2.5 pl-[18px] pr-2', withSearch ? 'pointer-events-auto' : 'pointer-events-none')} style={{ width: bMax }} onPointerDown={() => { if (!shown) setOpened(true); }}>
                   <span className="glass-label grid shrink-0 place-items-center text-slate-600 dark:text-slate-300"><Search size={20} strokeWidth={1.9} /></span>
+                  <motion.span className="flex min-w-0 flex-1 items-center" style={{ opacity: typing }}>
                   <input
                     ref={inputRef}
                     type="search"
@@ -253,7 +251,7 @@ export function Dock<S extends DockSection>({ section, onChange, onTicket, scrol
                     autoComplete="off"
                     spellCheck={false}
                     value={query}
-                    tabIndex={shown && withSearch ? 0 : -1}
+                    tabIndex={withSearch ? 0 : -1}
                     aria-label={entry?.placeholder || 'Buscar'}
                     placeholder={entry?.placeholder || 'Buscar'}
                     onChange={(event) => control?.setQuery(event.target.value)}
@@ -270,6 +268,7 @@ export function Dock<S extends DockSection>({ section, onChange, onTicket, scrol
                       <X size={17} />
                     </button>
                   )}
+                  </motion.span>
                 </label>
               </motion.div>
 
@@ -313,16 +312,28 @@ const SearchGlass = memo(function SearchGlass({ x, width, opacity, span: wide }:
   );
 });
 
-const TabButton = memo(function TabButton({ tab, isActive, compact, morph, onPress }: {
+const TabButton = memo(function TabButton({ tab, isActive, compact, morph, boxW, search, onPress }: {
   tab: (typeof TABS)[number];
   isActive: boolean;
   compact: boolean;
   morph: MotionValue<number>;
+  boxW: MotionValue<number>;
+  search: MotionValue<number>;
   onPress: () => void;
 }) {
   const Icon = tab.icon;
   // La pestaña activa viaja al centro de la burbuja; las demás se apagan antes de quedar recortadas.
-  const x = useTransform(morph, (p) => (isActive ? lerp(slotCenter(tab.slot), HALF, clamp01(p)) : slotCenter(tab.slot)) - HALF);
+  // Suscripción explícita: lee los valores actuales al montar (el ancho puede haber llegado antes).
+  const x = useMotionValue(0);
+  useLayoutEffect(() => {
+    const place = () => {
+      const home = slotCenter(tab.slot, capsuleWidth(boxW.get(), search.get() > 0.5));
+      x.set((isActive ? lerp(home, HALF, clamp01(morph.get())) : home) - HALF);
+    };
+    place();
+    const offs = [morph.on('change', place), boxW.on('change', place), search.on('change', place)];
+    return () => offs.forEach((off) => off());
+  }, [tab.slot, isActive, morph, boxW, search, x]);
   const fade = useTransform(morph, (p) => (isActive ? 1 : 1 - smooth(span(p, 0, 0.45))));
   const shrink = useTransform(morph, (p) => (isActive ? 1 : 1 - 0.2 * smooth(span(p, 0, 0.45))));
   const hidden = compact && !isActive;

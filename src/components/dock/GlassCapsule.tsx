@@ -15,7 +15,7 @@
  * Navegadores sin filtros SVG en backdrop-filter: el fallback esmerilado de .liquid-glass, igual que antes.
  */
 import { memo, useEffect, useId, useLayoutEffect, useRef, useState, type RefObject } from 'react';
-import { motion, useTransform, type MotionValue } from 'motion/react';
+import { motion, type MotionValue } from 'motion/react';
 import { canRefract, displacementMap } from '@/components/LiquidGlass';
 import { cn } from '@/lib/utils';
 
@@ -89,18 +89,19 @@ export const GlassCapsule = memo(function GlassCapsule({
   const W = Math.max(Math.round(height), Math.round(span));
   const wide = (w: number) => Math.min(W, Math.max(h, w));
 
-  // Recorte de la capa óptica a la forma actual (sin cambiar su tamaño).
-  const clip = useTransform(width, (w) => `inset(0px ${(W - wide(w)).toFixed(2)}px 0px 0px round ${half}px)`);
-  const sheenW = useTransform(width, wide);
-  const origin = useTransform(width, (w) => `${wide(w) / 2}px ${h / 2}px`);
-
-  // Canto derecho del mapa: 3 atributos por fotograma (solo si cambia de píxel).
+  // Por fotograma, sin React: recorte de la capa óptica, ancho del brillo, origen y canto derecho del mapa.
+  // Suscripción explícita (y relectura al cambiar el ancho fijo W): nunca queda un valor viejo.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const sheenRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
-    if (!canRefract || !optics) return;
     let last = -1;
     const apply = (w: number) => {
-      const right = Math.round(wide(w));
-      if (right === last) return;
+      const shown = wide(w);
+      if (opticsRef.current) opticsRef.current.style.clipPath = `inset(0px ${(W - shown).toFixed(2)}px 0px 0px round ${half}px)`;
+      if (sheenRef.current) sheenRef.current.style.width = `${shown}px`;
+      if (rootRef.current) rootRef.current.style.transformOrigin = `${shown / 2}px ${h / 2}px`;
+      const right = Math.round(shown);
+      if (right === last || !canRefract || !optics) return;
       last = right;
       capRightRef.current?.setAttribute('dx', String(right - h));
       capRightRef.current?.setAttribute('x', String(right - half));
@@ -109,7 +110,7 @@ export const GlassCapsule = memo(function GlassCapsule({
     apply(width.get());
     return width.on('change', apply);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [width, optics, h, half]);
+  }, [width, optics, h, half, W]);
 
   const refract = canRefract && optics ? optics : null;
   const maps = refract ? capsuleMaps(h) : null;
@@ -117,7 +118,7 @@ export const GlassCapsule = memo(function GlassCapsule({
   const w0 = Math.round(wide(width.get()));
 
   return (
-    <motion.div aria-hidden className="pointer-events-none absolute left-0 top-0" style={{ x, opacity, scaleX, scaleY, transformOrigin: origin, width: 0, height: h }}>
+    <motion.div ref={rootRef} aria-hidden className="pointer-events-none absolute left-0 top-0" style={{ x, opacity, scaleX, scaleY, width: 0, height: h }}>
       {maps && refract ? (
         <svg width="0" height="0" focusable="false" className="pointer-events-none absolute h-0 w-0 overflow-hidden">
           <filter id={id} x="0" y="0" width={W} height={h} filterUnits="userSpaceOnUse" primitiveUnits="userSpaceOnUse" colorInterpolationFilters="sRGB">
@@ -157,12 +158,13 @@ export const GlassCapsule = memo(function GlassCapsule({
         data-part="optics"
         data-refract={refract ? '' : undefined}
         className="liquid-glass absolute left-0 top-0"
-        style={{ width: W, height: h, clipPath: clip, ['--lens' as string]: refract ? `url(#${id})` : undefined }}
+        style={{ width: W, height: h, ['--lens' as string]: refract ? `url(#${id})` : undefined }}
       />
-      <motion.div
+      <div
+        ref={sheenRef}
         data-part="sheen"
         className={cn('liquid-glass absolute left-0 top-0 rounded-full', pressed && 'is-pressed')}
-        style={{ width: sheenW, height: h, borderRadius: 999 }}
+        style={{ height: h, borderRadius: 999 }}
       />
     </motion.div>
   );
