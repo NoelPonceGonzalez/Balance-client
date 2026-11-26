@@ -14,6 +14,14 @@ export class ApiError extends Error {
   }
 }
 
+const writeListeners = new Set<() => void>();
+
+/** Avisa tras cada escritura que llega al servidor (POST/PUT/PATCH/DELETE): lib/query.ts vacía su caché. */
+export function onApiWrite(listener: () => void): () => void {
+  writeListeners.add(listener);
+  return () => { writeListeners.delete(listener); };
+}
+
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   let last: unknown;
   for (let attempt = 0; attempt < 4; attempt += 1) {
@@ -45,6 +53,9 @@ async function apiOnce<T>(path: string, options: RequestInit): Promise<T> {
     const timedOut = error instanceof DOMException && (error.name === 'TimeoutError' || error.name === 'AbortError');
     throw new ApiError(timedOut ? 'El servidor ha tardado demasiado.' : 'No hay conexión con el servidor. Comprueba que la API esté en marcha.', 0, timedOut ? 'timeout' : 'offline');
   }
+  const method = (options.method || 'GET').toUpperCase();
+  // Con respuesta (correcta o no) la escritura pudo aplicarse: nada guardado antes vale ya.
+  if (method !== 'GET' && method !== 'HEAD') writeListeners.forEach((listener) => listener());
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     if (data.code === 'lock') {

@@ -1,3 +1,4 @@
+import { cachedApi } from '@/lib/query';
 import { api } from '@/lib/api';
 
 interface Priced {
@@ -29,7 +30,8 @@ export async function shapeLine(rows: Priced[]): Promise<{ day: string; eur: num
   const stories = await Promise.all(linked.map(async (row) => {
     const kind = row.source === 'coingecko' ? 'crypto' : 'stock';
     try {
-      const data = await api<Story>(`/api/market/story?kind=${kind}&key=${encodeURIComponent(`${row.source}:${row.quoteId}`)}&name=${encodeURIComponent(row.quoteId)}&days=365`);
+      // Histórico diario de un año: se reutiliza 5 min (antes se descargaba entero cada 30 s por cartera abierta).
+      const data = await cachedApi<Story>(`/api/market/story?kind=${kind}&key=${encodeURIComponent(`${row.source}:${row.quoteId}`)}&name=${encodeURIComponent(row.quoteId)}&days=365`, { maxAge: 5 * 60_000 });
       const days = new Map<string, number>();
       for (const point of data.series || []) {
         if (point.eur > 0) days.set(dayOf(point.at), point.eur);
