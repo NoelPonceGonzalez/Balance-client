@@ -14,7 +14,7 @@ import { Settings } from '@/views/Settings';
 import { JoinTrip } from '@/views/TripPlan';
 import { AppLock } from '@/components/AppLock';
 import { DeviceAccess } from '@/components/DeviceAccess';
-import { TicketCam } from '@/components/TicketCam';
+import { CameraLayer, useCameraPreload } from '@/components/CameraLayer';
 import { QuietLoad, arriveTokenNow, beginArrive } from '@/components/QuietLoad';
 
 function applyTheme(theme: User['theme']) {
@@ -221,6 +221,9 @@ export default function App() {
     return () => window.clearTimeout(timer);
   }, [ready]);
 
+  // La cámara se descarga aparte del Resumen y se precarga cuando el navegador está libre.
+  useCameraPreload(Boolean(ready && user));
+
   if (!ready) return null;
   if (offline && !user) {
     return (
@@ -297,13 +300,12 @@ export default function App() {
         />
       )}
       <DeviceAccess />
-      {ticket && (
-        <TicketCam
-          userId={user.id}
-          onClose={() => setTicket(false)}
-          onSaved={() => { setTicket(false); setBooks((value) => value + 1); }}
-        />
-      )}
+      <CameraLayer
+        open={ticket}
+        userId={user.id}
+        onClose={() => setTicket(false)}
+        onSaved={() => { setTicket(false); setBooks((value) => value + 1); }}
+      />
     </Shell>
     {opening && (
       <div id="arrive" className="arrive-hold">

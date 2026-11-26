@@ -558,3 +558,33 @@ html[data-surface='resumen'] div:has(> main.app-scroll) {
   -webkit-appearance: none;
   appearance: none;
 }
+
+/* Bloque D · importe de las hojas: cifras tabulares sin flechas del navegador (el valor y el redondeo no cambian). */
+.amount-field::-webkit-inner-spin-button,
+.amount-field::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.amount-field {
+  -moz-appearance: textfield;
+  appearance: textfield;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Bloque D · listas agrupadas de Ajustes: separador fino que empieza tras el margen, como en los ajustes del sistema. */
+.settings-list > * + * {
+  position: relative;
+}
+.settings-list > * + *::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 1rem;
+  right: 0;
+  height: 1px;
+  background: rgb(226 232 240 / 0.9);
+  pointer-events: none;
+}
+.dark .settings-list > * + *::before {
+  background: rgb(255 255 255 / 0.08);
+}

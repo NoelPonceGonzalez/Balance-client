@@ -1,7 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Field, Input, fieldClass } from '@/components/ui/Input';
 import { Modal } from '@/components/Modal';
+import { PlatformLogo } from '@/components/PlatformLogo';
+import { playFlip } from '@/lib/flip';
 import { api, ApiError } from '@/lib/api';
 import { formatDay } from '@/lib/format';
 import { CATEGORIES } from '@/lib/labels';
@@ -47,6 +49,8 @@ interface Props {
   onClose: () => void;
   onSaved: () => Promise<void> | void;
   onDelete?: () => void;
+  /** Movimiento que se edita, tal como se ve en su fila: sus piezas vuelan desde la fila hasta aquí. */
+  identity?: { logo: string; title: string; caption: string; amount: string; tone?: string };
 }
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -55,7 +59,7 @@ function emptyExtra() {
   return { description: '', category: '', fee: '', date: today(), counterAccountId: '', holdingId: '', otherHoldingId: '', quantity: '', otherQuantity: '' };
 }
 
-export function EntrySheet({ accounts, pieces, accountId, verb, allowed, editing, initial, onClose, onSaved, onDelete }: Props) {
+export function EntrySheet({ accounts, pieces, accountId, verb, allowed, editing, initial, onClose, onSaved, onDelete, identity }: Props) {
   const [siteId, setSiteId] = useState(accountId);
   const [chosen, setChosen] = useState<VerbId>(verb);
   const [amount, setAmount] = useState(initial?.amount || '');
@@ -65,6 +69,11 @@ export function EntrySheet({ accounts, pieces, accountId, verb, allowed, editing
   const [duplicate, setDuplicate] = useState(false);
   const [saving, setSaving] = useState(false);
   const [choice, setChoice] = useState<boolean | null>(editing && initial?.applyToBalances != null ? initial.applyToBalances : null);
+  // Bloque D: cambios sin guardar (se pregunta antes de cerrar) y un solo envío a la vez.
+  const snap = JSON.stringify([siteId, chosen, amount, extra, choice]);
+  const startSnap = useRef(snap);
+  const dirty = snap !== startSnap.current;
+  const sending = useRef(false);
   const site = accounts.find((item) => item.id === siteId) || accounts[0];
   const allVerbs = site ? verbsFor(site.kind, site.tracking) : [];
   const narrowed = allowed?.length ? allVerbs.filter((item) => allowed.includes(item.id)) : allVerbs;
@@ -87,6 +96,16 @@ export function EntrySheet({ accounts, pieces, accountId, verb, allowed, editing
   };
 
   const save = async (confirmDuplicate = false) => {
+    if (sending.current) return;
+    sending.current = true;
+    try {
+      await send(confirmDuplicate);
+    } finally {
+      sending.current = false;
+    }
+  };
+
+  const send = async (confirmDuplicate = false) => {
     if (!site) return;
     setError('');
     setSaving(true);
@@ -156,9 +175,44 @@ export function EntrySheet({ accounts, pieces, accountId, verb, allowed, editing
   };
 
   if (!site) return null;
+  const amountLabel = balanceVerb ? 'El saldo es' : active === 'add' || active === 'remove' ? 'Cantidad' : coinPass ? 'Valor en euros' : 'Importe';
+  const unit = active === 'add' || active === 'remove' ? '' : eur || coinPass ? '€' : (site.currency || '').toUpperCase();
   return (
-    <Modal title={verbs.find((item) => item.id === active)?.label || 'Apuntar'} onClose={onClose}>
+    <Modal
+      title={verbs.find((item) => item.id === active)?.label || 'Apuntar'}
+      onClose={onClose}
+      dirty={dirty}
+      busy={saving}
+      entrance={identity ? 'fade' : 'sheet'}
+      onShown={identity ? (panel) => playFlip(panel) : undefined}
+    >
       <div className="grid gap-4">
+        {identity && (
+          <div className="-mt-1 flex items-center gap-3 rounded-[22px] bg-slate-50 px-3 py-3 dark:bg-white/[0.05]">
+            <span data-flip-to="logo" className="shrink-0"><PlatformLogo name={identity.logo} size={40} /></span>
+            <span className="min-w-0 flex-1">
+              <span data-flip-to="name" className="block truncate text-[16px] font-semibold">{identity.title}</span>
+              <span className="mt-0.5 block truncate text-[13px] font-medium text-slate-400">{identity.caption}</span>
+            </span>
+            <span data-flip-to="value" className={cn('shrink-0 text-right text-[16px] font-semibold tabular-nums', identity.tone)}>{identity.amount}</span>
+          </div>
+        )}
+        <label className="block min-w-0">
+          <span className="text-[13px] font-medium text-slate-600 dark:text-slate-300">{amountLabel}</span>
+          <span className="mt-1.5 flex items-baseline gap-2 rounded-[22px] border border-slate-200/90 bg-white/90 px-4 py-2.5 transition-shadow focus-within:border-slate-300 focus-within:ring-4 focus-within:ring-slate-900/[0.06] dark:border-white/10 dark:bg-white/5 dark:focus-within:ring-white/10">
+            <input
+              type="number"
+              step="any"
+              inputMode="decimal"
+              enterKeyHint="done"
+              placeholder="0"
+              value={amount}
+              onChange={(event) => setAmount(event.target.value)}
+              className="amount-field w-0 min-w-0 flex-1 bg-transparent text-[30px] font-semibold leading-tight tracking-tight tabular-nums text-slate-900 outline-none placeholder:text-slate-300 dark:text-white dark:placeholder:text-slate-600"
+            />
+            {unit && <span className="shrink-0 text-[17px] font-semibold text-slate-400" aria-hidden>{unit}</span>}
+          </span>
+        </label>
         {accounts.length > 1 && !editing && (
           <Field label="Sitio">
             <select className={fieldClass} value={site.id} onChange={(event) => { setSiteId(event.target.value); setChosen(verbsFor(accounts.find((item) => item.id === event.target.value)?.kind || '', accounts.find((item) => item.id === event.target.value)?.tracking || '')[0]?.id || 'out'); }}>
@@ -166,14 +220,6 @@ export function EntrySheet({ accounts, pieces, accountId, verb, allowed, editing
             </select>
           </Field>
         )}
-        <div className="flex flex-wrap gap-2">
-          {verbs.map((item) => (
-            <button key={item.id} type="button" onClick={() => setChosen(item.id)} className={cn('rounded-full px-3 py-1.5 text-sm font-semibold', item.id === active ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950' : 'text-slate-500 ring-1 ring-slate-200 dark:ring-white/15')}>
-              {item.label}
-            </button>
-          ))}
-        </div>
-        <Input label={balanceVerb ? 'El saldo es' : active === 'add' || active === 'remove' ? 'Cantidad' : coinPass ? 'Valor en euros' : 'Importe'} type="number" step="any" value={amount} onChange={(event) => setAmount(event.target.value)} />
         {needsPiece && (
           <Field label="Pieza">
             <select className={fieldClass} value={extra.holdingId} onChange={(event) => setExtra({ ...extra, holdingId: event.target.value })}>
@@ -216,6 +262,13 @@ export function EntrySheet({ accounts, pieces, accountId, verb, allowed, editing
             {coinPass && <p className="text-[13px] font-medium leading-snug text-slate-500">Pasa la moneda con su coste. El efectivo se queda y no tributa.</p>}
           </>
         )}
+        <div className="flex flex-wrap gap-2">
+          {verbs.map((item) => (
+            <button key={item.id} type="button" onClick={() => setChosen(item.id)} className={cn('rounded-full px-3 py-1.5 text-sm font-semibold', item.id === active ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950' : 'text-slate-500 ring-1 ring-slate-200 dark:ring-white/15')}>
+              {item.label}
+            </button>
+          ))}
+        </div>
         <Input label="Fecha" type="date" value={extra.date} onChange={(event) => setExtra({ ...extra, date: event.target.value })} />
         {eur && active !== 'balance' && !coinPass && (
           <label className="flex items-start gap-3 rounded-[20px] bg-slate-100 px-4 py-3 text-[13px] font-medium leading-snug text-slate-600 dark:bg-white/10 dark:text-slate-300">
@@ -242,12 +295,12 @@ export function EntrySheet({ accounts, pieces, accountId, verb, allowed, editing
             <Input label="Comisión" type="number" step="any" value={extra.fee} onChange={(event) => setExtra({ ...extra, fee: event.target.value })} placeholder="No se resta otra vez" />
           </div>
         )}
-        {error && <p className="text-sm font-medium text-rose-600">{error}</p>}
-        <div className="flex items-center justify-between gap-2">
-          {onDelete ? <Button variant="outline" onClick={onDelete}>Eliminar</Button> : <span />}
+        {error && <p role="alert" className="text-sm font-medium text-rose-600">{error}</p>}
+        <div className="sticky bottom-[-1.25rem] -mx-5 -mb-5 flex items-center justify-between gap-2 border-t border-slate-100 bg-white/90 px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/90">
+          {onDelete ? <button type="button" onClick={onDelete} disabled={saving} className="rounded-full px-2 py-2 text-sm font-semibold text-rose-600 disabled:opacity-50 dark:text-rose-400">Eliminar</button> : <span />}
           <div className="flex gap-2">
-            {duplicate && <Button variant="outline" onClick={() => save(true)}>Guardar igualmente</Button>}
-            <Button onClick={() => save(false)} disabled={saving}>{saving ? 'Guardando' : 'Guardar'}</Button>
+            {duplicate && <Button variant="outline" onClick={() => save(true)} disabled={saving}>Guardar igualmente</Button>}
+            <Button onClick={() => save(false)} disabled={saving} aria-busy={saving || undefined}>{saving ? 'Guardando…' : 'Guardar'}</Button>
           </div>
         </div>
       </div>

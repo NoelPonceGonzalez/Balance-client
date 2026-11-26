@@ -15,7 +15,10 @@ import { Dashboard } from '@/views/Dashboard';
 import { Market } from '@/views/Market';
 import { Plans } from '@/views/Plans';
 import { Movements } from '@/views/Movements';
+import { Settings } from '@/views/Settings';
+import type { User } from '@/lib/types';
 import { installSquish } from '@/lib/squish';
+import { CameraLayer, useCameraPreload } from '@/components/CameraLayer';
 import { previewResponseB } from './fixtures-b';
 import { previewResponseC } from './fixtures-c';
 
@@ -45,19 +48,39 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
 localStorage.setItem('pat_token', 'preview');
 installSquish();
 
+// Cámara (Bloque D, solo aquí): cuándo se pide, cuándo llega el primer fotograma y qué pistas siguen vivas.
+const cam = { tap: 0, ask: [] as number[], got: [] as number[], frame: [] as number[], tracks: [] as MediaStreamTrack[] };
+Object.assign(window, { __cam: Object.assign(cam, { live: () => cam.tracks.filter((track) => track.readyState === 'live').length }) });
+if (navigator.mediaDevices?.getUserMedia) {
+  const ask = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+  navigator.mediaDevices.getUserMedia = async (constraints) => {
+    cam.ask.push(Math.round(performance.now() - cam.tap));
+    const stream = await ask(constraints);
+    cam.got.push(Math.round(performance.now() - cam.tap));
+    cam.tracks.push(...stream.getTracks());
+    return stream;
+  };
+}
+document.addEventListener('playing', (event) => { if (event.target instanceof HTMLVideoElement) cam.frame.push(Math.round(performance.now() - cam.tap)); }, true);
+
 const onRender = (_id: string, _phase: string, actual: number) => { prof.commits += 1; prof.ms += actual; };
 
 function Preview() {
   const [section, setSection] = useState<Section>((params.get('section') as Section | null) || 'dashboard');
+  const [ticket, setTicket] = useState(false);
+  // Usuario de muestra para Ajustes (sintético; los cambios no salen del navegador).
+  const [me, setMe] = useState<User>({ id: 'preview', name: 'Vista previa', email: 'vista@previa.local', username: 'vista', theme: 'system' } as User);
+  useCameraPreload(true);
   return (
-    <Shell section={section} onChange={setSection} onTicket={() => {}} onSettled={() => {}} user={{ id: 'preview', name: 'Vista previa' } as never}>
+    <Shell section={section} onChange={setSection} onTicket={() => { cam.tap = performance.now(); setTicket(true); }} onSettled={() => {}} user={{ id: 'preview', name: 'Vista previa' } as never}>
       <Profiler id="pantalla" onRender={onRender}>
         {section === 'dashboard' && <Dashboard heroMs={5000} home={0} books={0} />}
         {section === 'market' && <Market />}
         {section === 'plans' && <Plans userId="preview" />}
         {section === 'movements' && <Movements />}
-        {section === 'settings' && <p className="p-6 text-sm text-slate-500">Ajustes no forma parte de la vista previa.</p>}
+        {section === 'settings' && <Settings user={me} heroMs={5000} onHero={() => {}} onUser={(next) => { if (next) setMe(next); }} onLogout={() => {}} />}
       </Profiler>
+      <CameraLayer open={ticket} userId="preview" onClose={() => setTicket(false)} onSaved={() => setTicket(false)} />
     </Shell>
   );
 }

@@ -3,6 +3,7 @@ import { ChevronRight } from 'lucide-react';
 import { AppLock } from '@/components/AppLock';
 import { PasswordReset } from '@/components/PasswordReset';
 import { PlanOffer } from '@/components/PlanOffer';
+import { Segmented } from '@/components/Segmented';
 import { Input } from '@/components/ui/Input';
 import { api } from '@/lib/api';
 import { activateCamera, activatePush, phoneStatus, type Gate } from '@/lib/device';
@@ -16,11 +17,22 @@ function seconds(ms: number): string {
 function Group({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section>
-      <h2 className="px-1 text-[13px] font-semibold text-slate-400">{title}</h2>
-      <div className="mt-2 overflow-hidden rounded-[28px] border border-slate-200/80 bg-white/70 dark:border-white/10 dark:bg-white/[0.04]">
+      <h2 className="px-4 text-[13px] font-medium text-slate-500 dark:text-slate-400">{title}</h2>
+      <div className="settings-list mt-1.5 overflow-hidden rounded-[22px] bg-white ring-1 ring-slate-200/60 dark:bg-white/[0.06] dark:ring-white/10">
         {children}
       </div>
     </section>
+  );
+}
+
+/** Estado de un permiso del móvil: punto de color + texto (el texto ya dice el estado; el color solo acompaña). */
+function GateMark({ gate, on, off }: { gate: Gate; on: string; off: string }) {
+  const label = gate === 'ready' ? on : gate === 'blocked' ? (on === 'Activos' ? 'Bloqueados' : 'Bloqueada') : gate === 'unsupported' ? 'No disponible' + (on === 'Activos' ? 's' : '') : off;
+  return (
+    <span className="inline-flex shrink-0 items-center gap-1.5 text-[13px] font-medium text-slate-500 dark:text-slate-400">
+      <span aria-hidden className={cn('h-1.5 w-1.5 rounded-full', gate === 'ready' ? 'bg-emerald-500' : gate === 'blocked' ? 'bg-amber-500' : 'bg-slate-300 dark:bg-slate-600')} />
+      {label}
+    </span>
   );
 }
 
@@ -37,14 +49,14 @@ function Line({
   href?: string;
   caret?: boolean;
 }) {
-  const className = 'flex w-full items-center gap-3 px-4 py-3.5 text-left';
+  const className = 'flex w-full items-center gap-3 px-4 py-3.5 text-left transition-colors duration-150 active:bg-slate-100/80 focus-visible:bg-slate-50 focus-visible:outline-none dark:active:bg-white/[0.06] dark:focus-visible:bg-white/[0.04]';
   const body = (
     <>
       <span className="min-w-0 flex-1">
         <span className="block text-[15px] font-semibold">{label}</span>
         {hint && <span className="mt-0.5 block text-xs font-medium text-slate-400">{hint}</span>}
       </span>
-      {caret && <ChevronRight size={16} className="shrink-0 text-slate-300" />}
+      {caret && <ChevronRight size={16} className="shrink-0 text-slate-300 dark:text-slate-600" aria-hidden />}
     </>
   );
   if (href) return <a href={href} className={className}>{body}</a>;
@@ -210,10 +222,10 @@ export function Settings({
   ];
 
   return (
-    <div className="mx-auto max-w-lg space-y-8 pb-28">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Ajustes</h1>
-        <p className="mt-1 text-sm font-medium text-slate-400">{user.email}</p>
+    <div className="mx-auto max-w-lg space-y-7 pb-28">
+      <div className="px-1">
+        <h1 className="text-[28px] font-semibold leading-tight tracking-tight">Ajustes</h1>
+        <p className="mt-0.5 text-sm font-medium text-slate-400">{user.email}</p>
       </div>
 
       {error && <p className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">{error}</p>}
@@ -257,35 +269,24 @@ export function Settings({
       </section>
 
       <Group title="Apariencia">
-        <div className="p-3">
-          <div className="grid grid-cols-3 gap-1 rounded-full bg-slate-100 p-1 dark:bg-white/10">
-            {themes.map((theme) => {
-              const on = user.theme === theme.id;
-              return (
-                <button
-                  key={theme.id}
-                  type="button"
-                  aria-pressed={on}
-                  onClick={() => void saveTheme(theme.id)}
-                  className={cn(
-                    'rounded-full px-3 py-2 text-[13px] font-semibold',
-                    on ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 dark:text-slate-400',
-                  )}
-                >
-                  {theme.label}
-                </button>
-              );
-            })}
-          </div>
+        <div className="p-2">
+          <Segmented
+            id="settings-theme"
+            label="Apariencia"
+            options={themes}
+            value={(user.theme || '') as (typeof themes)[number]['id']}
+            onChange={(next) => void saveTheme(next)}
+            className="w-full [&>button]:flex-1"
+          />
         </div>
       </Group>
 
       <Group title="Móvil">
-        <div className="divide-y divide-slate-100 dark:divide-white/10">
+        <div className="settings-list">
           <div className="px-4 py-4">
             <div className="flex items-center justify-between gap-3">
               <p className="text-[15px] font-semibold">Avisos</p>
-              <p className="text-[13px] font-semibold text-slate-400">{pushGate === 'ready' ? 'Activos' : pushGate === 'blocked' ? 'Bloqueados' : pushGate === 'unsupported' ? 'No disponibles' : 'Apagados'}</p>
+              <GateMark gate={pushGate} on="Activos" off="Apagados" />
             </div>
             {pushGate !== 'unsupported' && (
               <button type="button" onClick={() => void turnOn('push')} className="mt-3 text-sm font-semibold text-slate-800 dark:text-slate-100">{pushGate === 'ready' ? 'Probar aviso' : 'Activar'}</button>
@@ -294,7 +295,7 @@ export function Settings({
           <div className="px-4 py-4">
             <div className="flex items-center justify-between gap-3">
               <p className="text-[15px] font-semibold">Cámara</p>
-              <p className="text-[13px] font-semibold text-slate-400">{cameraGate === 'ready' ? 'Activa' : cameraGate === 'blocked' ? 'Bloqueada' : cameraGate === 'unsupported' ? 'No disponible' : 'Apagada'}</p>
+              <GateMark gate={cameraGate} on="Activa" off="Apagada" />
             </div>
             {cameraGate !== 'ready' && cameraGate !== 'unsupported' && (
               <button type="button" onClick={() => void turnOn('camera')} className="mt-3 text-sm font-semibold text-slate-800 dark:text-slate-100">Activar</button>
@@ -352,7 +353,7 @@ export function Settings({
       </Group>
 
       <Group title="Cuenta">
-        <div className="divide-y divide-slate-100 dark:divide-white/10">
+        <div className="settings-list">
           <Line label="Código de acceso" hint="Los 4 números al abrir." onClick={() => setCodeOpen(true)} />
           <div>
             <Line
@@ -384,7 +385,7 @@ export function Settings({
         </div>
       )}
 
-      <div className="px-1">
+      <div className="px-4">
         {erase === 'idle' ? (
           <button type="button" onClick={() => { setErase('confirm'); setEraseText(''); setError(''); }} className="text-sm font-semibold text-rose-600">
             Borrar la cuenta

@@ -16,6 +16,7 @@ import { TYPE_LABEL } from '@/lib/labels';
 import { moveFaces } from '@/lib/move-faces';
 import { verbFromType } from '@/lib/verbs';
 import { flowIn, flowOut } from '@/lib/flow';
+import { captureFlip } from '@/lib/flip';
 import { cn, docId } from '@/lib/utils';
 import type { AccountRow, HoldingRow, MovementRow } from '@/lib/types';
 
@@ -136,6 +137,8 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
   }, [dockQuery]);
   const [sort, setSort] = useState<{ key: 'date' | 'amount'; dir: 'asc' | 'desc' }>({ key: 'date', dir: 'desc' });
   const [draft, setDraft] = useState<Draft | null>(null);
+  // Bloque D: cómo se veía la fila del movimiento que se edita (para la cabecera de la hoja y su vuelo).
+  const [identity, setIdentity] = useState<{ logo: string; title: string; caption: string; amount: string; tone?: string } | null>(null);
   const [formMore, setFormMore] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
   const [duplicate, setDuplicate] = useState(false);
@@ -421,15 +424,15 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
                 const shown = coin ? `${mark}${coin}` : `${mark}${formatMove(Math.abs(signed), row.currency)}`;
                 return (
                   <li key={group.id}>
-                    <button type="button" onClick={() => { if (many) setOpenGroup(open ? null : group.id); else openEdit(row); }} className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-3 rounded-2xl px-2 py-3 text-left transition-colors duration-150 active:bg-slate-50 dark:active:bg-white/[0.04]">
-                      <PlatformLogo name={accountOf(row.accountId)?.platform || nameOf(row.accountId)} size={36} />
+                    <button type="button" onClick={(event) => { if (many) setOpenGroup(open ? null : group.id); else openRow(row, event.currentTarget, shown); }} className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-3 rounded-2xl px-2 py-3 text-left transition-colors duration-150 active:bg-slate-50 dark:active:bg-white/[0.04]">
+                      <span data-flip="logo" className="flex shrink-0"><PlatformLogo name={accountOf(row.accountId)?.platform || nameOf(row.accountId)} size={36} /></span>
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[15px] font-semibold">{titleOf(row)}</span>
+                        <span data-flip="name" className="block truncate text-[15px] font-semibold">{titleOf(row)}</span>
                         <span className="mt-0.5 block truncate text-[13px] font-medium text-slate-400">
                           {many ? `${group.rows.length} apuntes · ${nameOf(row.accountId)}` : `${nameOf(row.accountId)} · ${kindOf(row)}${row.applyToBalances === false ? ' · guardado para la renta' : ''}`}
                         </span>
                       </span>
-                      <span className={cn('shrink-0 text-right text-[15px] font-semibold tabular-nums', toneOf(row))}>
+                      <span data-flip="value" className={cn('shrink-0 text-right text-[15px] font-semibold tabular-nums', toneOf(row))}>
                         {shown}
                       </span>
                     </button>
@@ -437,7 +440,7 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
                       <ul className="mb-2 rounded-2xl bg-slate-50/80 px-2 dark:bg-white/[0.04]">
                         {group.rows.map((item) => (
                           <li key={docId(item)} className="border-t border-slate-100 first:border-t-0 dark:border-white/10">
-                            <button type="button" onClick={() => openEdit(item)} className="flex w-full items-center justify-between gap-3 px-2 py-2.5 text-left">
+                            <button type="button" onClick={() => openRow(item)} className="flex w-full items-center justify-between gap-3 px-2 py-2.5 text-left">
                               <span className="text-[13px] font-medium text-slate-500">{formatDay(item.date)} · {(item.description.split('·')[1] || '').trim()}</span>
                               <span className={cn('text-xs font-semibold tabular-nums', toneOf(item))}>{(() => { const side = flowOf(item, filters.accountId); const prefix = item.type === 'transfer' ? (side === 'out' ? '−' : side === 'in' ? '+' : '') : (moveSign(item) < 0 ? '−' : '+'); return `${prefix}${figureOf(item) || formatMove(item.amount, item.currency)}`; })()}</span>
                             </button>
@@ -478,6 +481,7 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
           accountId={draft.accountId}
           verb={verbFromType(draft.type, draft.direction, draft.holdingId)}
           editing={editing}
+          identity={editing && identity ? identity : undefined}
           initial={{
             amount: draft.amount,
             date: draft.date,
@@ -498,6 +502,19 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
       )}
     </div>
   );
+  function openRow(row: MovementRow, from?: HTMLElement, amount?: string) {
+    if (from) captureFlip(from);
+    const side = flowOf(row, filters.accountId);
+    const prefix = row.type === 'transfer' ? (side === 'out' ? '−' : side === 'in' ? '+' : '') : (moveSign(row) < 0 ? '−' : '+');
+    setIdentity({
+      logo: accountOf(row.accountId)?.platform || nameOf(row.accountId),
+      title: titleOf(row),
+      caption: `${nameOf(row.accountId)} · ${formatDay(row.date)}`,
+      amount: amount ?? `${prefix}${figureOf(row) || formatMove(row.amount, row.currency)}`,
+      tone: toneOf(row),
+    });
+    openEdit(row);
+  }
   function openEdit(row: MovementRow) {
     setEditing(docId(row));
     setDuplicate(false);

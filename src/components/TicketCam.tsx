@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import tesseractWorkerUrl from 'tesseract.js/dist/worker.min.js?url';
 import { createPortal } from 'react-dom';
 import { ChevronDown, ChevronLeft, ImagePlus, Plus, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { modalPanelClass } from '@/components/Modal';
+import { DiscardAsk } from '@/components/DiscardAsk';
+import { concealCamera, flyPhoto, revealCamera } from '@/lib/camera-reveal';
 import { jelly, quickOut, softSpring } from '@/lib/motion';
 import { formatPct } from '@/lib/format';
 import { PlatformLogo } from '@/components/PlatformLogo';
@@ -33,8 +35,13 @@ interface Member {
   color: string;
 }
 
+interface OcrNote {
+  status?: string;
+  progress?: number;
+}
+
 interface OcrApi {
-  createWorker: (langs: string, oem: 1, options: { workerPath: string; corePath: string; langPath: string; workerBlobURL: boolean; gzip: boolean }) => Promise<{ setParameters: (params: Record<string, string>) => Promise<unknown>; recognize: (image: string, opts?: object, output?: { text?: boolean; blocks?: boolean }) => Promise<{ data: { text: string; blocks?: { paragraphs?: { lines?: { words?: OcrWord[] }[] }[] }[] | null } }>; terminate: () => Promise<unknown> }>;
+  createWorker: (langs: string, oem: 1, options: { workerPath: string; corePath: string; langPath: string; workerBlobURL: boolean; gzip: boolean; logger?: (message: OcrNote) => void }) => Promise<{ setParameters: (params: Record<string, string>) => Promise<unknown>; recognize: (image: string, opts?: object, output?: { text?: boolean; blocks?: boolean }) => Promise<{ data: { text: string; blocks?: { paragraphs?: { lines?: { words?: OcrWord[] }[] }[] }[] | null } }>; terminate: () => Promise<unknown> }>;
   PSM: { SINGLE_BLOCK: string };
 }
 
@@ -263,10 +270,10 @@ function PhotoWash({ src }: { src: string }) {
   return <img src={src} alt="" className="absolute inset-0 h-full w-full scale-110 object-cover blur-2xl" />;
 }
 
-function ReadMark() {
+function ReadMark({ className = 'h-16 w-16' }: { className?: string }) {
   const still = prefersStill();
   return (
-    <div className="relative h-16 w-16" aria-hidden>
+    <div className={cn('relative', className)} aria-hidden>
       <svg viewBox="0 0 64 64" className="h-full w-full">
         <circle cx="32" cy="32" r="26" fill="none" className="stroke-slate-200" strokeWidth="3" />
       </svg>
@@ -808,6 +815,20 @@ export function TicketCam({
   const [giftKeys, setGiftKeys] = useState<Record<string, boolean>>({});
   const [book, setBook] = useState<BookHolding[]>([]);
   const [gainBeat, setGainBeat] = useState(0);
+  // Bloque D: apertura desde el dock, vuelo de la foto, fases reales del lector y salida sin perder cambios.
+  const layerRef = useRef<HTMLDivElement>(null);
+  const thumbRef = useRef<HTMLImageElement>(null);
+  const flown = useRef('');
+  const leaving = useRef(false);
+  const baseline = useRef('');
+  const engineReady = useRef(false);
+  const stepSink = useRef<((message: OcrNote) => void) | null>(null);
+  const [askLeave, setAskLeave] = useState(false);
+  const [readStep, setReadStep] = useState<{ phase: 'engine' | 'photo' | 'text'; progress: number | null }>({ phase: 'photo', progress: null });
+
+  useLayoutEffect(() => {
+    revealCamera(layerRef.current);
+  }, []);
 
   useEffect(() => {
     if (shot !== 'cartera') return undefined;
@@ -937,8 +958,11 @@ export function TicketCam({
           langPath: '/tesseract',
           gzip: true,
           workerBlobURL: false,
+          // Progreso real del motor: solo se enseña mientras lee una foto.
+          logger: (message: OcrNote) => stepSink.current?.(message),
         });
         await worker.setParameters({ tessedit_pageseg_mode: api.PSM.SINGLE_BLOCK, user_defined_dpi: '300' });
+        engineReady.current = true;
         return worker;
       });
       pending.catch(() => {
@@ -961,13 +985,26 @@ export function TicketCam({
   useEffect(() => {
     if (!photo) return undefined;
     let cancel = false;
+    let frame = 0;
+    let last = -1;
     setReading(true);
     setShot(null);
     setError('');
+    setReadStep({ phase: engineReady.current ? 'photo' : 'engine', progress: null });
+    stepSink.current = (message) => {
+      if (cancel || message.status !== 'recognizing text' || typeof message.progress !== 'number') return;
+      const progress = Math.round(Math.min(1, Math.max(0, message.progress)) * 50) / 50;
+      if (progress === last) return;
+      last = progress;
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => setReadStep({ phase: 'text', progress }));
+    };
     const run = async () => {
       try {
         const worker = await readWorker();
+        if (!cancel) setReadStep((step) => (step.phase === 'engine' ? { phase: 'photo', progress: null } : step));
         const prepared = await preparePhoto(photo);
+        if (!cancel) setReadStep({ phase: 'text', progress: null });
         const result = await worker.recognize(prepared.image, {}, { text: true, blocks: true });
         if (cancel) return;
         const plain = result.data.text || '';
@@ -1003,8 +1040,16 @@ export function TicketCam({
     void run();
     return () => {
       cancel = true;
+      window.cancelAnimationFrame(frame);
+      stepSink.current = null;
     };
   }, [photo]);
+
+  useLayoutEffect(() => {
+    if (!photo || shot || flown.current === photo) return;
+    flown.current = photo;
+    flyPhoto(photo, thumbRef.current);
+  }, [photo, shot]);
 
   useEffect(() => {
     if (shot !== 'cartera' || !ocrRef.current || touched.current || !accounts.length) return;
@@ -1040,9 +1085,47 @@ export function TicketCam({
   }, [query]);
 
   const close = () => {
+    if (leaving.current) return;
+    leaving.current = true;
+    // La cámara se apaga antes de la animación de salida: nunca queda encendida tras cerrar.
     streamRef.current?.getTracks().forEach((track) => track.stop());
-    onClose();
+    streamRef.current = null;
+    if (videoRef.current) videoRef.current.srcObject = null;
+    concealCamera(layerRef.current, onClose);
   };
+
+  // Lo que el usuario puede cambiar tras leer la foto; si difiere de lo leído, se pregunta antes de salir.
+  const snapshot = () => JSON.stringify([lines, walletLines, walletId, fresh?.id || '', where, outside, payer, accountId, origin, counterFor, cameFrom, giftKeys]);
+  useEffect(() => {
+    baseline.current = !reading && shot ? snapshot() : '';
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reading, shot]);
+
+  const requestClose = () => {
+    if (mark === 'spin') return;
+    if (photo && shot && mark !== 'ok' && baseline.current && snapshot() !== baseline.current) {
+      setAskLeave(true);
+      return;
+    }
+    close();
+  };
+  const requestCloseRef = useRef(requestClose);
+  requestCloseRef.current = requestClose;
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      if (askLeave) {
+        setAskLeave(false);
+        return;
+      }
+      if (editKey !== null) return;
+      event.preventDefault();
+      requestCloseRef.current();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [askLeave, editKey]);
 
   const take = () => {
     const video = videoRef.current;
@@ -1728,7 +1811,7 @@ export function TicketCam({
   };
 
   return createPortal(
-    <div className={cn('fixed inset-0 z-[80]', photo ? 'bg-[#e8edf3]' : 'bg-slate-950/80 text-white')}>
+    <div ref={layerRef} className={cn('fixed inset-0 z-[80]', photo ? 'bg-[#e8edf3]' : 'bg-slate-950/80 text-white')}>
       {!photo ? (
         <div className={cn('relative h-full bg-black', cameraError && 'bg-slate-950')}>
           <video ref={videoRef} playsInline muted autoPlay className={cn('h-full w-full object-cover', cameraError && 'hidden')} />
@@ -1749,7 +1832,7 @@ export function TicketCam({
             </>
           )}
           <div className="absolute inset-x-0 top-0 flex items-center px-4 pt-[max(0.75rem,env(safe-area-inset-top))]">
-            <button type="button" onClick={close} className="grid h-10 w-10 place-items-center rounded-full bg-black/45 text-white" aria-label="Cerrar">
+            <button type="button" onClick={requestClose} className="grid h-10 w-10 place-items-center rounded-full bg-black/45 text-white" aria-label="Cerrar">
               <X size={18} />
             </button>
             {!cameraError && (
@@ -1789,14 +1872,24 @@ export function TicketCam({
       ) : !shot ? (
         <div className="relative h-full overflow-hidden">
           <PhotoWash src={photo} />
-          <button type="button" onClick={close} className="absolute left-4 top-4 grid h-10 w-10 place-items-center rounded-full bg-white/90 text-slate-800" aria-label="Cerrar">
+          <button type="button" onClick={requestClose} className="absolute left-4 top-4 grid h-10 w-10 place-items-center rounded-full bg-white/90 text-slate-800" aria-label="Cerrar">
             <X size={18} />
           </button>
           <div className="absolute inset-0 flex items-end justify-center p-3 sm:items-center">
-            <motion.div role="status" aria-live="polite" className={cn(modalPanelClass, 'flex max-w-md flex-col items-center px-8 py-8 text-center')} initial={prefersStill() ? false : sheetIn} animate={sheetOn} transition={sheetSpring}>
-              <ReadMark />
-              <p className="mt-5 text-[13px] font-medium text-slate-500">De la foto</p>
-              <h2 className="mt-1 text-[22px] font-semibold tracking-tight">Leyendo la foto</h2>
+            <motion.div role="status" aria-live="polite" className={cn(modalPanelClass, 'flex max-w-md flex-col items-center px-8 py-8 text-center')} initial={prefersStill() ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.22 }}>
+              <div className="relative">
+                <img ref={thumbRef} src={photo} alt="Foto hecha" className="h-24 w-[72px] rounded-[14px] object-cover shadow-[0_10px_28px_rgba(15,23,42,0.18)]" />
+                <span className="absolute -bottom-3 -right-3 grid h-10 w-10 place-items-center rounded-full bg-white shadow-sm ring-1 ring-slate-200/70">
+                  <ReadMark className="h-8 w-8" />
+                </span>
+              </div>
+              <p className="mt-6 text-[13px] font-medium text-slate-500">De la foto</p>
+              <h2 className="mt-1 text-[22px] font-semibold tracking-tight">{readStep.phase === 'engine' ? 'Preparando el lector' : readStep.phase === 'photo' ? 'Preparando la foto' : 'Leyendo la foto'}</h2>
+              {readStep.phase === 'text' && readStep.progress !== null ? (
+                <div className="mt-5 h-1 w-40 overflow-hidden rounded-full bg-slate-200" role="progressbar" aria-label="Leyendo la foto" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(readStep.progress * 100)}>
+                  <div className="h-full origin-left rounded-full bg-slate-900 transition-transform duration-150 ease-linear" style={{ transform: `scaleX(${readStep.progress})` }} />
+                </div>
+              ) : (
               <div className="mt-4 flex items-center gap-1.5">
                 {[0, 1, 2].map((dot) => (
                   <motion.span
@@ -1807,17 +1900,18 @@ export function TicketCam({
                   />
                 ))}
               </div>
+              )}
             </motion.div>
           </div>
         </div>
       ) : (
         <div className="relative h-full overflow-hidden">
           <PhotoWash src={photo} />
-          <div className="absolute inset-0 flex items-end justify-center p-3 sm:items-center" onClick={close}>
+          <div className="absolute inset-0 flex items-end justify-center p-3 sm:items-center" onClick={requestClose}>
             {shot === 'cartera' ? (
             <motion.div role="dialog" aria-labelledby="wallet-read" className={cn(modalPanelClass, 'flex max-h-[85dvh] max-w-md flex-col overflow-hidden border-0 bg-white/70 p-0 shadow-none ring-0 backdrop-blur-xl dark:bg-white/10')} onClick={(event) => event.stopPropagation()} initial={prefersStill() ? false : sheetIn} animate={sheetOn} transition={sheetSpring}>
               <div className="mb-4 flex shrink-0 items-start gap-1 px-2 pt-4">
-                <button type="button" onClick={close} className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-slate-800 dark:text-slate-100" aria-label="Cerrar">
+                <button type="button" onClick={requestClose} className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-slate-800 dark:text-slate-100" aria-label="Cerrar">
                   <ChevronLeft size={22} />
                 </button>
                 {movesBetween.length > 0 ? (
@@ -2046,7 +2140,7 @@ export function TicketCam({
                   <p className="text-[13px] font-medium text-slate-500">He leído esto</p>
                   <h2 id="ticket-read" className="text-[22px] font-semibold tracking-tight">¿Está todo correcto?</h2>
                 </div>
-                <button type="button" onClick={close} className="shrink-0 rounded-full border border-slate-200/90 bg-white/60 px-3 py-1 text-[13px] font-medium text-slate-600">Cerrar</button>
+                <button type="button" onClick={requestClose} className="shrink-0 rounded-full border border-slate-200/90 bg-white/60 px-3 py-1 text-[13px] font-medium text-slate-600">Cerrar</button>
               </div>
               <div className="overflow-hidden rounded-2xl border border-white/80 bg-white/80 dark:border-white/10 dark:bg-white/5">
                 {lines.map((line, index) => (
@@ -2132,6 +2226,13 @@ export function TicketCam({
             <LineSheet key={editing.key} line={editing} onClose={closeEdit} onApply={applyEdit} onRemove={removeEdit} />
           )}
         </div>
+      )}
+      {askLeave && (
+        <DiscardAsk
+          text="Se pierde lo que has leído y cambiado de esta foto."
+          onStay={() => setAskLeave(false)}
+          onLeave={() => { setAskLeave(false); close(); }}
+        />
       )}
     </div>,
     document.body,
