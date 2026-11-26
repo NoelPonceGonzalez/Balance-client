@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronLeft, Link2, Plus } from 'lucide-react';
 import { Modal, ModalClose, modalPanelClass, Overlay } from '@/components/Modal';
+import { useDirty } from '@/lib/sheet';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { api } from '@/lib/api';
@@ -116,7 +117,7 @@ export function TripFace({ plan, split, onMenu, userId = '' }: { plan: PlanRow; 
   return (
     <>
       <span className="flex items-start justify-between gap-2">
-        <span className="min-w-0 truncate text-sm font-semibold">{plan.name}</span>
+        <span data-flip="name" className="min-w-0 truncate text-sm font-semibold">{plan.name}</span>
         <button
           type="button"
           data-menu
@@ -132,7 +133,7 @@ export function TripFace({ plan, split, onMenu, userId = '' }: { plan: PlanRow; 
         </button>
       </span>
       <span className="mt-2 block text-[11px] font-semibold text-slate-400">Reparto</span>
-      <span className="mt-1 block whitespace-nowrap text-[clamp(1.35rem,6.2vw,1.85rem)] font-semibold leading-none tabular-nums sm:text-[28px]">{formatEur(split?.totalSpent || 0)}</span>
+      <span data-flip="value" className="mt-1 block whitespace-nowrap text-[clamp(1.35rem,6.2vw,1.85rem)] font-semibold leading-none tabular-nums sm:text-[28px]">{formatEur(split?.totalSpent || 0)}</span>
       {split?.budget && split.budget.budget > 0 && (
         <span className={cn('mt-1 block text-[11px] font-semibold', split.budget.left < -0.004 ? 'text-[#ea3943]' : 'text-slate-500')}>Quedan {formatEur(split.budget.left)}</span>
       )}
@@ -175,6 +176,7 @@ export function TripPlan({
   const [payId, setPayId] = useState<string | null>(null);
   const [ask, setAsk] = useState<'pay' | 'got' | 'miss' | null>(null);
   const [draft, setDraft] = useState<ExpenseDraft | null>(null);
+  const draftDirty = useDirty(draft);
   const [pot, setPot] = useState('');
   const [potOn, setPotOn] = useState(false);
   const [carry, setCarry] = useState('');
@@ -385,8 +387,8 @@ export function TripPlan({
             <button type="button" onClick={onBack} className="grid h-7 w-7 place-items-center rounded-full text-slate-500 hover:bg-white/80" aria-label="Todos los planes">
               <ChevronLeft size={16} />
             </button>
-            <span className="truncate">{plan.name}</span>
-            <span className="shrink-0 text-base font-semibold text-slate-900 dark:text-white">{formatEur(split?.totalSpent || 0)}</span>
+            <span data-flip-to="name" className="truncate">{plan.name}</span>
+            <span data-flip-to="value" className="shrink-0 text-base font-semibold text-slate-900 dark:text-white">{formatEur(split?.totalSpent || 0)}</span>
           </span>
           <span className="flex shrink-0 items-center gap-3">
             {phase === 'active' && (
@@ -544,7 +546,7 @@ export function TripPlan({
       )}
 
       {draft && (
-        <Modal title={draft.id ? 'Cambiar gasto' : 'Nuevo gasto'} onClose={() => setDraft(null)}>
+        <Modal title={draft.id ? 'Cambiar gasto' : 'Nuevo gasto'} onClose={() => setDraft(null)} dirty={draftDirty} busy={busy}>
           <form className="grid gap-4" onSubmit={(event) => { event.preventDefault(); void saveExpense(); }}>
             <Input label="Concepto" value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="Cena, tren, hotel…" />
             <Input label="Importe" type="number" min="0" step="any" value={draft.amount} onChange={(event) => setDraft({ ...draft, amount: event.target.value })} />
@@ -656,7 +658,7 @@ export function TripPlan({
       )}
 
       {selectedPay && (
-        <Modal title="Liquidación" onClose={() => { setPayId(null); setAsk(null); }}>
+        <Modal title="Liquidación" onClose={() => { setPayId(null); setAsk(null); }} busy={busy}>
           {ask === 'pay' ? (
             <div className="grid gap-3">
               <p className="text-lg font-semibold">¿Has realizado este pago?</p>
@@ -712,7 +714,7 @@ export function TripPlan({
       )}
 
       {finishAsk && (
-        <Modal title="Finalizar plan" onClose={() => setFinishAsk(false)}>
+        <Modal title="Finalizar plan" onClose={() => setFinishAsk(false)} busy={busy} compact>
           <div className="grid gap-3 text-sm font-medium leading-6 text-slate-600 dark:text-slate-300">
             <p>Se dejan de añadir gastos. Se calculan los balances y se generan las liquidaciones.</p>
             <p>Cada persona verá cuánto tiene que pagar y a quién. Un pago se cierra cuando quien paga lo indica y quien recibe lo confirma.</p>
@@ -723,7 +725,7 @@ export function TripPlan({
       )}
 
       {reopenAsk && (
-        <Modal title="Corregir un gasto" onClose={() => setReopenAsk(false)}>
+        <Modal title="Corregir un gasto" onClose={() => setReopenAsk(false)} busy={busy} compact>
           <div className="grid gap-3 text-sm font-medium leading-6 text-slate-600 dark:text-slate-300">
             <p>El plan vuelve a estar abierto. Los pagos que ya estaban confirmados se mantienen. Los que estaban a medias se anulan y las deudas se calculan otra vez.</p>
             <p>Quien sigue en el reparto recibe un aviso.</p>
@@ -784,7 +786,7 @@ export function JoinTrip({ code, onClose, onOpen }: { code: string; onClose: () 
   if (!ready) return null;
 
   return (
-    <Overlay onClose={onClose}>
+    <Overlay onClose={onClose} dirty={amount !== ''}>
       <div className={cn(modalPanelClass, 'max-w-md')} onClick={(event) => event.stopPropagation()}>
         <div className="mb-4 flex items-center justify-between gap-4">
           <h3 className="text-[17px] font-semibold">{name ? `Te unes a ${name}` : 'El enlace'}</h3>

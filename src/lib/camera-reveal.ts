@@ -6,6 +6,7 @@
  * Al cerrar, el círculo vuelve al botón. Si el botón no está visible, nace del centro inferior.
  * Con movimiento reducido, solo un fundido corto. Nunca retrasa la cámara: se lanza en paralelo.
  */
+import { EASE_SETTLE } from './motion';
 function origin(): { x: number; y: number; r: number } {
   const button = document.querySelector<HTMLElement>('button[aria-label="Hacer una foto"]');
   const rect = button?.getBoundingClientRect();
@@ -66,7 +67,7 @@ export function revealCamera(layer: HTMLElement | null) {
       { clipPath: `circle(${r}px at ${x}px ${y}px)` },
       { clipPath: `circle(${cover(x, y)}px at ${x}px ${y}px)` },
     ],
-    { duration: REVEAL_MS, easing: 'cubic-bezier(0.22, 0.9, 0.24, 1)' },
+    { duration: REVEAL_MS, easing: EASE_SETTLE },
   );
   if (since < REVEAL_MS) run.currentTime = since;
   else revealStart = now;
@@ -102,7 +103,7 @@ export function flyPhoto(src: string, to: HTMLElement | null) {
       { transform: 'translate(0px, 0px) scale(1)', clipPath: 'inset(0px round 0px)' },
       { transform: `translate(${tx}px, ${ty}px) scale(${scale})`, clipPath: `inset(${iy}px ${ix}px round ${14 / scale}px)` },
     ],
-    { duration: 420, easing: 'cubic-bezier(0.22, 0.9, 0.24, 1)', fill: 'forwards' },
+    { duration: 420, easing: EASE_SETTLE, fill: 'forwards' },
   );
   run.onfinish = finish;
   window.setTimeout(finish, 700);

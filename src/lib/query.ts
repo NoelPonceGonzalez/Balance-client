@@ -88,7 +88,8 @@ export function cachedApi<T>(path: string, { maxAge = 0, force = false }: { maxA
     (value) => {
       // Si hubo una escritura mientras volaba, la respuesta puede ser anterior al cambio: no se guarda.
       if (epoch === started) store.set(path, { value, at: Date.now(), epoch });
-      else store.delete(path);
+      // Si no, solo se quita su propia entrada: una lectura nueva (posterior al vaciado) no se toca.
+      else if (store.get(path)?.inflight === inflight) store.delete(path);
       return value;
     },
     (error: unknown) => {

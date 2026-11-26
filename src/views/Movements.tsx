@@ -342,7 +342,7 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
       <div className={embedded ? 'flex items-center justify-between gap-3' : 'sticky -top-2 z-20 -mx-4 flex items-center justify-between gap-3 bg-[var(--app-bg)] px-4 py-2 md:-mx-8 md:px-8'}>
         <h2 className={embedded ? 'text-lg font-semibold tracking-tight' : 'text-2xl font-semibold tracking-tight'}>Movimientos</h2>
         <div className="flex items-center gap-3">
-          <button type="button" onClick={() => { setTaxYear(year || initialYear); setExportOpen(true); }} className="text-sm font-semibold text-slate-500">Descargar</button>
+          <button type="button" onClick={() => { setTaxYear(year || initialYear); setExportOpen(true); }} className="-m-2 rounded-full p-2 text-sm font-semibold text-slate-500 active:bg-slate-100 dark:active:bg-white/10">Descargar</button>
           <button type="button" onClick={() => { setEditing(null); setDuplicate(false); setFormMore(false); setDraft(emptyDraft(accounts[0] ? docId(accounts[0]) : '')); }} className="rounded-full bg-slate-950 px-4 py-2 text-sm font-semibold text-white dark:bg-white dark:text-slate-950">Nuevo</button>
         </div>
       </div>

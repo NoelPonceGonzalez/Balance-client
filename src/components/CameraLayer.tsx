@@ -6,6 +6,7 @@
  */
 import { useEffect, useLayoutEffect, useRef, useState, type ComponentType } from 'react';
 import { createPortal } from 'react-dom';
+import { apiIdle } from '@/lib/api';
 import { revealCamera } from '@/lib/camera-reveal';
 
 type CamProps = { userId: string; onClose: () => void; onSaved: () => void };
@@ -30,17 +31,35 @@ export function preloadCamera() {
   void load().catch(() => undefined);
 }
 
-/** Precarga la cámara cuando el navegador está libre, después de pintar la pantalla inicial. */
+/**
+ * Precarga la cámara cuando el navegador está libre, después de pintar la pantalla inicial y cuando no queda
+ * ninguna petición de datos en curso (Bloque E): así no compite con lo que el Resumen necesita primero.
+ * Si la red no se queda libre, lo intenta como mucho durante ~15 s y luego precarga igualmente.
+ */
 export function useCameraPreload(enabled: boolean) {
   useEffect(() => {
     if (!enabled) return undefined;
-    const idle = (window as Window & { requestIdleCallback?: (fn: () => void, opts?: { timeout: number }) => number }).requestIdleCallback;
-    if (idle) {
-      const id = idle(preloadCamera, { timeout: 4000 });
-      return () => (window as Window & { cancelIdleCallback?: (id: number) => void }).cancelIdleCallback?.(id);
-    }
-    const timer = window.setTimeout(preloadCamera, 2000);
-    return () => window.clearTimeout(timer);
+    const started = performance.now();
+    let timer = 0;
+    let stop = false;
+    const attempt = () => {
+      if (stop) return;
+      if (apiIdle() || performance.now() - started > 15_000) {
+        preloadCamera();
+        return;
+      }
+      timer = window.setTimeout(wait, 700);
+    };
+    const wait = () => {
+      const idle = (window as Window & { requestIdleCallback?: (fn: () => void, opts?: { timeout: number }) => number }).requestIdleCallback;
+      if (idle) idle(attempt, { timeout: 2000 });
+      else timer = window.setTimeout(attempt, 300);
+    };
+    timer = window.setTimeout(wait, 1200);
+    return () => {
+      stop = true;
+      window.clearTimeout(timer);
+    };
   }, [enabled]);
 }
 

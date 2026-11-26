@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/Button';
 import { Field, Input, fieldClass } from '@/components/ui/Input';
 import { Modal } from '@/components/Modal';
 import { PlatformLogo } from '@/components/PlatformLogo';
+import { SearchPick } from '@/components/SearchPick';
 import { playFlip } from '@/lib/flip';
 import { api, ApiError } from '@/lib/api';
 import { formatDay } from '@/lib/format';
@@ -214,49 +215,30 @@ export function EntrySheet({ accounts, pieces, accountId, verb, allowed, editing
           </span>
         </label>
         {accounts.length > 1 && !editing && (
-          <Field label="Sitio">
-            <select className={fieldClass} value={site.id} onChange={(event) => { setSiteId(event.target.value); setChosen(verbsFor(accounts.find((item) => item.id === event.target.value)?.kind || '', accounts.find((item) => item.id === event.target.value)?.tracking || '')[0]?.id || 'out'); }}>
-              {accounts.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-            </select>
-          </Field>
+          <SearchPick
+            label="Sitio"
+            value={site.id}
+            options={accounts.map((item) => ({ id: item.id, label: item.name }))}
+            onChange={(id) => { setSiteId(id); setChosen(verbsFor(accounts.find((item) => item.id === id)?.kind || '', accounts.find((item) => item.id === id)?.tracking || '')[0]?.id || 'out'); }}
+          />
         )}
         {needsPiece && (
-          <Field label="Pieza">
-            <select className={fieldClass} value={extra.holdingId} onChange={(event) => setExtra({ ...extra, holdingId: event.target.value })}>
-              <option value="">Elige</option>
-              {mine.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-            </select>
-          </Field>
+          <SearchPick label="Pieza" empty="Elige" value={extra.holdingId} options={mine.map((item) => ({ id: item.id, label: item.name }))} onChange={(id) => setExtra({ ...extra, holdingId: id })} />
         )}
         {(active === 'buy' || active === 'sell' || active === 'swap') && (
           <Input label="Cantidad" type="number" step="any" value={extra.quantity} onChange={(event) => setExtra({ ...extra, quantity: event.target.value })} />
         )}
         {active === 'swap' && (
           <>
-            <Field label="La otra pieza">
-              <select className={fieldClass} value={extra.otherHoldingId} onChange={(event) => setExtra({ ...extra, otherHoldingId: event.target.value })}>
-                <option value="">Elige</option>
-                {mine.filter((item) => item.id !== extra.holdingId).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-              </select>
-            </Field>
+            <SearchPick label="La otra pieza" empty="Elige" value={extra.otherHoldingId} options={mine.filter((item) => item.id !== extra.holdingId).map((item) => ({ id: item.id, label: item.name }))} onChange={(id) => setExtra({ ...extra, otherHoldingId: id })} />
             <Input label="Cantidad que entra" type="number" step="any" value={extra.otherQuantity} onChange={(event) => setExtra({ ...extra, otherQuantity: event.target.value })} />
           </>
         )}
         {active === 'pass' && (
           <>
-            <Field label="Hacia">
-              <select className={fieldClass} value={extra.counterAccountId} onChange={(event) => setExtra({ ...extra, counterAccountId: event.target.value })}>
-                <option value="">Elige</option>
-                {accounts.filter((item) => item.id !== site.id).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-              </select>
-            </Field>
+            <SearchPick label="Hacia" empty="Elige" value={extra.counterAccountId} options={accounts.filter((item) => item.id !== site.id).map((item) => ({ id: item.id, label: item.name }))} onChange={(id) => setExtra({ ...extra, counterAccountId: id })} />
             {mine.length > 0 && (
-              <Field label="Moneda">
-                <select className={fieldClass} value={extra.holdingId} onChange={(event) => setExtra({ ...extra, holdingId: event.target.value })}>
-                  <option value="">Solo euros</option>
-                  {mine.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-                </select>
-              </Field>
+              <SearchPick label="Moneda" empty="Solo euros" value={extra.holdingId} options={mine.map((item) => ({ id: item.id, label: item.name }))} onChange={(id) => setExtra({ ...extra, holdingId: id })} />
             )}
             {coinPass && <Input label="Cantidad" type="number" step="any" value={extra.quantity} onChange={(event) => setExtra({ ...extra, quantity: event.target.value })} />}
             {coinPass && <p className="text-[13px] font-medium leading-snug text-slate-500">Pasa la moneda con su coste. El efectivo se queda y no tributa.</p>}

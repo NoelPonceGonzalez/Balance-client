@@ -2,7 +2,8 @@ import { useEffect, useLayoutEffect, useRef, useState, type FocusEvent, type Rea
 import { createPortal } from 'react-dom';
 import { motion } from 'motion/react';
 import { DiscardAsk } from '@/components/DiscardAsk';
-import { softSpring } from '@/lib/motion';
+import { SheetCloseContext, useEscapeLayer, useSheetClose } from '@/lib/sheet';
+import { EASE_SETTLE, confirmSpring, sheetOut, sheetSpring } from '@/lib/motion';
 import { cn } from '@/lib/utils';
 
 export const modalOverlayClass =
@@ -12,10 +13,12 @@ export const modalPanelClass =
   'no-scrollbar max-h-[92dvh] w-full overflow-y-auto overscroll-contain rounded-[28px] bg-white p-5 text-slate-900 ring-1 ring-slate-200/70 dark:bg-slate-900 dark:text-white dark:ring-white/10';
 
 export function ModalClose({ onClose }: { onClose: () => void }) {
+  // Dentro de una hoja con cierre protegido, «Cerrar» pasa por él (pregunta si hay cambios sin guardar).
+  const guarded = useSheetClose();
   return (
     <button
       type="button"
-      onClick={onClose}
+      onClick={guarded ?? onClose}
       className="shrink-0 rounded-full border border-slate-200/90 bg-white/60 px-3 py-1 text-[13px] font-medium text-slate-600 backdrop-blur-xl hover:bg-white dark:border-white/15 dark:bg-white/10 dark:text-slate-200"
       aria-label="Cerrar"
     >
@@ -24,8 +27,22 @@ export function ModalClose({ onClose }: { onClose: () => void }) {
   );
 }
 
-/** Fondo del modal pintado en `body`, para que quede centrado en la pantalla aunque el padre tenga transform. */
-export function Overlay({ onClose, className, children }: { onClose: () => void; className?: string; children: ReactNode }) {
+/**
+ * Fondo del modal pintado en `body`, para que quede centrado en la pantalla aunque el padre tenga transform.
+ * Bloque E: Escape cierra; con `dirty` pregunta antes de perder lo escrito (fondo, «Cerrar», Escape) y con
+ * `busy` no se cierra mientras se guarda. Las hojas propias (Planes, Viajes) lo usan así.
+ */
+export function Overlay({ onClose, className, children, dirty = false, busy = false }: { onClose: () => void; className?: string; children: ReactNode; dirty?: boolean; busy?: boolean }) {
+  const [ask, setAsk] = useState(false);
+  const request = () => {
+    if (busy) return;
+    if (dirty) {
+      setAsk(true);
+      return;
+    }
+    onClose();
+  };
+  useEscapeLayer(() => (ask ? setAsk(false) : request()));
   useEffect(() => {
     const scroller = document.querySelector('.app-scroll');
     if (!(scroller instanceof HTMLElement)) return;
@@ -34,9 +51,12 @@ export function Overlay({ onClose, className, children }: { onClose: () => void;
     return () => { scroller.style.overflow = previous; };
   }, []);
   return createPortal(
-    <div className={cn(modalOverlayClass, className)} onClick={onClose}>
-      {children}
-    </div>,
+    <SheetCloseContext.Provider value={request}>
+      <div className={cn(modalOverlayClass, className)} onClick={request}>
+        {children}
+        {ask && <DiscardAsk onStay={() => setAsk(false)} onLeave={() => { setAsk(false); onClose(); }} />}
+      </div>
+    </SheetCloseContext.Provider>,
     document.body,
   );
 }
@@ -44,9 +64,6 @@ export function Overlay({ onClose, className, children }: { onClose: () => void;
 function still(): boolean {
   return typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
-
-// Hojas abiertas, de abajo arriba: Escape solo cierra la de encima.
-const stack: symbol[] = [];
 
 /**
  * Parte del teclado del móvil que tapa la pantalla (visualViewport). Solo mueve esta hoja; el dock y el
@@ -103,7 +120,7 @@ export function Modal({
   onShown?: (panel: HTMLElement) => void;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
-  const id = useRef(Symbol('sheet'));
+  const contentRef = useRef<HTMLDivElement>(null);
   const leaving = useRef(false);
   const [closing, setClosing] = useState(false);
   const [ask, setAsk] = useState(false);
@@ -136,10 +153,7 @@ export function Modal({
     }
     finish();
   };
-  const requestRef = useRef(request);
-  requestRef.current = request;
-  const askRef = useRef(ask);
-  askRef.current = ask;
+  useEscapeLayer(() => (ask ? setAsk(false) : request()));
 
   useEffect(() => {
     const scroller = document.querySelector('.app-scroll');
@@ -151,27 +165,45 @@ export function Modal({
 
   useLayoutEffect(() => {
     const before = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const me = id.current;
-    stack.push(me);
     const panel = panelRef.current;
     if (panel) {
       shownRef.current?.(panel);
       if (!panel.contains(document.activeElement)) panel.focus({ preventScroll: true });
     }
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || stack[stack.length - 1] !== me || event.defaultPrevented) return;
-      event.preventDefault();
-      if (askRef.current) setAsk(false);
-      else requestRef.current();
-    };
-    window.addEventListener('keydown', onKey);
     return () => {
-      window.removeEventListener('keydown', onKey);
-      const at = stack.indexOf(me);
-      if (at >= 0) stack.splice(at, 1);
       if (before?.isConnected) before.focus({ preventScroll: true });
     };
   }, []);
+
+  // Altura que se adapta al contenido (Bloque E, D041): cuando aparecen o desaparecen campos, la hoja crece o
+  // encoge en 240 ms en vez de saltar. Interrumpible (parte de la altura que tenga en ese momento), nunca
+  // mientras se escribe y nunca con movimiento reducido. Solo anima la caja; el contenido no se escala.
+  useEffect(() => {
+    const panel = panelRef.current;
+    const content = contentRef.current;
+    if (!panel || !content || calm || typeof ResizeObserver === 'undefined') return undefined;
+    let last = panel.offsetHeight;
+    let typedAt = 0;
+    let run: Animation | null = null;
+    const onInput = () => { typedAt = performance.now(); };
+    panel.addEventListener('input', onInput, true);
+    const watch = new ResizeObserver(() => {
+      const from = run ? panel.offsetHeight : last;
+      run?.cancel();
+      run = null;
+      const to = panel.offsetHeight;
+      last = to;
+      if (Math.abs(to - from) < 6 || performance.now() - typedAt < 600 || leaving.current) return;
+      run = panel.animate([{ height: `${from}px` }, { height: `${to}px` }], { duration: 240, easing: EASE_SETTLE });
+      run.onfinish = () => { run = null; last = panel.offsetHeight; };
+    });
+    watch.observe(content);
+    return () => {
+      watch.disconnect();
+      run?.cancel();
+      panel.removeEventListener('input', onInput, true);
+    };
+  }, [calm]);
 
   // Con el teclado abierto, el campo activo no queda escondido debajo.
   const keepInView = (event: FocusEvent<HTMLDivElement>) => {
@@ -186,7 +218,7 @@ export function Modal({
 
   return createPortal(
     <motion.div
-      className={modalOverlayClass}
+      className={cn(modalOverlayClass, closing && 'pointer-events-none')}
       style={keyboard ? { paddingBottom: keyboard + 12 } : undefined}
       onClick={request}
       initial={calm ? false : { opacity: 0 }}
@@ -206,14 +238,18 @@ export function Modal({
         aria-busy={busy || undefined}
         initial={calm ? false : start}
         animate={closing ? away : rest}
-        transition={closing ? { duration: compact ? 0.14 : 0.2, ease: [0.4, 0, 1, 1] } : compact ? { type: 'spring', stiffness: 620, damping: 38, mass: 0.7, opacity: { duration: 0.12 } } : { ...softSpring, damping: 30, opacity: { duration: 0.18 } }}
+        transition={closing ? { ...sheetOut, duration: compact ? 0.14 : sheetOut.duration } : compact ? confirmSpring : sheetSpring}
         onAnimationComplete={() => { if (closing) done(); }}
       >
-        <div className="mb-5 flex items-center justify-between gap-4">
-          <h2 id="modal-title" className="min-w-0 break-words text-[17px] font-semibold leading-snug tracking-tight text-slate-900 dark:text-white">{title}</h2>
-          <ModalClose onClose={request} />
-        </div>
-        {children}
+        <SheetCloseContext.Provider value={request}>
+          <div ref={contentRef}>
+            <div className="mb-5 flex items-center justify-between gap-4">
+              <h2 id="modal-title" className="min-w-0 break-words text-[17px] font-semibold leading-snug tracking-tight text-slate-900 dark:text-white">{title}</h2>
+              <ModalClose onClose={request} />
+            </div>
+            {children}
+          </div>
+        </SheetCloseContext.Provider>
       </motion.div>
       {ask && (
         <DiscardAsk

@@ -14,3 +14,17 @@ export const SPRING_EASE = typeof CSS !== 'undefined' && CSS.supports('animation
 
 /** Salida corta: lo que se va no rebota, para que lo nuevo entre enseguida. */
 export const quickOut = { duration: 0.14, ease: [0.4, 0, 1, 1] as const };
+
+/* ── Bloque E (D042): tokens de hojas y transiciones hechas a mano. Antes estaban repetidos en cada archivo. ── */
+
+/** Hoja con formulario: muelle blando y sin rebote visible (el texto no debe bailar). */
+export const sheetSpring = { ...softSpring, damping: 30, opacity: { duration: 0.18 } };
+
+/** Confirmación pequeña: entra rápida y firme. */
+export const confirmSpring = { type: 'spring' as const, stiffness: 620, damping: 38, mass: 0.7, opacity: { duration: 0.12 } };
+
+/** Salida de una hoja: corta, acelerando; lo que se va no rebota. */
+export const sheetOut = { duration: 0.2, ease: [0.4, 0, 1, 1] as const };
+
+/** Curva de salida suave para WAAPI (cámara, vuelo de la foto, altura de las hojas). */
+export const EASE_SETTLE = 'cubic-bezier(0.22, 0.9, 0.24, 1)';

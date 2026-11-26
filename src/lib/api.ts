@@ -22,6 +22,12 @@ export function onApiWrite(listener: () => void): () => void {
   return () => { writeListeners.delete(listener); };
 }
 
+// Peticiones en curso (Bloque E): las precargas en segundo plano esperan a que no haya ninguna.
+let inflight = 0;
+export function apiIdle(): boolean {
+  return inflight === 0;
+}
+
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   let last: unknown;
   for (let attempt = 0; attempt < 4; attempt += 1) {
@@ -39,6 +45,15 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
 }
 
 async function apiOnce<T>(path: string, options: RequestInit): Promise<T> {
+  inflight += 1;
+  try {
+    return await apiRequest<T>(path, options);
+  } finally {
+    inflight -= 1;
+  }
+}
+
+async function apiRequest<T>(path: string, options: RequestInit): Promise<T> {
   const token = localStorage.getItem('pat_token');
   const headers = new Headers(options.headers);
   if (!headers.has('Content-Type') && options.body) headers.set('Content-Type', 'application/json');

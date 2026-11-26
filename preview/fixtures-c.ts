@@ -92,6 +92,12 @@ export const plans = [
   { plan: plan('p-casa', 'Entrada del piso', 'patrimonio', 12_400, 600, 40_000, -420, 1_200, ['acc-tr']), forecast: forecastFor(12_400, 600, 40, 40_000, -420) },
   { plan: plan('p-moto', 'Moto', 'liquidez', 1_000, 300, 4_000, -400, -10, ['acc-bank']), forecast: forecastFor(1_000, 300, 12, 4_000, -400) },
   { plan: trip, forecast: forecastFor(0, 0, 1, 0, 0), split: tripSplit },
+  // Bloque E: plan de tandas sintético (para probar su vuelo lista→detalle).
+  { plan: { ...plan('p-tandas', 'Tandas de Bitcoin', 'inversion', 0, 0, 3_000, -90, 120, []), buys: [
+    { _id: 'b1', asset: 'bitcoin', amount: 500, date: dayOffset(-60), done: true, doneAt: dayOffset(-60), priceEur: 58_000, quantity: 0.0086, spent: 500 },
+    { _id: 'b2', asset: 'bitcoin', amount: 500, date: dayOffset(-30), done: true, doneAt: dayOffset(-30), priceEur: 61_000, quantity: 0.0082, spent: 500 },
+    { _id: 'b3', asset: 'bitcoin', amount: 500, date: dayOffset(5), done: false },
+  ] }, forecast: forecastFor(0, 0, 1, 3_000, -90) },
 ];
 
 const TITLES = ['Mercadona', 'Nómina', 'Alquiler', 'Netflix', 'Gasolina', 'Café', 'Compra MSCI World', 'Bizum Ana', 'Farmacia', 'Amazon', 'Luz', 'Gimnasio', 'Restaurante', 'Transferencia a OKX'];

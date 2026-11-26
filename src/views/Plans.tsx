@@ -23,6 +23,7 @@ import { flowClass, flowIn, flowOut } from '@/lib/flow';
 import { cn, docId } from '@/lib/utils';
 import type { AccountRow, PlanForecast, PlanInvest, PlanMonthLine, PlanMonthView, PlanRow, TripSplit } from '@/lib/types';
 import { PlanTrial } from '@/components/PlanTrial';
+import { useDirty, usePending } from '@/lib/sheet';
 import { TripFace, TripPlan } from '@/views/TripPlan';
 import { assetLabel, buyLeft, CoinMark, coinMoments, fillPlan, InvestPlan, INVEST_ASSETS, localInvest, MOMENT_LABEL, MOMENT_TONE, planOutcome, usePlanCoins, wholeEur, type CoinMoment, type PlanOutcome } from '@/components/InvestPlan';
 
@@ -543,6 +544,12 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
   const dragRef = useRef<{ line: PlanMonthLine; x: number; y: number; moved: boolean } | null>(null);
   const [extra, setExtra] = useState<{ month: string; name: string; amount: string; date: string; direction: 'in' | 'out'; image: string } | null>(null);
   const [keepAsk, setKeepAsk] = useState<{ name: string; amount: number; date: string; image: string } | null>(null);
+  // Bloque E: las hojas con formulario preguntan antes de perder lo escrito y no se cierran mientras guardan.
+  const draftDirty = useDirty(draft);
+  const editorDirty = useDirty(editor);
+  const extraDirty = useDirty(extra);
+  const [editorBusy, runEditor] = usePending();
+  const [extraBusy, runExtra] = usePending();
   const [beat, setBeat] = useState(0);
   const [cardMenu, setCardMenu] = useState<{ id: string; top: number; left: number; confirm: boolean } | null>(null);
   const [makingId, setMakingId] = useState<string | null>(null);
@@ -1126,11 +1133,12 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
                     event.preventDefault();
                     setCardMenu({ id, ...placeMenu(event.clientX, event.clientY), confirm: false });
                   }}
-                  onClick={() => {
+                  onClick={(event) => {
                     if (suppressCard.current) {
                       suppressCard.current = false;
                       return;
                     }
+                    captureFlip(event.currentTarget);
                     setSelected(id);
                   }}
                   className={cn('hold-target -mx-2 cursor-pointer rounded-2xl px-2 py-4 text-left transition-colors duration-150 active:bg-slate-50 dark:active:bg-white/[0.04]', rise && 'plan-rise')}
@@ -1161,11 +1169,12 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
                     event.preventDefault();
                     setCardMenu({ id, ...placeMenu(event.clientX, event.clientY), confirm: false });
                   }}
-                  onClick={() => {
+                  onClick={(event) => {
                     if (suppressCard.current) {
                       suppressCard.current = false;
                       return;
                     }
+                    captureFlip(event.currentTarget);
                     setSelected(id);
                   }}
                   className={cn('hold-target -mx-2 cursor-pointer rounded-2xl px-2 py-4 text-left transition-colors duration-150 active:bg-slate-50 dark:active:bg-white/[0.04]', rise && 'plan-rise')}
@@ -1173,7 +1182,7 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
                   <span className="flex items-start justify-between gap-2">
                     <span className="flex min-w-0 items-center gap-2">
                       {site && <PlatformLogo name={site.platform || site.name} size={22} />}
-                      <span className="min-w-0 truncate text-sm font-semibold">{item.plan.name}</span>
+                      <span data-flip="name" className="min-w-0 truncate text-sm font-semibold">{item.plan.name}</span>
                       <button
                         type="button"
                         data-menu
@@ -1192,7 +1201,7 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
                     <OutcomeCorner outcome={outcome} fill={deployedShare(shown, outcome)} beat={beat} />
                   </span>
                   <span className="mt-2 block text-[11px] font-semibold text-slate-400">{kindLabel(item.plan)}</span>
-                  <span className="mt-3 block whitespace-nowrap text-[1.65rem] font-semibold leading-none tabular-nums tracking-tight">{outcome ? <SoftEur value={outcome.value} whole /> : '—'}</span>
+                  <span data-flip="value" className="mt-3 block whitespace-nowrap text-[1.65rem] font-semibold leading-none tabular-nums tracking-tight">{outcome ? <SoftEur value={outcome.value} whole /> : '—'}</span>
                   <OutcomeBar share={deployedShare(shown, outcome)} up={(outcome?.result ?? 0) >= 0} className="mt-4" />
                   <span className="mt-2 block text-[13px] font-medium text-slate-400">{tandasLine(shown, outcome)}</span>
                 </div>
@@ -1513,12 +1522,13 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
           accounts={accounts}
           editing={editing != null}
           error={error}
+          dirty={draftDirty}
           onSave={save}
           onClose={() => { setDraft(null); setEditing(null); }}
         />
       )}
       {extra && (
-        <Overlay onClose={() => setExtra(null)}>
+        <Overlay onClose={() => setExtra(null)} dirty={extraDirty} busy={extraBusy}>
           <div className={cn(modalPanelClass, 'max-w-md')} onClick={(event) => event.stopPropagation()}>
             <div className="mb-4 flex items-center justify-between gap-4">
               <h3 className="text-[17px] font-semibold">Añadir extra</h3>
@@ -1536,13 +1546,13 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
                 <button type="button" onClick={() => setExtra({ ...extra, direction: 'in' })} className={cn('flex-1 rounded-full border py-2 text-sm font-semibold transition-colors', extra.direction === 'in' ? 'border-[color:var(--flow-in)] text-[color:var(--flow-in)]' : 'border-slate-200 text-slate-400')}>Entra</button>
               </div>
               {error && <p className="text-sm font-medium text-rose-600">{error}</p>}
-              <Button onClick={() => void addExtra()}>Añadir</Button>
+              <Button onClick={() => void runExtra(addExtra)} disabled={extraBusy}>{extraBusy ? 'Añadiendo…' : 'Añadir'}</Button>
             </div>
           </div>
         </Overlay>
       )}
       {editor && (
-        <Overlay onClose={() => setEditor(null)}>
+        <Overlay onClose={() => setEditor(null)} dirty={editorDirty} busy={editorBusy}>
           <div className={cn(modalPanelClass, 'max-w-md')} onClick={(event) => event.stopPropagation()}>
             <div className="mb-4 flex items-center justify-between gap-4">
               <h3 className="text-[17px] font-semibold">{editor.name || 'Apunte'}</h3>
@@ -1562,8 +1572,8 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
                 <Input label="Cada cuántas semanas" type="number" min="1" max="52" value={editor.everyWeeks} onChange={(event) => setEditor({ ...editor, everyWeeks: event.target.value })} />
               )}
               <div className="flex gap-2">
-                <Button className="flex-1" onClick={() => void saveEditor(false)}>Guardar</Button>
-                <Button variant="danger" onClick={() => void saveEditor(true)}>Quitar</Button>
+                <Button className="flex-1" onClick={() => void runEditor(() => saveEditor(false))} disabled={editorBusy}>{editorBusy ? 'Guardando…' : 'Guardar'}</Button>
+                <Button variant="danger" onClick={() => void runEditor(() => saveEditor(true))} disabled={editorBusy}>Quitar</Button>
               </div>
             </div>
           </div>
@@ -1638,9 +1648,11 @@ function PlanDraft({
   accounts,
   editing,
   error,
+  dirty = false,
   onSave,
   onClose,
 }: {
+  dirty?: boolean;
   draft: Draft;
   setDraft: (draft: Draft) => void;
   accounts: AccountRow[];
@@ -1741,7 +1753,7 @@ function PlanDraft({
             : '';
 
   return (
-    <Overlay onClose={onClose}>
+    <Overlay onClose={onClose} dirty={dirty} busy={busy}>
       <form
         className={cn(modalPanelClass, 'max-w-sm')}
         onClick={(event) => event.stopPropagation()}
@@ -2085,7 +2097,7 @@ function TandasHeader({ plan, outcome, loading, beat, moments, open, onToggle, o
   return (
     <HeroCard open={open} onToggle={onToggle}>
       <div className="flex items-end justify-between gap-3">
-        <p className="text-[2rem] font-semibold leading-none tabular-nums tracking-[-0.03em] text-slate-900 dark:text-white">
+        <p data-flip-to="value" className="text-[2rem] font-semibold leading-none tabular-nums tracking-[-0.03em] text-slate-900 dark:text-white">
           {outcome ? <SoftEur value={outcome.value} whole /> : '—'}
         </p>
         {invested > 0 ? <OutcomeCorner outcome={outcome} fill={deployedShare(plan, outcome)} beat={beat} /> : <MomentTags moments={moments} onPick={onPick} />}

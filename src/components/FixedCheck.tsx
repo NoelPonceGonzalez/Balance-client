@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'motion/react';
 import { api } from '@/lib/api';
+import { cachedApi } from '@/lib/query';
 import { formatDay, formatEur } from '@/lib/format';
 import { jelly, quickOut, softSpring } from '@/lib/motion';
 import { modalOverlayClass, modalPanelClass } from '@/components/Modal';
@@ -49,7 +50,7 @@ export function FixedCheck({ nonce, focusKey, onSettled }: { nonce: number; focu
 
   useEffect(() => {
     let cancelled = false;
-    api<{ prompts: DuePrompt[] }>('/api/plans/due')
+    cachedApi<{ prompts: DuePrompt[] }>('/api/plans/due', { maxAge: 15_000 })
       .then((data) => {
         if (cancelled) return;
         const rows = data.prompts || [];

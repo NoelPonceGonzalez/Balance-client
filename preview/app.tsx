@@ -36,7 +36,20 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   if (!path.startsWith('/api')) return realFetch(input, init);
   net.push({ path, at: Math.round(performance.now()) });
   const method = (init?.method || 'GET').toUpperCase();
-  const body = (method === 'GET' ? previewResponseC(path) : undefined) ?? previewResponseB(path, method);
+  let body = (method === 'GET' ? previewResponseC(path) : undefined) ?? previewResponseB(path, method);
+  // ?many=N (Bloque E): N cuentas sintéticas más, para probar el selector con búsqueda.
+  const many = Number(params.get('many') || 0);
+  if (many && method === 'GET' && path.startsWith('/api/accounts') && body && typeof body === 'object' && Array.isArray((body as { accounts?: unknown[] }).accounts)) {
+    const base = (body as { accounts: Record<string, unknown>[] }).accounts;
+    const extra = Array.from({ length: many }, (_, i) => ({ ...base[0], _id: `acc-prueba-${i}`, id: `acc-prueba-${i}`, name: `Cuenta de prueba ${String(i + 1).padStart(2, '0')}`, archived: false }));
+    body = { ...(body as object), accounts: [...base, ...extra] };
+  }
+  // ?fail=ruta (Bloque E): esa ruta responde 503 (error de conexión simulado). ?empty=1: listas vacías.
+  const failing = params.get('fail');
+  if (failing && path.startsWith(failing)) {
+    await new Promise((resolve) => setTimeout(resolve, slow));
+    return new Response(JSON.stringify({ error: 'Sin conexión (simulado).' }), { status: 503, headers: { 'Content-Type': 'application/json' } });
+  }
   await new Promise<void>((resolve, reject) => {
     // ?race=1: las respuestas filtradas por la cuenta nómina tardan 900 ms más (prueba de respuestas fuera de orden).
     const late = params.get('race') === '1' && path.includes('accountId=acc-bank') ? 900 : 0;

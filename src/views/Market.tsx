@@ -1267,6 +1267,7 @@ function MarketScreen({ focusListing, focusTick = 0, focusSkin = null }: { focus
   const [tapeFilter, setTapeFilter] = useState<TapeFilter>('all');
   const [open, setOpen] = useState<{ kind: string; key: string; name: string; symbol: string; priceEur: number | null; changePct: number | null; changeLabel: string; sparkline: number[] } | null>(null);
   const [desk, setDesk] = useState<'saved' | 'alerts' | 'csfloat' | null>(focusListing ? 'csfloat' : null);
+  const [csDirty, setCsDirty] = useState(false);
   const [listingFocus, setListingFocus] = useState<string | null>(focusListing || null);
   const dir = useRef(1);
 
@@ -1461,8 +1462,8 @@ function MarketScreen({ focusListing, focusTick = 0, focusSkin = null }: { focus
         </Modal>
       )}
       {desk === 'csfloat' && (
-        <Modal title="CSFloat" onClose={() => { setDesk(null); setListingFocus(null); }}>
-          <CsfloatFinder key={focusTick} focusId={listingFocus} />
+        <Modal title="CSFloat" onClose={() => { setDesk(null); setListingFocus(null); setCsDirty(false); }} dirty={csDirty}>
+          <CsfloatFinder key={focusTick} focusId={listingFocus} onDirty={setCsDirty} />
         </Modal>
       )}
       {!desk && !open && createPortal(

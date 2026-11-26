@@ -619,7 +619,7 @@ function ListingRow({ image, title, sub, price, starred, onOpen }: { image: stri
   );
 }
 
-export function CsfloatFinder({ focusId }: { focusId?: string | null }) {
+export function CsfloatFinder({ focusId, onDirty }: { focusId?: string | null; onDirty?: (dirty: boolean) => void }) {
   const [openId, setOpenId] = useState<string | null>(focusId || null);
   const [tracked, setTracked] = useState<Tracked[]>([]);
   const [query, setQuery] = useState('');
@@ -631,6 +631,9 @@ export function CsfloatFinder({ focusId }: { focusId?: string | null }) {
   const [maxFloat, setMaxFloat] = useState('');
   const [maxEur, setMaxEur] = useState('');
   const [seed, setSeed] = useState('');
+  // Bloque E: los filtros escritos a mano cuentan como cambios; la hoja pregunta antes de perderlos.
+  const typed = [minFloat, maxFloat, maxEur, seed].some((value) => value.trim() !== '');
+  useEffect(() => { onDirty?.(typed); }, [typed, onDirty]);
   const [listings, setListings] = useState<Listing[] | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);

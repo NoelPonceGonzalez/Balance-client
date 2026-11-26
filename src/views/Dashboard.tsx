@@ -1,6 +1,6 @@
-import { cachedApi } from '@/lib/query';
+import { cachedApi, peek } from '@/lib/query';
 import { captureFlip, playFlip } from '@/lib/flip';
-import { forwardRef, memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type PointerEvent as ReactPointerEvent, type ReactNode, type SetStateAction } from 'react';
+import { startTransition, forwardRef, memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type PointerEvent as ReactPointerEvent, type ReactNode, type SetStateAction } from 'react';
 import { matchesSearch, useDockSearch } from '@/components/dock/dock-search';
 import { bindHold, HoldMenu, holdItemClass, placeMenu } from '@/components/HoldMenu';
 import { AnimatePresence, motion, useReducedMotion, useTransform, type MotionValue } from 'motion/react';
@@ -245,15 +245,22 @@ function AccountFold({ open, children }: { open: boolean; children: ReactNode })
   );
 }
 
-function useRise(target: number, play: boolean, duration = 1100, delay = 0, stick = false) {
-  const [value, setValue] = useState(() => (play && !prefersStill() ? 0 : target));
+// Bloque E (D040): los importes (`once`) suben desde cero solo la primera vez de la sesión. Al volver al
+// Resumen o cuando llegan datos nuevos se muestran ya en su valor: sin repetir la animación ni enseñar
+// importes intermedios que no son reales. El anillo (Donut, protegido por D013) conserva su animación.
+let risenOnce = false;
+
+function useRise(target: number, play: boolean, duration = 1100, delay = 0, stick = false, once = false) {
+  const fresh = useRef(!(once && risenOnce));
+  const [value, setValue] = useState(() => (play && fresh.current && !prefersStill() ? 0 : target));
   const rose = useRef(false);
   useEffect(() => {
-    if (!play || prefersStill() || (stick && rose.current)) {
+    if (!play || prefersStill() || (stick && rose.current) || (once && (!fresh.current || rose.current))) {
       setValue(target);
       return;
     }
     rose.current = true;
+    if (once) risenOnce = true;
     let frame = 0;
     const start = performance.now() + delay;
     const tick = (now: number) => {
@@ -279,7 +286,7 @@ function formatRisingEur(value: number): string {
 }
 
 function RisingAmount({ value, hidden, signed = false, card = false, delay = 0, stick = false }: { value: number; hidden: boolean; signed?: boolean; card?: boolean; delay?: number; stick?: boolean }) {
-  const shown = useRise(Math.abs(value), !hidden, 680, delay, stick);
+  const shown = useRise(Math.abs(value), !hidden, 680, delay, stick, true);
   if (hidden) return <>*****</>;
   const text = formatRisingEur(shown);
   if (!signed) return <>{text}</>;
@@ -1048,7 +1055,14 @@ function ResumenHero({ scrub, live, worth, hidden, beat, today, variation, scrol
 }
 
 export function Dashboard({ heroMs, home, books }: { heroMs: number; home: number; books: number }) {
+  // Al volver al Resumen se pinta al instante lo último leído en esta sesión (máx. 5 min; una escritura lo borra)
+  // y se refresca enseguida. Nunca se muestra lo de otra sesión: la caché se vacía al cambiar de usuario.
   const [data, setData] = useState<DashboardData | null>(null);
+  useEffect(() => {
+    // Después del primer fotograma (el dock responde ya) y como transición interrumpible: sin tarea larga.
+    const cached = peek<DashboardData>('/api/dashboard?period=30d', 5 * 60_000);
+    if (cached) startTransition(() => setData((current) => current ?? cached));
+  }, []);
   const [lived, setLived] = useState<{ day: string; eur: number }[] | null>(null);
   const [lineReady, setLineReady] = useState(false);
   const [view, setView] = useState<'general' | 'cartera'>('general');
@@ -1146,7 +1160,7 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
     let timer = 0;
     const token = arriveTokenNow();
     const pull = (attempt: number) => {
-      api<DashboardData>('/api/dashboard?period=30d')
+      cachedApi<DashboardData>('/api/dashboard?period=30d', { force: true })
         .then((next) => {
           if (cancelled) return;
           setData(next);
@@ -1206,10 +1220,11 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
 
   useEffect(() => {
     let cancelled = false;
-    api<{ prompts: { label: string; amount: number; direction: 'in' | 'out' }[] }>('/api/plans/due')
+    // Lecturas compartidas con Hoy y los avisos de pago fijo: una sola petición (caché de 15 s, se vacía al escribir).
+    cachedApi<{ prompts: { label: string; amount: number; direction: 'in' | 'out' }[] }>('/api/plans/due', { maxAge: 15_000 })
       .then((payload) => { if (!cancelled) setDueLine(payload.prompts?.[0] || null); })
       .catch(() => { if (!cancelled) setDueLine(null); });
-    api<{ plans: PlanPack[] }>('/api/plans')
+    cachedApi<{ plans: PlanPack[] }>('/api/plans', { maxAge: 15_000 })
       .then((payload) => {
         if (cancelled) return;
         const packs = payload.plans || [];
@@ -1231,8 +1246,8 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
   useEffect(() => {
     let cancelled = false;
     Promise.all([
-      api<{ skins: { name: string; wear: string; label: string; image: string | null; lastBestEur: number | null }[] }>('/api/market/skin-stars').catch(() => ({ skins: [] })),
-      api<{ tracked: { id: string; label: string; image: string | null; priceEur: number | null }[] }>('/api/market/tracked').catch(() => ({ tracked: [] })),
+      cachedApi<{ skins: { name: string; wear: string; label: string; image: string | null; lastBestEur: number | null }[] }>('/api/market/skin-stars', { maxAge: 15_000 }).catch(() => ({ skins: [] })),
+      cachedApi<{ tracked: { id: string; label: string; image: string | null; priceEur: number | null }[] }>('/api/market/tracked', { maxAge: 15_000 }).catch(() => ({ tracked: [] })),
     ]).then(([stars, tracked]) => {
       if (cancelled) return;
       setFollowedSkins(stars.skins || []);

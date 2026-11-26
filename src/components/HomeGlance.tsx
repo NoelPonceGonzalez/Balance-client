@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api } from '@/lib/api';
+import { cachedApi } from '@/lib/query';
 import { formatEur } from '@/lib/format';
 import { assetLabel, coinMoments, type CoinHolding } from '@/components/InvestPlan';
 import type { AppNotification, DashboardData, PlanInvest, PlanRow } from '@/lib/types';
@@ -50,8 +50,9 @@ export function HomeGlance({ data, hidden, notes }: { data: DashboardData; hidde
   useEffect(() => {
     let cancelled = false;
     Promise.all([
-      api<{ holdings: CoinHolding[] }>('/api/holdings').catch(() => ({ holdings: [] as CoinHolding[] })),
-      api<{ plans: { plan: PlanRow; invest?: PlanInvest }[] }>('/api/plans').catch(() => ({ plans: [] })),
+      // Las mismas lecturas que el Resumen: se comparten (caché de 15 s, se vacía al escribir).
+      cachedApi<{ holdings: CoinHolding[] }>('/api/holdings', { maxAge: 15_000 }).catch(() => ({ holdings: [] as CoinHolding[] })),
+      cachedApi<{ plans: { plan: PlanRow; invest?: PlanInvest }[] }>('/api/plans', { maxAge: 15_000 }).catch(() => ({ plans: [] })),
     ]).then(([book, plans]) => {
       if (cancelled) return;
       const holdings = book.holdings || [];

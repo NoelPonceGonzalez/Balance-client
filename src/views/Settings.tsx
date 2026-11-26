@@ -289,7 +289,7 @@ export function Settings({
               <GateMark gate={pushGate} on="Activos" off="Apagados" />
             </div>
             {pushGate !== 'unsupported' && (
-              <button type="button" onClick={() => void turnOn('push')} className="mt-3 text-sm font-semibold text-slate-800 dark:text-slate-100">{pushGate === 'ready' ? 'Probar aviso' : 'Activar'}</button>
+              <button type="button" onClick={() => void turnOn('push')} className="-mx-2 -mb-1.5 mt-1.5 rounded-full px-2 py-1.5 text-sm font-semibold text-slate-800 active:bg-slate-100 dark:text-slate-100 dark:active:bg-white/10">{pushGate === 'ready' ? 'Probar aviso' : 'Activar'}</button>
             )}
           </div>
           <div className="px-4 py-4">
@@ -298,7 +298,7 @@ export function Settings({
               <GateMark gate={cameraGate} on="Activa" off="Apagada" />
             </div>
             {cameraGate !== 'ready' && cameraGate !== 'unsupported' && (
-              <button type="button" onClick={() => void turnOn('camera')} className="mt-3 text-sm font-semibold text-slate-800 dark:text-slate-100">Activar</button>
+              <button type="button" onClick={() => void turnOn('camera')} className="-mx-2 -mb-1.5 mt-1.5 rounded-full px-2 py-1.5 text-sm font-semibold text-slate-800 active:bg-slate-100 dark:text-slate-100 dark:active:bg-white/10">Activar</button>
             )}
           </div>
         </div>
