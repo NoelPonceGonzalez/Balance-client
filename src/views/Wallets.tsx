@@ -1,3 +1,6 @@
+import { ChartBone } from '@/components/Skeleton';
+import { cachedApi, peek } from '@/lib/query';
+import { captureFlip } from '@/lib/flip';
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { matchesSearch, useDockSearch, useOpenDockSearch } from '@/components/dock/dock-search';
 import { AnimatePresence, motion } from 'motion/react';
@@ -9,7 +12,7 @@ import { Modal } from '@/components/Modal';
 import { EntrySheet } from '@/components/EntrySheet';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { api, ApiError } from '@/lib/api';
+import { api, onApiWrite, ApiError } from '@/lib/api';
 import { loadMovementPages } from '@/lib/history';
 import { shapeLine } from '@/lib/shape-line';
 import { OriginGlyph, OriginPicker } from '@/components/OriginMark';
@@ -641,46 +644,71 @@ export function CashChart({ points, now, hidden, base = null, spent = null, labe
   );
 }
 
+/** Últimas líneas calculadas por cuenta/grupo/posición: al volver a una cartera se pintan al instante. */
+const seriesMemo = new Map<string, { points: LinePoint[]; at: number }>();
+/** Movimientos de cada cuenta ya descargados (todas las páginas), por saldo de efectivo. */
+const movesMemo = new Map<string, { rows: BookedMove[]; at: number }>();
+const SERIES_KEEP = 10 * 60_000;
+const MOVES_KEEP = 60_000;
+onApiWrite(() => {
+  seriesMemo.clear();
+  movesMemo.clear();
+});
+
 function useSeries(accountKey: string | null, group: string, holdingId: string | null = null): LinePoint[] | null {
-  const [points, setPoints] = useState<LinePoint[] | null>(null);
+  const key = accountKey ? `${accountKey}|${group}|${holdingId || ''}` : '';
+  const remembered = (): LinePoint[] | null => {
+    const hit = key ? seriesMemo.get(key) : undefined;
+    return hit && Date.now() - hit.at < SERIES_KEEP ? hit.points : null;
+  };
+  const [state, setState] = useState<{ key: string; points: LinePoint[] | null }>(() => ({ key, points: remembered() }));
+  if (state.key !== key) setState({ key, points: remembered() });
   const [clock, setClock] = useState(0);
   useEffect(() => {
     const timer = window.setInterval(() => setClock((value) => value + 1), 30000);
     return () => window.clearInterval(timer);
   }, []);
-  useEffect(() => { setPoints(null); }, [accountKey, group, holdingId]);
   useEffect(() => {
     if (!accountKey) return undefined;
     let cancelled = false;
+    const done = (points: LinePoint[], keep = true) => {
+      if (cancelled) return;
+      if (keep) seriesMemo.set(key, { points, at: Date.now() });
+      setState({ key, points });
+    };
     const holding = holdingId ? `&holdingId=${encodeURIComponent(holdingId)}` : '';
-    api<{ points: LinePoint[] }>(`/api/wallets/series?accountId=${encodeURIComponent(accountKey)}&group=${encodeURIComponent(group)}${holding}`)
+    // Serie y cartera en paralelo (antes, una detrás de otra); las dos salen de la caché si son recientes.
+    const seriesCall = cachedApi<{ points: LinePoint[] }>(`/api/wallets/series?accountId=${encodeURIComponent(accountKey)}&group=${encodeURIComponent(group)}${holding}`, { maxAge: 25_000 });
+    const bookCall = cachedApi<{ holdings?: { _id?: string; id?: string; accountId: string; assetClass: string; quantity: number; costBasis?: number | null; quoteSource?: string | null; quoteId?: string | null; unitMarketValue?: number | null }[] }>('/api/holdings', { maxAge: 15_000 });
+    bookCall.catch(() => undefined);
+    seriesCall
       .then(async (data) => {
         if (cancelled) return;
         const points = data.points || [];
         try {
-          const book = await api<{ holdings?: { _id?: string; id?: string; accountId: string; assetClass: string; quantity: number; costBasis?: number | null; quoteSource?: string | null; quoteId?: string | null; unitMarketValue?: number | null }[] }>('/api/holdings');
+          const book = await bookCall;
           const list = book.holdings || [];
           const rows = list.filter((item) => String(item.accountId) === accountKey && (group === 'all' || item.assetClass === group || (group === 'valores' && (item.assetClass === 'etf' || item.assetClass === 'stock'))) && (!holdingId || String(item._id || item.id) === holdingId));
           const moving = rows.filter((item) => item.costBasis != null && item.costBasis > 0 && (item.quoteSource === 'coingecko' || item.quoteSource === 'yahoo') && item.quoteId && (item.unitMarketValue || 0) > 0);
           const shaped = await shapeLine(moving.map((item) => ({ quantity: item.quantity, source: item.quoteSource || '', quoteId: item.quoteId || '', unit: item.unitMarketValue || 0 })));
           if (cancelled) return;
           if (shaped.length < 2) {
-            setPoints(points);
+            done(points);
             return;
           }
           const worth = (item: { quantity: number; unitMarketValue?: number | null }) => (item.unitMarketValue || 0) * item.quantity;
           const flat = rows.reduce((sum, item) => sum + worth(item), 0) - moving.reduce((sum, item) => sum + worth(item), 0);
           const lifted = shaped.map((point) => ({ day: point.day, eur: round2(flat + point.eur) }));
           lifted[lifted.length - 1] = { day: lifted[lifted.length - 1].day, eur: round2(flat + moving.reduce((sum, item) => sum + worth(item), 0)) };
-          setPoints(lifted);
+          done(lifted);
         } catch {
-          if (!cancelled) setPoints(points);
+          done(points);
         }
       })
-      .catch(() => { if (!cancelled) setPoints([]); });
+      .catch(() => { if (!cancelled && !seriesMemo.has(key)) done([], false); });
     return () => { cancelled = true; };
-  }, [accountKey, group, holdingId, clock]);
-  return points;
+  }, [accountKey, group, holdingId, clock, key]);
+  return state.key === key ? state.points : remembered();
 }
 
 function GainTag({ value, cost, mode, hidden }: { value: number; cost?: number | null; mode: 'eur' | 'pct'; hidden: boolean }) {
@@ -902,7 +930,7 @@ function openingPane(accounts: CarteraAccount[], openId: string | null): 0 | 1 {
 }
 
 export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, onOpen, onAdd, onSections, onSaved, onKeep, onEditExtra, onFigure, onDay, onMove }: { accounts: CarteraAccount[]; hidden: boolean; beat?: number; openId: string | null; paneSlot?: HTMLElement | null; onOpen: (id: string | null) => void; onAdd?: (accountKey: string, section?: string) => void; onSections?: (accountKey: string, sections: string[]) => Promise<void>; onSaved?: () => Promise<void> | void; onKeep?: (name: string, amount: number) => void; onEditExtra?: (id: string) => void; onFigure?: (amount: number | null) => void; onDay?: (day: string | null) => void; onMove?: (move: { amount: number; pct: number | null } | null) => void }) {
-  const [notes, setNotes] = useState<WalletRow[]>([]);
+  const [notes, setNotes] = useState<WalletRow[]>(() => peek<{ wallets: WalletRow[] }>('/api/wallets')?.wallets ?? []);
   const [booked, setBooked] = useState<BookedMove[]>([]);
   const [bookedFor, setBookedFor] = useState<string | null>(null);
   const [error, setError] = useState('');
@@ -938,7 +966,7 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
   }
 
   const load = async () => {
-    const data = await api<{ wallets: WalletRow[] }>('/api/wallets');
+    const data = await cachedApi<{ wallets: WalletRow[] }>('/api/wallets', { force: true });
     setNotes(data.wallets);
   };
 
@@ -946,7 +974,7 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
     let cancelled = false;
     let timer = 0;
     const pull = (attempt: number) => {
-      api<{ wallets: WalletRow[] }>('/api/wallets')
+      cachedApi<{ wallets: WalletRow[] }>('/api/wallets', { maxAge: attempt ? 0 : 20_000 })
         .then((data) => {
           if (cancelled) return;
           setNotes(data.wallets);
@@ -983,8 +1011,16 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
       return;
     }
     let cancelled = false;
+    const memoKey = `${openId}|${openCash ?? ''}`;
+    const memo = movesMemo.get(memoKey);
+    if (memo && Date.now() - memo.at < MOVES_KEEP) {
+      setBooked(memo.rows);
+      setBookedFor(openId);
+      return undefined;
+    }
     loadMovementPages<BookedMove>(new URLSearchParams({ accountId: openId }))
       .then((data) => {
+        if (data.complete) movesMemo.set(memoKey, { rows: data.rows, at: Date.now() });
         if (!cancelled) {
           setBooked(data.rows);
           setBookedFor(openId);
@@ -1404,31 +1440,39 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
     <div className="space-y-4">
       {error && <p className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">{error}</p>}
       {!current && (
-        <div className="grid grid-cols-1 gap-3 min-[480px]:grid-cols-2">
-          {accounts.map((account, index) => (
-            <motion.button
-              key={account.key}
-              type="button"
-              onClick={() => onOpen(account.key)}
-              initial={window.matchMedia('(prefers-reduced-motion: reduce)').matches ? false : { opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ ...glide, delay: Math.min(index, 5) * 0.04 }}
-              className="rounded-[28px] bg-white p-4 text-left ring-1 ring-slate-200/70 dark:bg-slate-900 dark:ring-white/10"
-            >
-              <span className="flex items-start justify-between gap-2">
-                <span className="flex min-w-0 items-center gap-2">
-                  {account.image ? <img src={account.image} alt="" className="h-[22px] w-[22px] rounded-lg object-cover" /> : <PlatformLogo name={account.logoName} size={22} />}
-                  <span className="min-w-0 truncate text-sm font-semibold">{account.name}</span>
+        <section aria-label="Carteras">
+          <h2 className="mb-1 text-[19px] font-semibold tracking-[-0.02em] text-slate-950 dark:text-white">Carteras</h2>
+          <div className="divide-y divide-slate-100 dark:divide-white/[0.08]">
+          {accounts.map((account, index) => {
+            const frames = [
+              ...(account.gainPct != null ? [{ text: formatPct(account.gainPct), tone: toneClass(account.gainPct) }] : []),
+              ...(account.gainEur != null ? [{ text: formatSignedEur(account.gainEur), tone: toneClass(account.gainEur) }] : []),
+            ];
+            const frame = frames.length ? frames[beat % frames.length] : { text: '—', tone: 'text-slate-300' };
+            const text = hidden && frames.length ? '*****' : frame.text;
+            const caption = [(account.sides || []).map((side) => side.title).join(' · ') || 'Sin desglose', account.pricedOn ? `${account.tracking === 'positions' ? 'efectivo' : 'cifra'} del ${formatDay(account.pricedOn)}` : ''].filter(Boolean).join(' · ');
+            return (
+              <motion.button
+                key={account.key}
+                type="button"
+                onClick={(event) => { captureFlip(event.currentTarget); onOpen(account.key); }}
+                initial={stillMotion() || index > 11 ? false : { opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ ...glide, delay: Math.min(index, 5) * 0.04 }}
+                className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-3 rounded-2xl px-2 py-3.5 text-left transition-colors duration-150 active:bg-slate-50 dark:active:bg-white/[0.04]"
+              >
+                <span data-flip="logo" className="shrink-0">
+                  {account.image ? <img src={account.image} alt="" className="h-[38px] w-[38px] rounded-xl object-cover" /> : <PlatformLogo name={account.logoName} size={38} />}
                 </span>
-                {(() => {
-                  const frames = [
-                    ...(account.gainPct != null ? [{ text: formatPct(account.gainPct), tone: toneClass(account.gainPct) }] : []),
-                    ...(account.gainEur != null ? [{ text: formatSignedEur(account.gainEur), tone: toneClass(account.gainEur) }] : []),
-                  ];
-                  const frame = frames.length ? frames[beat % frames.length] : { text: '—', tone: 'text-slate-300' };
-                  const text = hidden && frames.length ? '*****' : frame.text;
-                  if (stillMotion()) return <span className={cn('shrink-0 text-[13px] font-semibold tabular-nums', frame.tone)}>{text}</span>;
-                  return (
+                <span className="min-w-0 flex-1">
+                  <span data-flip="name" className="block truncate text-[15px] font-semibold leading-tight text-slate-950 dark:text-white">{account.name}</span>
+                  <span className="mt-0.5 block truncate text-[13px] font-medium text-slate-400 dark:text-slate-500">{caption}</span>
+                </span>
+                <span className="shrink-0 text-right">
+                  <span data-flip="value" className="block whitespace-nowrap text-[15px] font-semibold leading-tight tabular-nums tracking-tight text-slate-950 dark:text-white">{account.value == null ? '—' : money(account.value, hidden)}</span>
+                  {stillMotion() ? (
+                    <span className={cn('mt-0.5 block text-[13px] font-semibold tabular-nums', frame.tone)}>{text}</span>
+                  ) : (
                     <AnimatePresence mode="wait" initial={false}>
                       <motion.span
                         key={text}
@@ -1436,26 +1480,18 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
                         animate={{ opacity: 1, y: 0, scale: 1 }}
                         exit={{ opacity: 0, y: -6, scale: 0.9, transition: quickOut }}
                         transition={jelly}
-                        className={cn('inline-block shrink-0 text-[13px] font-semibold tabular-nums', frame.tone)}
+                        className={cn('mt-0.5 block text-[13px] font-semibold tabular-nums', frame.tone)}
                       >
                         {text}
                       </motion.span>
                     </AnimatePresence>
-                  );
-                })()}
-              </span>
-              <span className="mt-3 block whitespace-nowrap text-[1.65rem] font-semibold leading-none tabular-nums tracking-tight">{account.value == null ? '—' : money(account.value, hidden)}</span>
-              <span className="mt-2 block text-[11px] font-semibold text-slate-400">
-                {(account.sides || []).map((side) => side.title).join(' · ') || 'Sin desglose'}
-              </span>
-              {account.pricedOn && (
-                <span className="mt-1 block text-[11px] font-semibold text-slate-400">
-                  {account.tracking === 'positions' ? 'Efectivo' : 'Cifra'} del {formatDay(account.pricedOn)}
+                  )}
                 </span>
-              )}
-            </motion.button>
-          ))}
-        </div>
+              </motion.button>
+            );
+          })}
+          </div>
+        </section>
       )}
       <AnimatePresence mode="wait" initial={false}>
       {current && ledger && (
@@ -1560,7 +1596,7 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
           {showCash && cashSide && <div aria-hidden className="h-8" />}
           {showPortfolio && inventory && (
             <section className="px-1">
-              <CashChart
+              {(asset ? assetFetching && assetSeries == null : totalFetching && totalSeries == null) ? <ChartBone tall /> : <CashChart
                 key={`${current.key}:skins:${asset?.id || 'all'}:${range}:${(asset ? assetRanged : totalRanged) ? 'ready' : 'wait'}`}
                 quiet
                 tall
@@ -1573,7 +1609,7 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
                 beforePlot={(asset ? assetRanged : totalRanged) ? <LineRangeTabs value={range} onChange={setRange} /> : undefined}
                 points={(asset ? assetRanged : totalRanged) || []}
                 emptyText={(asset ? assetSeries : totalSeries) ? 'La gráfica aparece cuando CSFloat mande más de un día.' : 'Cargando…'}
-              />
+              />}
               {asset && (
                 <button type="button" onClick={() => { setLive(null); setAsset(null); }} className="mt-2 text-sm font-semibold text-slate-500">Todo el inventario</button>
               )}
@@ -1672,7 +1708,11 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
                         </AnimatePresence>
                       </div>
                       <div className="mt-1.5">
-                        {asset ? (
+                        {asset && assetFetching && assetSeries == null ? (
+                          <ChartBone tall />
+                        ) : !asset && !page.empty && pageFetching && pageSeries == null ? (
+                          <ChartBone tall />
+                        ) : asset ? (
                           <CashChart
                             key={`${asset.id}:${range}`}
                             quiet
@@ -1777,7 +1817,7 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
                   </>
                 ) : (
                   <div className="px-1">
-                    <CashChart
+                    {totalFetching && totalSeries == null ? <ChartBone tall /> : <CashChart
                       key={`${current.key}:all:${range}`}
                       quiet
                       tall
@@ -1793,7 +1833,7 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
                       beforePlot={totalRanged ? <LineRangeTabs value={range} onChange={setRange} /> : undefined}
                       points={totalRanged || []}
                       emptyText={totalSeries ? 'La gráfica aparece cuando haya más de un día.' : 'Cargando…'}
-                    />
+                    />}
                     {listed.length > 0 && (
                       <div className="pt-6">
                         <div className="flex items-center justify-between gap-3">

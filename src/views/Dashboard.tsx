@@ -1,3 +1,5 @@
+import { cachedApi } from '@/lib/query';
+import { captureFlip, playFlip } from '@/lib/flip';
 import { forwardRef, memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type PointerEvent as ReactPointerEvent, type ReactNode, type SetStateAction } from 'react';
 import { matchesSearch, useDockSearch } from '@/components/dock/dock-search';
 import { bindHold, HoldMenu, holdItemClass, placeMenu } from '@/components/HoldMenu';
@@ -1062,6 +1064,33 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
   const [scrub] = useState(createScrub);
   const topRef = useRef<HTMLDivElement>(null);
   const scroll = useShellScroll(topRef);
+  const generalScroll = useRef(0);
+  useLayoutEffect(() => {
+    const scroller = topRef.current?.closest<HTMLElement>('.app-scroll');
+    if (!scroller) return undefined;
+    if (view === 'general') {
+      // La lista puede tardar unos fotogramas en tener su altura: se reintenta hasta ~20 fotogramas.
+      const target = generalScroll.current;
+      let frame = 0;
+      let tries = 0;
+      const apply = () => {
+        scroller.scrollTop = target;
+        if (Math.abs(scroller.scrollTop - target) > 1 && tries++ < 20) frame = window.requestAnimationFrame(apply);
+      };
+      if (target > 0) apply();
+      return () => {
+        window.cancelAnimationFrame(frame);
+        generalScroll.current = scroll.get();
+      };
+    }
+    return undefined;
+  }, [view, scroll]);
+  useLayoutEffect(() => {
+    if (!openWallet) return;
+    const scroller = topRef.current?.closest<HTMLElement>('.app-scroll');
+    if (scroller && scroller.scrollTop > 0) scroller.scrollTop = 0;
+    playFlip(topRef.current);
+  }, [openWallet]);
   useResumenSurface();
   const [dueLine, setDueLine] = useState<{ label: string; amount: number; direction: 'in' | 'out' } | null>(null);
   const [markLine, setMarkLine] = useState<{ planId: string; label: string; amount: number } | null>(null);
@@ -1155,7 +1184,7 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
     let cancelled = false;
     const total = data.netWorth.eur;
     const today = data.today;
-    api<{ holdings?: { quantity: number; costBasis?: number | null; quoteSource?: string | null; quoteId?: string | null; unitMarketValue?: number | null }[] }>('/api/holdings')
+    cachedApi<{ holdings?: { quantity: number; costBasis?: number | null; quoteSource?: string | null; quoteId?: string | null; unitMarketValue?: number | null }[] }>('/api/holdings', { maxAge: 15_000 })
       .then((book) => {
         const rows = (book.holdings || []).filter((item) => item.costBasis != null && item.costBasis > 0 && (item.quoteSource === 'coingecko' || item.quoteSource === 'yahoo') && item.quoteId && (item.unitMarketValue || 0) > 0);
         const pricedToday = rows.reduce((sum, item) => sum + (item.unitMarketValue || 0) * item.quantity, 0);
@@ -1748,7 +1777,7 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
       <div className="order-2 min-w-0">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <div className="flex shrink-0 items-center gap-2">
-            <p className="whitespace-nowrap text-[clamp(1.65rem,7.2vw,2.15rem)] font-semibold leading-none tabular-nums tracking-tight text-slate-900 dark:text-white">
+            <p data-flip-to="value" className="whitespace-nowrap text-[clamp(1.65rem,7.2vw,2.15rem)] font-semibold leading-none tabular-nums tracking-tight text-slate-900 dark:text-white">
               {barValue == null ? '—' : hidden ? '*****' : formatEur(barValue)}
             </p>
             <button
@@ -1782,8 +1811,8 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
           <button type="button" onClick={() => setOpenWallet(null)} className="inline-flex items-center gap-0.5 text-sm font-semibold text-slate-500" aria-label="Volver a carteras">
             <ChevronLeft size={16} /> Carteras
           </button>
-          <PlatformLogo name={openAccount.logoName} size={28} />
-          <h2 className="min-w-0 truncate text-base font-semibold">{openAccount.name}</h2>
+          <span data-flip-to="logo" className="shrink-0"><PlatformLogo name={openAccount.logoName} size={28} /></span>
+          <h2 data-flip-to="name" className="min-w-0 truncate text-base font-semibold">{openAccount.name}</h2>
         </div>
       )}
     </div>
@@ -2001,7 +2030,16 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
 
   const still = prefersStill();
   return (
-    <div className="mx-auto max-w-3xl space-y-5">
+    <div
+      className="mx-auto max-w-3xl space-y-5"
+      onClickCapture={(event) => {
+        // Continuidad Resumen → cartera: se lee la fila pulsada (lista «Sitios» sin tocar, D027).
+        const enter = event.target instanceof Element ? event.target.closest('button[aria-label^="Entrar en "]') : null;
+        const row = enter?.closest('[role="button"]');
+        if (!enter || !row) return;
+        captureFlip(row, { logo: row.firstElementChild, name: enter.querySelector('span'), value: row.lastElementChild?.firstElementChild ?? null });
+      }}
+    >
       {pin}
       <AnimatePresence mode="wait" initial={false}>
         <ScreenSwap key="general" dir={-1} className="space-y-8 pb-6">

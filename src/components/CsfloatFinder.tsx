@@ -400,9 +400,11 @@ export function SkinSuggest({ query, onPick, onMatch }: { query: string; onPick:
       return;
     }
     let cancel = false;
+    // La petición anterior se aborta: una respuesta vieja nunca pisa a la nueva.
+    const abort = new AbortController();
     setNote('Buscando en CSFloat…');
     const timer = window.setTimeout(() => {
-      api<Catalog>(`/api/market/csfloat/catalog?q=${encodeURIComponent(text)}`)
+      api<Catalog>(`/api/market/csfloat/catalog?q=${encodeURIComponent(text)}`, { signal: abort.signal })
         .then((data) => {
           if (cancel) return;
           const results = data.results || [];
@@ -427,6 +429,7 @@ export function SkinSuggest({ query, onPick, onMatch }: { query: string; onPick:
     }, 250);
     return () => {
       cancel = true;
+      abort.abort();
       window.clearTimeout(timer);
     };
   }, [query]);
