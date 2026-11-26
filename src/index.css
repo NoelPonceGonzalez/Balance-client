@@ -532,3 +532,29 @@ html.dark {
 html[data-surface='resumen'] div:has(> main.app-scroll) {
   background-color: var(--resumen-bg);
 }
+
+/* ───────── Dock: cristal en dos capas (D025) ─────────
+   El dock separa el material aprobado en dos capas con la misma clase .liquid-glass
+   (components/dock/GlassCapsule.tsx): «optics» lleva solo el fondo refractado y el tinte, con tamaño fijo
+   y recortada con clip-path; «sheen» lleva reflejos, canto, grosor y sombras con el ancho real.
+   Solo reparte propiedades; no modifica ninguna regla del bloque Liquid Glass. */
+:root .liquid-glass[data-part='optics'] {
+  box-shadow: none;
+  transition: none;
+}
+.liquid-glass[data-part='optics']::before,
+.liquid-glass[data-part='optics']::after {
+  content: none;
+}
+.liquid-glass[data-part='sheen'] {
+  background: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+/* Buscador del dock: sin la «x» nativa (el dock pone la suya) ni decoración de type=search. */
+.dock-search::-webkit-search-cancel-button,
+.dock-search::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
+}

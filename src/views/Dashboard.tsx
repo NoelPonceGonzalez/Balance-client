@@ -1,4 +1,5 @@
 import { forwardRef, memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type PointerEvent as ReactPointerEvent, type ReactNode, type SetStateAction } from 'react';
+import { matchesSearch, useDockSearch } from '@/components/dock/dock-search';
 import { bindHold, HoldMenu, holdItemClass, placeMenu } from '@/components/HoldMenu';
 import { AnimatePresence, motion, useReducedMotion, useTransform, type MotionValue } from 'motion/react';
 import { ArrowUpDown, ChevronLeft, ChevronRight, Eye, EyeOff, Pencil, Plus, Search, Star, Tag, Trash2 } from 'lucide-react';
@@ -1257,6 +1258,23 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
     return list;
   }, [rows, sort]);
 
+  // Buscador único del dock (D025): cuentas y carteras por nombre; activos dentro de cada una.
+  // Solo filtra la lista; el gráfico y los totales no cambian.
+  const [query] = useDockSearch('Cuentas y activos');
+  const found = useMemo(() => {
+    if (!query.trim()) return null;
+    const hits = new Map<string, typeof ordered[number]['sides'] | null>();
+    for (const row of ordered) {
+      if (matchesSearch(query, row.name)) { hits.set(row.key, null); continue; }
+      const sides = row.sides
+        .map((side) => (matchesSearch(query, side.title) ? side : { ...side, items: side.items.filter((item) => matchesSearch(query, item.label, item.detail)) }))
+        .filter((side) => side.items.length > 0 || matchesSearch(query, side.title));
+      if (sides.length > 0) hits.set(row.key, sides);
+    }
+    return hits;
+  }, [query, ordered]);
+  const listed = found ? ordered.filter((row) => found.has(row.key)) : ordered;
+
   const cycleSort = () => {
     setSort((current) => {
       const index = SORTS.findIndex((item) => item.id === current);
@@ -2052,10 +2070,14 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
             </button>
           )}
         </div>
-        {(ordered.length > 0 || (countExtras && extraWealth > 0)) && <div className="divide-y divide-slate-100 dark:divide-white/[0.08]">
-        {ordered.map((row, index) => {
+        {found && listed.length === 0 && <p className="py-8 text-center text-sm font-medium text-slate-400">Nada coincide con «{query.trim()}».</p>}
+        {(listed.length > 0 || (!found && countExtras && extraWealth > 0)) && <div className="divide-y divide-slate-100 dark:divide-white/[0.08]">
+        {listed.map((source, index) => {
+          // Con búsqueda, una cuenta encontrada por sus activos se abre y enseña solo esos activos.
+          const narrowed = found?.get(source.key);
+          const row = narrowed ? { ...source, sides: narrowed } : source;
           const frame = row.frames[beat % row.frames.length];
-          const open = openKey === row.key;
+          const open = openKey === row.key || Boolean(narrowed);
           const held = row.sides.filter((side) => side.group !== 'cash').reduce((sum, side) => sum + side.items.length, 0);
           const caption = row.tracking === 'positions' && held > 0 ? `${held} ${held === 1 ? 'posición' : 'posiciones'}` : 'Saldo';
           return (

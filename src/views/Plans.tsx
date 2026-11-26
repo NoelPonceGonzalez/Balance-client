@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import { matchesSearch, useDockSearch } from '@/components/dock/dock-search';
 import { bindHold, HoldMenu, holdItemClass, placeMenu } from '@/components/HoldMenu';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'motion/react';
@@ -652,7 +653,16 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
     setFilter(next);
     localStorage.setItem('pat_plan_filter', next);
   };
-  const listed = rows.filter((row) => filter === 'all' || (filter === 'over') === row.over);
+  // Buscador único del dock (D025): filtra por nombre del plan, tipo y nombres de sus partidas.
+  const [query] = useDockSearch('Buscar planes');
+  const listed = rows.filter((row) => (query ? true : filter === 'all' || (filter === 'over') === row.over) && (!query || matchesSearch(
+    query,
+    planTitle(row.item.plan),
+    kindLabel(row.item.plan),
+    ...(row.item.plan.recurring || []).map((line) => line.name),
+    ...(row.item.plan.plannedExpenses || []).map((line) => line.name),
+    ...(row.item.plan.incomes || []).map((line) => line.name),
+  )));
   const moments = tandas ? coinMoments(tandas, tandasInvest, coins.holdings) : [];
   const [tandaFocus, setTandaFocus] = useState<{ id: string; at: number } | null>(null);
   const [coinsOpen, setCoinsOpen] = useState(false);

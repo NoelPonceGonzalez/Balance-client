@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useDockSearch } from '@/components/dock/dock-search';
 import { PlatformLogo } from '@/components/PlatformLogo';
 import { QuietLoad, markReady, arriveTokenNow } from '@/components/QuietLoad';
 import { Field, Input, fieldClass } from '@/components/ui/Input';
@@ -98,6 +99,13 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
   const [year, setYear] = useState(initialYear);
   const [month, setMonth] = useState(initialMonth);
   const [filters, setFilters] = useState({ q: '', type: '', accountId: '', ...periodRange(initialYear, initialMonth) });
+  // Buscador único del dock (D025): el texto viaja al servidor como antes (filters.q), con una pausa breve.
+  const [dockQuery] = useDockSearch('Buscar movimientos');
+  useEffect(() => {
+    const next = dockQuery.trim();
+    const wait = window.setTimeout(() => setFilters((current) => (current.q === next ? current : { ...current, q: next })), next ? 260 : 0);
+    return () => window.clearTimeout(wait);
+  }, [dockQuery]);
   const [sort, setSort] = useState<{ key: 'date' | 'amount'; dir: 'asc' | 'desc' }>({ key: 'date', dir: 'desc' });
   const [draft, setDraft] = useState<Draft | null>(null);
   const [formMore, setFormMore] = useState(false);
@@ -310,9 +318,8 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
         </select>
       </div>
       <details>
-        <summary className="cursor-pointer text-[13px] font-semibold text-slate-400">Buscar y fechas</summary>
+        <summary className="cursor-pointer text-[13px] font-semibold text-slate-400">Tipo y fechas</summary>
         <div className="mt-3 grid gap-3 sm:grid-cols-2">
-          <Input label="Buscar" value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} placeholder="Descripción o categoría" />
           <Field label="Tipo">
             <select className={fieldClass} value={filters.type} onChange={(e) => setFilters({ ...filters, type: e.target.value })}>
               <option value="">Todos</option>

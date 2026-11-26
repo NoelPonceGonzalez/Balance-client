@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { matchesSearch, useDockSearch, useOpenDockSearch } from '@/components/dock/dock-search';
 import { AnimatePresence, motion } from 'motion/react';
 import { createPortal } from 'react-dom';
 import { Check, ChevronDown, ChevronLeft, ChevronRight, Plus, Search, Trash2, X } from 'lucide-react';
@@ -782,7 +783,10 @@ function SiteBar({ title, verbs, onPick }: { title: string; verbs: { id: VerbId;
 }
 
 function ActivityList({ rows, hidden, mode, autoFocus = false }: { rows: Activity[]; hidden: boolean; mode: 'peek' | 'all'; autoFocus?: boolean }) {
-  const [query, setQuery] = useState('');
+  // Buscador único del dock (D025): solo la lista completa se busca; «Buscar» abre el del dock.
+  const [query] = useDockSearch(mode === 'all' ? 'Buscar transacciones' : null);
+  const openSearch = useOpenDockSearch();
+  useEffect(() => { if (autoFocus && mode === 'all') openSearch(); }, [autoFocus, mode, openSearch]);
   const matched = rows.filter((row) => matchesActivity(row.label, row.note, row.amount, query));
   const shown = mode === 'all' ? matched : rows.slice(0, 8);
   const fade = mode === 'peek' && shown.length >= 4;
@@ -790,28 +794,6 @@ function ActivityList({ rows, hidden, mode, autoFocus = false }: { rows: Activit
   const className = 'flex w-full items-center gap-3 border-t border-slate-200/70 py-2.5 text-left first:border-t-0 dark:border-white/10';
   return (
     <div>
-      {mode === 'all' && (
-        <motion.label
-          className="mb-1 flex items-center gap-2 py-2"
-          initial={still ? false : { opacity: 0, y: 14 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={still ? { duration: 0 } : jelly}
-        >
-          <Search size={18} className="shrink-0 text-slate-400" />
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Buscar"
-            autoFocus={autoFocus}
-            className="w-full bg-transparent text-[17px] font-semibold outline-none placeholder:font-medium placeholder:text-slate-300"
-          />
-          {query && (
-            <button type="button" onClick={() => setQuery('')} aria-label="Borrar búsqueda" className="squishy is-jelly grid h-7 w-7 shrink-0 place-items-center text-slate-400">
-              <X size={16} />
-            </button>
-          )}
-        </motion.label>
-      )}
       <div className={fade ? '[-webkit-mask-image:linear-gradient(to_bottom,#000_0,#000_calc(100%-9rem),transparent)] [mask-image:linear-gradient(to_bottom,#000_0,#000_calc(100%-9rem),transparent)]' : undefined}>
         <ul>
           <AnimatePresence initial={false}>
@@ -937,6 +919,9 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
   const [range, setRange] = useState<LineRangeId>('1A');
   const [picking, setPicking] = useState(false);
   const [searching, setSearching] = useState(false);
+  // Buscador único del dock (D025): con una cartera abierta, busca entre sus posiciones y activos.
+  const [heldQuery] = useDockSearch(openId ? 'Posiciones y activos' : null);
+  const heldMatch = (item: CarteraItem) => matchesSearch(heldQuery, item.label, item.detail);
   const [gainMode, setGainMode] = useState<'eur' | 'pct'>('eur');
   const [asset, setAsset] = useState<CarteraItem | null>(null);
   const [live, setLive] = useState<number | null>(null);
@@ -1604,7 +1589,7 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
                 <p className="pt-2 text-sm font-medium text-slate-400">Todavía no hay skins.</p>
               ) : (
                 <ul className="mt-1">
-                  {skinItems.map((item, index) => (
+                  {skinItems.filter(heldMatch).map((item, index) => (
                     <motion.li
                       key={item.id || item.label}
                       initial={stillMotion() ? false : { opacity: 0, y: 12 }}
@@ -1758,7 +1743,7 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
                         </div>
                       ) : (
                         <ul className="mt-1">
-                          {page.items.map((item, index) => (
+                          {page.items.filter(heldMatch).map((item, index) => (
                             <motion.li
                               key={item.id || item.label}
                               initial={stillMotion() ? false : { opacity: 0, y: 12 }}

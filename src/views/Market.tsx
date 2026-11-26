@@ -11,6 +11,7 @@ import { useOpenOffer } from '@/components/offer-focus';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
+import { useDockSearch } from '@/components/dock/dock-search';
 import { api } from '@/lib/api';
 import { activatePush } from '@/lib/device';
 import { formatAgo, formatDay, formatNumber, formatPct } from '@/lib/format';
@@ -1293,10 +1294,11 @@ function MarketScreen({ focusListing, focusTick = 0, focusSkin = null }: { focus
   const { code, setCode } = useMarketCode();
   const [data, setData] = useState<MarketBoard | null>(null);
   const [error, setError] = useState('');
-  const [query, setQuery] = useState('');
   const [skinMatch, setSkinMatch] = useState(false);
   const [market, setMarket] = useState(initialMarket);
   const [skinDesk, setSkinDesk] = useState<SkinHit | null>(null);
+  // Buscador único del dock (D025): el texto llega de ahí; setQuery lo vacía al cambiar de mercado.
+  const [query, setQuery] = useDockSearch(market === 'all' ? 'Activos y mercados' : skinDesk ? 'Otra skin o desgaste…' : MARKET_TONE[market]?.search || 'Buscar activos');
   const [wearPick, setWearPick] = useState('all');
   const [tapeFilter, setTapeFilter] = useState<TapeFilter>('all');
   const [open, setOpen] = useState<{ kind: string; key: string; name: string; symbol: string; priceEur: number | null; changePct: number | null; changeLabel: string; sparkline: number[] } | null>(null);
@@ -1396,7 +1398,6 @@ function MarketScreen({ focusListing, focusTick = 0, focusSkin = null }: { focus
   const showMoves = !skinDesk && !hero && market !== 'all' && market !== 'cs2' && (active?.raw.length || 0) > 1;
   const searchOn = market === 'all' || !hero;
   const tone = MARKET_TONE[market];
-  const placeholder = market === 'all' ? 'Un mercado, Bitcoin o Pandora' : skinDesk ? 'Otra skin o desgaste…' : tone?.search || 'Buscar';
   const heading = skinDesk ? skinDesk.label : market === 'all' ? 'Mercado' : active?.title || 'Mercado';
   const stageKey = skinDesk ? `skin:${skinDesk.name}:${skinDesk.paintIndex ?? ''}` : market;
   const openTape = (item: MarketTapeItem) => setOpen({ kind: item.kind, key: item.key, name: item.name, symbol: item.symbol, priceEur: item.priceEur, changePct: item.changePct, changeLabel: item.changeLabel, sparkline: item.sparkline });
@@ -1480,26 +1481,9 @@ function MarketScreen({ focusListing, focusTick = 0, focusSkin = null }: { focus
           {fresh ? `En vivo · ${formatAgo(data.updatedAt)}` : `Último intento ${formatAgo(data.updatedAt)}`}
           {code === 'USD' && !marketReady() ? ' · buscando el cambio del dólar' : code === 'USD' ? ' · en dólares' : ''}
         </p>
-      {searchOn && (
+      {searchOn && (market === 'all' || market === 'cs2') && needle.length >= 2 && (
           <div className="relative mt-1">
-            <Input
-              icon={<Search size={16} />}
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder={placeholder}
-              aria-label="Buscar en este mercado"
-              style={tone && market !== 'all' ? { boxShadow: `inset 3px 0 0 ${tone.accent}` } : undefined}
-              trailing={
-                query ? (
-                  <button type="button" onClick={() => setQuery('')} aria-label="Borrar búsqueda" className="grid h-8 w-8 place-items-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-white/10 dark:hover:text-white">
-                    <X size={16} />
-                  </button>
-                ) : undefined
-              }
-            />
-            {(market === 'all' || market === 'cs2') && needle.length >= 2 && (
-              <SkinSuggest query={needle} onMatch={setSkinMatch} onPick={openSkin} />
-            )}
+            <SkinSuggest query={needle} onMatch={setSkinMatch} onPick={openSkin} />
           </div>
       )}
         </div>

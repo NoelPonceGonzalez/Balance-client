@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { Dock } from '@/components/dock/Dock';
+import { DockSearchProvider } from '@/components/dock/dock-search';
 import { LayoutDashboard, Target, Settings, ArrowLeftRight, LineChart } from 'lucide-react';
 import { FixedCheck } from '@/components/FixedCheck';
 import { OfferNotice } from '@/components/OfferNotice';
@@ -150,6 +151,7 @@ export function Shell({
   return (
     <ChromeHidden.Provider value={hideChrome}>
     <OfferFocusContext.Provider value={setFocusedOffer}>
+    <DockSearchProvider scope={section}>
     <div className="relative flex h-dvh flex-col overflow-hidden bg-[var(--app-bg)] text-[var(--app-text)]">
       <header aria-hidden={bare} style={section === 'market' ? { background: 'var(--market-tint, transparent)' } : section === 'plans' ? { background: 'var(--app-bg)' } : undefined} className={cn('relative z-10 grid shrink-0 transition-[grid-template-rows,opacity] duration-300 ease-out', bare ? 'pointer-events-none grid-rows-[0fr] opacity-0' : 'grid-rows-[1fr] opacity-100')}>
         <div className="min-h-0 overflow-hidden">
@@ -178,6 +180,7 @@ export function Shell({
       </main>
       <Dock section={section} onChange={onChange} onTicket={onTicket} scrollRef={scrollRef} />
     </div>
+    </DockSearchProvider>
     </OfferFocusContext.Provider>
     </ChromeHidden.Provider>
   );

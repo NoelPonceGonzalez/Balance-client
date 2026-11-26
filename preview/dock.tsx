@@ -13,6 +13,7 @@ import { Shell, type Section } from '@/components/Shell';
 import { Dashboard } from '@/views/Dashboard';
 import { installSquish } from '@/lib/squish';
 import { previewResponse } from './fixtures';
+import { matchesSearch, useDockSearch } from '@/components/dock/dock-search';
 
 const params = new URLSearchParams(location.search);
 if (params.get('theme') === 'dark') document.documentElement.classList.add('dark');
@@ -38,17 +39,17 @@ function rows(count: number, seed: number) {
 }
 
 function MarketScreen() {
+  const [query] = useDockSearch('Buscar activos');
   return (
     <div className="mx-auto max-w-3xl pb-28">
       <h1 className="pt-2 text-[28px] font-semibold tracking-tight">Mercado</h1>
-      <input data-dock-ignore placeholder="Buscar activo" className="mt-3 h-10 w-full rounded-xl bg-slate-100 px-3 text-[15px] outline-none dark:bg-white/10" />
       <div className="market-pills no-scrollbar -mx-3 mt-3 flex gap-2 overflow-x-auto px-3">
         {['Todo', 'Acciones', 'ETF', 'Cripto', 'Materias primas', 'Divisas', 'Skins'].map((label, index) => (
           <span key={label} className={`shrink-0 rounded-full px-3 py-1.5 text-[13px] font-semibold ${index === 0 ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950' : 'bg-slate-100 text-slate-600 dark:bg-white/10 dark:text-slate-300'}`}>{label}</span>
         ))}
       </div>
       <ul className="mt-3 divide-y divide-slate-100 dark:divide-white/10">
-        {rows(48, 1.7).map(({ index, n, up }) => (
+        {rows(48, 1.7).filter(({ index }) => matchesSearch(query, TICKERS[index % TICKERS.length], `#${index + 1}`)).map(({ index, n, up }) => (
           <li key={index} className="flex items-center justify-between py-3.5">
             <span>
               <span className="block text-[15px] font-semibold">{TICKERS[index % TICKERS.length]}</span>
@@ -66,16 +67,14 @@ function MarketScreen() {
 }
 
 function MovementsScreen() {
+  const [query] = useDockSearch('Buscar movimientos');
   return (
     <div className="mx-auto max-w-3xl pb-28">
       <div className="sticky -top-2 z-20 -mx-3 bg-[var(--app-bg)] px-3 py-2">
         <h1 className="text-[28px] font-semibold tracking-tight">Movimientos</h1>
-        {/* Misma estructura que la pantalla real: el buscador vive dentro de «Buscar y fechas». */}
+        {/* Como la pantalla real: «Tipo y fechas» sin buscador propio; la búsqueda es la del dock. */}
         <details className="mt-1">
-          <summary className="cursor-pointer text-[13px] font-semibold text-slate-400">Buscar y fechas</summary>
-          <label className="mt-2 block text-[13px] font-semibold text-slate-500">Buscar
-            <input placeholder="Descripción o categoría" className="mt-1 h-10 w-full rounded-xl bg-slate-100 px-3 text-[15px] outline-none dark:bg-white/10" />
-          </label>
+          <summary className="cursor-pointer text-[13px] font-semibold text-slate-400">Tipo y fechas</summary>
         </details>
         <div className="mt-2 flex gap-2 text-[13px] font-semibold">
           {['Todos', 'Entradas', 'Salidas', 'Inversión'].map((label, index) => (
@@ -84,7 +83,7 @@ function MovementsScreen() {
         </div>
       </div>
       <ul className="divide-y divide-slate-100 dark:divide-white/10">
-        {rows(80, 2.3).map(({ index, n, up }) => (
+        {rows(80, 2.3).filter(({ index, up }) => matchesSearch(query, `${up ? 'Ingreso' : 'Pago'} sintético ${index + 1}`)).map(({ index, n, up }) => (
           <li key={index} className="flex items-center justify-between py-3">
             <span>
               <span className="block text-[15px] font-semibold">{up ? 'Ingreso' : 'Pago'} sintético {index + 1}</span>
@@ -99,17 +98,18 @@ function MovementsScreen() {
 }
 
 function PlansScreen() {
+  const [query] = useDockSearch('Buscar planes');
   return (
     <div className="mx-auto max-w-3xl space-y-3 pb-28">
       <h1 className="pt-2 text-[28px] font-semibold tracking-tight">Planes</h1>
-      {['Viaje a Lisboa', 'Fondo de emergencia', 'Tandas de MSCI World'].map((name, index) => (
+      {['Viaje a Lisboa', 'Fondo de emergencia', 'Tandas de MSCI World'].filter((name) => matchesSearch(query, name)).map((name, index) => (
         <div key={name} className="rounded-3xl bg-white p-4 ring-1 ring-slate-200/70 dark:bg-white/5 dark:ring-white/10">
           <p className="text-[15px] font-semibold">{name}</p>
           <p className="mt-1 text-[13px] text-slate-400">Plan sintético · {[42, 68, 15][index]} % completado</p>
           <div className="mt-3 h-1.5 rounded-full bg-slate-100 dark:bg-white/10"><div className="h-full rounded-full bg-slate-950 dark:bg-white" style={{ width: `${[42, 68, 15][index]}%` }} /></div>
         </div>
       ))}
-      <p className="pt-2 text-center text-[13px] text-slate-400">Pantalla corta: el dock se queda expandido.</p>
+      <p className="pt-2 text-center text-[13px] text-slate-400">Pantalla corta: el dock se queda expandido. Toca Planes otra vez para buscar.</p>
     </div>
   );
 }
