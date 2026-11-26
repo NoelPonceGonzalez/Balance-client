@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode, useLayoutEffect } from 'react';
 import { matchesSearch, useDockSearch } from '@/components/dock/dock-search';
 import { bindHold, HoldMenu, holdItemClass, placeMenu } from '@/components/HoldMenu';
 import { createPortal } from 'react-dom';
@@ -7,7 +7,11 @@ import { Check, ChevronDown, ChevronLeft, ChevronRight, Copy, GripVertical, Imag
 import { ModalClose, modalPanelClass, Overlay } from '@/components/Modal';
 import { OriginGlyph, OriginPicker } from '@/components/OriginMark';
 import { PlatformLogo } from '@/components/PlatformLogo';
-import { QuietLoad, markReady, arriveTokenNow } from '@/components/QuietLoad';
+import { markReady, arriveTokenNow } from '@/components/QuietLoad';
+import { Segmented } from '@/components/Segmented';
+import { Bone } from '@/components/Skeleton';
+import { captureFlip, playFlip } from '@/lib/flip';
+import { cachedApi, peek } from '@/lib/query';
 import { Button } from '@/components/ui/Button';
 import { Input, fieldClass } from '@/components/ui/Input';
 import { api } from '@/lib/api';
@@ -503,9 +507,31 @@ function shiftMonths(months: PlanMonthView[], key: string, paid: boolean): PlanM
   }));
 }
 
+/** Solo la primera visita de la sesión hace entrar las filas; al volver, la lista ya está. */
+let plansSeen = false;
+
+/** Hueco de la lista de planes: nombre, importe grande y barra, como las filas reales. */
+function PlanBones() {
+  return (
+    <div role="status" aria-busy="true" aria-live="polite" className="divide-y divide-slate-100 dark:divide-white/[0.08]">
+      <span className="sr-only">Cargando planes</span>
+      <Bone className="mb-3 h-9 w-full rounded-full" />
+      {Array.from({ length: 3 }, (_, index) => (
+        <div key={index} className="space-y-3 py-4">
+          <div className="flex justify-between"><Bone className="h-4 w-40" /><Bone className="h-4 w-12" /></div>
+          <Bone className="h-7 w-36" />
+          <Bone className="h-1 w-full rounded-full" />
+          <Bone className="h-3.5 w-32" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function Plans({ embedded = false, books = 0, userId = '', focusId = null, focusTick = 0 }: { embedded?: boolean; books?: number; userId?: string; focusId?: string | null; focusTick?: number }) {
-  const [items, setItems] = useState<PlanItem[]>([]);
-  const [accounts, setAccounts] = useState<AccountRow[]>([]);
+  // Lo último conocido se pinta al instante y se revalida (D029: cualquier escritura vacía la caché).
+  const [items, setItems] = useState<PlanItem[]>(() => peek<{ plans: PlanItem[] }>('/api/plans')?.plans ?? []);
+  const [accounts, setAccounts] = useState<AccountRow[]>(() => peek<{ accounts: AccountRow[] }>('/api/accounts')?.accounts ?? []);
   const [selected, setSelected] = useState<string | null>(null);
   const [monthOpen, setMonthOpen] = useState<Record<string, boolean>>({});
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -524,7 +550,7 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
   const [textSheet, setTextSheet] = useState<PlanTextView | null>(null);
   const [sheet, setSheet] = useState<{ url: string; blob: Blob; fileName: string } | null>(null);
   const [copied, setCopied] = useState(false);
-  const [ready, setReady] = useState(false);
+  const [ready, setReady] = useState(() => peek('/api/plans') != null);
   const [previewDay, setPreviewDay] = useState<string | null>(null);
   const suppressCard = useRef(false);
   const focusRef = useRef(focusId);
@@ -536,7 +562,7 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
   const marking = useRef(new Set<string>());
 
   const load = async () => {
-    const planData = await api<{ plans: PlanItem[] }>('/api/plans');
+    const planData = await cachedApi<{ plans: PlanItem[] }>('/api/plans', { force: true });
     setItems(planData.plans);
     setSelected((current) => {
       const keep = current || focusRef.current;
@@ -568,7 +594,7 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
       setReady(true);
       if (arriveTokenNow() === token) markReady();
     });
-    api<{ accounts: AccountRow[] }>('/api/accounts')
+    cachedApi<{ accounts: AccountRow[] }>('/api/accounts', { maxAge: 30_000 })
       .then((data) => setAccounts(data.accounts))
       .catch(() => setAccounts([]));
     return () => { cancelled = true; };
@@ -615,6 +641,35 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
 
   const current = items.find((item) => docId(item.plan) === selected) || null;
   const plan = current?.plan;
+  const rootRef = useRef<HTMLDivElement>(null);
+  const listScroll = useRef(0);
+  const [rise] = useState(() => !plansSeen);
+  useEffect(() => { plansSeen = true; }, []);
+  useLayoutEffect(() => {
+    const scroller = rootRef.current?.closest<HTMLElement>('.app-scroll');
+    if (!scroller) return undefined;
+    if (selected) {
+      // Detalle: empieza arriba y el nombre, el importe y la barra vuelan desde la fila pulsada.
+      if (scroller.scrollTop > 0) scroller.scrollTop = 0;
+      playFlip(rootRef.current);
+      return undefined;
+    }
+    // Lista: vuelve a donde estaba (la lista puede tardar unos fotogramas en tener su altura).
+    const target = listScroll.current;
+    let frame = 0;
+    let tries = 0;
+    const apply = () => {
+      scroller.scrollTop = target;
+      if (Math.abs(scroller.scrollTop - target) > 1 && tries++ < 20) frame = window.requestAnimationFrame(apply);
+    };
+    if (target > 0) apply();
+    const remember = () => { listScroll.current = scroller.scrollTop; };
+    scroller.addEventListener('scroll', remember, { passive: true });
+    return () => {
+      window.cancelAnimationFrame(frame);
+      scroller.removeEventListener('scroll', remember);
+    };
+  }, [selected]);
   const menuPlan = cardMenu ? items.find((entry) => docId(entry.plan) === cardMenu.id) : null;
   const forecast = current?.forecast;
   const months = forecast?.months || [];
@@ -971,7 +1026,7 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
 
   if (plan?.kind === 'gastos') {
     return (
-      <div className={embedded ? 'space-y-4' : 'mx-auto max-w-3xl space-y-4'}>
+      <div ref={rootRef} className={embedded ? 'space-y-4' : 'mx-auto max-w-3xl space-y-4'}>
         {error && <p className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">{error}</p>}
         <TripPlan plan={plan} split={current?.split} userId={userId} onBack={() => setSelected(null)} onChanged={load} />
       </div>
@@ -979,7 +1034,7 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
   }
 
   return (
-    <div className={embedded ? 'space-y-4' : 'mx-auto max-w-3xl space-y-4'}>
+    <div ref={rootRef} className={embedded ? 'space-y-4' : 'mx-auto max-w-3xl space-y-4'}>
       {plan && (
         <div className="sticky -top-2 z-30 -mt-2 mx-[calc(50%-50vw)] bg-[var(--app-bg)] px-3 pb-4 pt-4 sm:px-4 md:px-8">
           <div aria-hidden className="pointer-events-none absolute inset-x-0 top-full h-8 bg-gradient-to-b from-[var(--app-bg)] to-transparent" />
@@ -994,7 +1049,7 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
                 <ChevronLeft size={17} />
               </button>
               <div className="min-w-0 text-center">
-                <p className="truncate text-[15px] font-semibold tracking-tight">{plan.name}</p>
+                <p data-flip-to="name" className="truncate text-[15px] font-semibold tracking-tight">{plan.name}</p>
                 <p className="truncate text-[11px] font-semibold text-slate-400">{kindLabel(plan)}{linked[0] ? ` · ${linked[0].name}` : ''}</p>
               </div>
               <span className="justify-self-end rounded-full bg-slate-900/[0.05] px-2.5 py-1 text-[11px] font-semibold tabular-nums text-slate-500 dark:bg-white/10 dark:text-slate-300">
@@ -1015,7 +1070,7 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
             ) : (
               <HeroCard>
                 <div className="flex items-end justify-between gap-3">
-                  <p className="text-[2rem] font-semibold leading-none tabular-nums tracking-[-0.03em] text-slate-900 dark:text-white"><SoftEur value={shownBalance} /></p>
+                  <p data-flip-to="value" className="text-[2rem] font-semibold leading-none tabular-nums tracking-[-0.03em] text-slate-900 dark:text-white"><SoftEur value={shownBalance} /></p>
                   {finished ? (
                     <span className="inline-flex items-center gap-1 text-[12px] font-bold text-[#16c784]"><Check size={13} strokeWidth={3} /> Completado</span>
                   ) : (
@@ -1040,31 +1095,18 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
         </div>
       )}
       {error && <p className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">{error}</p>}
-      {!ready && !plan && <QuietLoad />}
+      {!ready && !plan && <PlanBones />}
       {ready && !selected && rows.length > 0 && (
-        <div className="flex gap-1.5 overflow-x-auto" role="tablist" aria-label="Filtrar planes">
-          {FILTERS.map((option) => {
-            const count = option.id === 'all' ? rows.length : rows.filter((row) => (option.id === 'over') === row.over).length;
-            return (
-              <button
-                key={option.id}
-                type="button"
-                role="tab"
-                aria-selected={filter === option.id}
-                onClick={() => pickFilter(option.id)}
-                className={cn(
-                  'shrink-0 rounded-full px-3.5 py-1.5 text-[13px] font-semibold transition-colors',
-                  filter === option.id ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900' : 'bg-slate-900/[0.05] text-slate-500 dark:bg-white/10 dark:text-slate-300',
-                )}
-              >
-                {option.label} <span className="tabular-nums opacity-60">{count}</span>
-              </button>
-            );
-          })}
-        </div>
+        <Segmented
+          id="plan-filter"
+          label="Filtrar planes"
+          value={filter}
+          onChange={pickFilter}
+          options={FILTERS.map((option) => ({ id: option.id, label: `${option.label} ${option.id === 'all' ? rows.length : rows.filter((row) => (option.id === 'over') === row.over).length}` }))}
+        />
       )}
       {ready && !selected && (
-        <div className="grid grid-cols-1 gap-3 min-[480px]:grid-cols-2">
+        <div className="divide-y divide-slate-100 dark:divide-white/[0.08]">
           {listed.length === 0 && rows.length > 0 && (
             <p className="col-span-full px-1 py-2 text-sm font-medium text-slate-400">
               {filter === 'over' ? 'Todavía no hay planes terminados.' : 'No hay planes en marcha.'}
@@ -1091,7 +1133,7 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
                     }
                     setSelected(id);
                   }}
-                  className="hold-target plan-rise cursor-pointer rounded-[28px] bg-white p-4 text-left ring-1 ring-slate-200/70 dark:bg-slate-900 dark:ring-white/10"
+                  className={cn('hold-target -mx-2 cursor-pointer rounded-2xl px-2 py-4 text-left transition-colors duration-150 active:bg-slate-50 dark:active:bg-white/[0.04]', rise && 'plan-rise')}
                 >
                   <TripFace
                     plan={item.plan}
@@ -1126,7 +1168,7 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
                     }
                     setSelected(id);
                   }}
-                  className="hold-target plan-rise cursor-pointer rounded-[28px] bg-white p-4 text-left ring-1 ring-slate-200/70 dark:bg-slate-900 dark:ring-white/10"
+                  className={cn('hold-target -mx-2 cursor-pointer rounded-2xl px-2 py-4 text-left transition-colors duration-150 active:bg-slate-50 dark:active:bg-white/[0.04]', rise && 'plan-rise')}
                 >
                   <span className="flex items-start justify-between gap-2">
                     <span className="flex min-w-0 items-center gap-2">
@@ -1167,19 +1209,20 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
                   event.preventDefault();
                   setCardMenu({ id, ...placeMenu(event.clientX, event.clientY), confirm: false });
                 }}
-                onClick={() => {
+                onClick={(event) => {
                   if (suppressCard.current) {
                     suppressCard.current = false;
                     return;
                   }
+                  captureFlip(event.currentTarget);
                   setSelected(id);
                 }}
-                className="hold-target plan-rise cursor-pointer rounded-[28px] bg-white p-4 text-left ring-1 ring-slate-200/70 dark:bg-slate-900 dark:ring-white/10"
+                className={cn('hold-target -mx-2 cursor-pointer rounded-2xl px-2 py-4 text-left transition-colors duration-150 active:bg-slate-50 dark:active:bg-white/[0.04]', rise && 'plan-rise')}
               >
                 <span className="flex items-start justify-between gap-2">
                   <span className="flex min-w-0 items-center gap-2">
                     {site && <PlatformLogo name={site.platform || site.name} size={22} />}
-                    <span className="min-w-0 truncate text-sm font-semibold">{item.plan.name}</span>
+                    <span data-flip="name" className="min-w-0 truncate text-[15px] font-semibold">{item.plan.name}</span>
                     <button
                       type="button"
                       data-menu
@@ -1204,9 +1247,9 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
                   )}
                 </span>
                 <span className="mt-2 block text-[11px] font-semibold text-slate-400">{kindLabel(item.plan)}</span>
-                <span className="mt-3 block whitespace-nowrap text-[1.65rem] font-semibold leading-none tabular-nums tracking-tight"><SoftEur value={balance} /></span>
+                <span data-flip="value" className="mt-3 block whitespace-nowrap text-[1.65rem] font-semibold leading-none tabular-nums tracking-tight"><SoftEur value={balance} /></span>
                 {jointLine(item.forecast, site) && <span className="mt-2 block text-[12px] font-medium leading-snug text-slate-400">{jointLine(item.forecast, site)}</span>}
-                <span className="mt-4 block h-0.5 overflow-hidden rounded-full bg-slate-200/80 dark:bg-white/10">
+                <span data-flip="bar" className="mt-4 block h-0.5 overflow-hidden rounded-full bg-slate-200/80 dark:bg-white/10">
                   <span className={cn('block h-full rounded-full transition-[width] duration-700', done ? 'bg-[#16c784]' : 'bg-slate-900 dark:bg-white')} style={{ width: `${barWidth(balance, item.plan.targetAmount)}%` }} />
                 </span>
                 <span className="mt-2 block text-[13px] font-medium text-slate-400">{done ? `Llegó el ${shortDay(done.day)}` : `Objetivo ${formatEur(item.plan.targetAmount)}`}</span>
@@ -1216,10 +1259,10 @@ export function Plans({ embedded = false, books = 0, userId = '', focusId = null
           <button
             type="button"
             onClick={() => { setEditing(null); setDraft(blank()); }}
-            className="flex min-h-28 flex-col items-center justify-center gap-2 rounded-[28px] border border-dashed border-slate-300 text-sm font-semibold text-slate-500 transition-colors hover:bg-white dark:border-white/15 dark:hover:bg-white/5"
+            className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-3 rounded-2xl px-2 py-3.5 text-left text-slate-500 transition-colors hover:text-slate-700 active:bg-slate-50 dark:text-slate-400 dark:hover:text-slate-200 dark:active:bg-white/[0.04]"
           >
-            <Plus size={18} />
-            Nuevo plan
+            <span className="grid h-[38px] w-[38px] shrink-0 place-items-center rounded-full bg-slate-100 dark:bg-white/[0.08]"><Plus size={16} /></span>
+            <span className="text-[15px] font-semibold">Nuevo plan</span>
           </button>
         </div>
       )}
@@ -2097,7 +2140,7 @@ function HeroCard({ children, onToggle, open }: { tone?: HeroTone; children: Rea
 function HeroBar({ share, tone }: { share: number; tone: HeroTone }) {
   const fill = tone === 'up' ? 'from-[#16c784] to-[#3ee0a1]' : tone === 'down' ? 'from-[#ea3943] to-[#ff7a82]' : 'from-slate-800 to-slate-500 dark:from-white dark:to-slate-300';
   return (
-    <div className="mt-3.5 h-1 overflow-hidden rounded-full bg-slate-900/[0.07] dark:bg-white/10">
+    <div data-flip-to="bar" className="mt-3.5 h-1 overflow-hidden rounded-full bg-slate-900/[0.07] dark:bg-white/10">
       <div className={cn('h-full rounded-full bg-gradient-to-r transition-[width] duration-700 ease-out', fill)} style={{ width: `${Math.max(0, Math.min(100, share))}%` }} />
     </div>
   );
@@ -2126,9 +2169,13 @@ function SoftEur({ value, signed = false, whole = false }: { value: number; sign
       const progress = Math.min(1, (now - began) / 560);
       const eased = 1 - (1 - progress) ** 3;
       const next = start + (value - start) * eased;
-      setShown(next);
-      if (progress < 1) frame = requestAnimationFrame(tick);
-      else from.current = value;
+      if (progress < 1) {
+        setShown(next);
+        frame = requestAnimationFrame(tick);
+      } else {
+        setShown(value);
+        from.current = value;
+      }
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);

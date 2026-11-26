@@ -10,7 +10,7 @@
  */
 import { SPRING_EASE } from '@/lib/motion';
 
-type Role = 'logo' | 'name' | 'value';
+type Role = 'logo' | 'name' | 'value' | 'bar';
 let pending: { rects: Partial<Record<Role, DOMRect>>; at: number } | null = null;
 
 function still(): boolean {
@@ -21,7 +21,7 @@ function still(): boolean {
 export function captureFlip(row: Element | null, pieces?: Partial<Record<Role, Element | null>>) {
   if (!row || still()) return;
   const rects: Partial<Record<Role, DOMRect>> = {};
-  for (const role of ['logo', 'name', 'value'] as Role[]) {
+  for (const role of ['logo', 'name', 'value', 'bar'] as Role[]) {
     const el = pieces?.[role] ?? row.querySelector(`[data-flip="${role}"]`);
     if (el) rects[role] = el.getBoundingClientRect();
   }
@@ -41,12 +41,13 @@ export function playFlip(target: Element | null) {
     if (!to.width || !to.height) continue;
     const dx = from.left - to.left;
     const dy = from.top - to.top;
-    // El texto escala por altura (conserva la proporción de la letra); el logo, por su lado mayor.
-    const scale = role === 'logo' ? Math.max(from.width, from.height) / Math.max(to.width, to.height) : from.height / to.height;
-    if (Math.abs(dx) < 1 && Math.abs(dy) < 1 && Math.abs(scale - 1) < 0.01) continue;
+    // El texto escala por altura (conserva la proporción de la letra); el logo, por su lado mayor; la barra, por ejes.
+    const sx = role === 'logo' ? Math.max(from.width, from.height) / Math.max(to.width, to.height) : role === 'bar' ? from.width / to.width : from.height / to.height;
+    const sy = role === 'bar' ? from.height / to.height : sx;
+    if (Math.abs(dx) < 1 && Math.abs(dy) < 1 && Math.abs(sx - 1) < 0.01 && Math.abs(sy - 1) < 0.01) continue;
     el.animate(
       [
-        { transformOrigin: '0 0', transform: `translate(${dx}px, ${dy}px) scale(${scale})`, opacity: role === 'value' ? 0.6 : 1 },
+        { transformOrigin: '0 0', transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`, opacity: role === 'value' ? 0.6 : 1 },
         { transformOrigin: '0 0', transform: 'none', opacity: 1 },
       ],
       { duration: role === 'logo' ? 560 : 520, easing: SPRING_EASE },

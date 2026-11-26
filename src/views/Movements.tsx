@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useDockSearch } from '@/components/dock/dock-search';
 import { PlatformLogo } from '@/components/PlatformLogo';
-import { QuietLoad, markReady, arriveTokenNow } from '@/components/QuietLoad';
+import { markReady, arriveTokenNow } from '@/components/QuietLoad';
+import { RowBones } from '@/components/Skeleton';
+import { cachedApi, cacheEpoch, onCacheReset, peek } from '@/lib/query';
 import { Field, Input, fieldClass } from '@/components/ui/Input';
 import { EntrySheet } from '@/components/EntrySheet';
 import { LimitOrders } from '@/components/LimitOrders';
@@ -89,16 +91,42 @@ function emptyDraft(accountId = ''): Draft {
   return { type: 'expense', date: today(), amount: '', currency: 'EUR', category: '', description: '', accountId, counterAccountId: '', holdingId: '', quantity: '', direction: 'out', fee: '', applyToBalances: true };
 }
 
+/** Movimientos ya descargados por filtro (todas las páginas). Se vacía con cualquier escritura o cambio de sesión. */
+const moveMemo = new Map<string, { rows: MovementRow[]; complete: boolean; at: number }>();
+const MOVE_KEEP = 60_000;
+onCacheReset(() => moveMemo.clear());
+/** Grupos que se pintan de entrada; el resto llega al acercarse al final (historiales largos). */
+const FIRST_GROUPS = 120;
+const MORE_GROUPS = 240;
+
+function filterKey(filters: Record<string, string>): string {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => { if (value) params.set(key, value); });
+  return params.toString();
+}
+
+function remembered(key: string) {
+  cacheEpoch();
+  const hit = moveMemo.get(key);
+  return hit && Date.now() - hit.at < MOVE_KEEP ? hit : null;
+}
+
 export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
   const now = new Date();
   const initialYear = String(now.getFullYear());
   const initialMonth = String(now.getMonth() + 1).padStart(2, '0');
-  const [rows, setRows] = useState<MovementRow[]>([]);
-  const [accounts, setAccounts] = useState<AccountRow[]>([]);
-  const [holdings, setHoldings] = useState<HoldingRow[]>([]);
   const [year, setYear] = useState(initialYear);
   const [month, setMonth] = useState(initialMonth);
   const [filters, setFilters] = useState({ q: '', type: '', accountId: '', ...periodRange(initialYear, initialMonth) });
+  const firstKey = filterKey(filters);
+  const [rows, setRows] = useState<MovementRow[]>(() => remembered(firstKey)?.rows ?? []);
+  const [accounts, setAccounts] = useState<AccountRow[]>(() => peek<{ accounts: AccountRow[] }>('/api/accounts')?.accounts ?? []);
+  const [holdings, setHoldings] = useState<HoldingRow[]>(() => peek<{ holdings: HoldingRow[] }>('/api/holdings')?.holdings ?? []);
+  // Filtro al que pertenecen las filas pintadas: si no coincide con el pedido, la lista se marca como «actualizando».
+  const [shownKey, setShownKey] = useState<string | null>(() => (remembered(firstKey) ? firstKey : null));
+  const loadSeq = useRef(0);
+  const [limit, setLimit] = useState(FIRST_GROUPS);
+  const moreRef = useRef<HTMLDivElement>(null);
   // Buscador único del dock (D025): el texto viaja al servidor como antes (filters.q), con una pausa breve.
   const [dockQuery] = useDockSearch('Buscar movimientos');
   useEffect(() => {
@@ -113,29 +141,44 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
   const [duplicate, setDuplicate] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [error, setError] = useState('');
-  const [ready, setReady] = useState(false);
+  const [ready, setReady] = useState(() => remembered(firstKey) != null);
   const [openGroup, setOpenGroup] = useState<string | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const [taxYear, setTaxYear] = useState(initialYear);
   const [cut, setCut] = useState(false);
 
   const load = async () => {
-    const params = new URLSearchParams();
-    Object.entries(filters).forEach(([key, value]) => { if (value) params.set(key, value); });
+    const key = filterKey(filters);
+    const params = new URLSearchParams(key);
+    // Solo vale la última petición: una respuesta de un filtro anterior nunca pisa al nuevo.
+    const seq = ++loadSeq.current;
+    const epoch = cacheEpoch();
     const [movementData, accountData, holdingData] = await Promise.all([
       loadMovementPages<MovementRow>(params),
-      api<{ accounts: AccountRow[] }>('/api/accounts'),
-      api<{ holdings: HoldingRow[] }>('/api/holdings'),
+      cachedApi<{ accounts: AccountRow[] }>('/api/accounts', { maxAge: 30_000 }),
+      cachedApi<{ holdings: HoldingRow[] }>('/api/holdings', { maxAge: 30_000 }),
     ]);
+    if (seq !== loadSeq.current) return;
+    if (movementData.complete && epoch === cacheEpoch()) moveMemo.set(key, { rows: movementData.rows, complete: true, at: Date.now() });
     setRows(movementData.rows);
     setCut(!movementData.complete);
     setAccounts(accountData.accounts);
     setHoldings(holdingData.holdings);
+    setShownKey(key);
   };
+  const wantKey = filterKey(filters);
+  const updating = ready && shownKey !== wantKey;
+  useEffect(() => { setLimit(FIRST_GROUPS); }, [wantKey]);
 
   useEffect(() => {
     let cancelled = false;
     const token = arriveTokenNow();
+    const hit = remembered(filterKey(filters));
+    if (hit) {
+      setRows(hit.rows);
+      setCut(!hit.complete);
+      setShownKey(filterKey(filters));
+    }
     load().catch((err: Error) => { if (!cancelled) setError(err.message); }).finally(() => {
       if (cancelled) return;
       setReady(true);
@@ -198,6 +241,29 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
     }
     return out;
   }, [grouped, sort.key]);
+
+  const totalGroups = grouped.length;
+  const visibleSections = useMemo(() => {
+    if (totalGroups <= limit) return sections;
+    const out: typeof sections = [];
+    let left = limit;
+    for (const section of sections) {
+      if (left <= 0) break;
+      const groups = section.groups.slice(0, left);
+      left -= groups.length;
+      out.push({ ...section, groups });
+    }
+    return out;
+  }, [sections, totalGroups, limit]);
+  useEffect(() => {
+    const sentinel = moreRef.current;
+    if (!sentinel || totalGroups <= limit) return undefined;
+    const watch = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) setLimit((value) => value + MORE_GROUPS);
+    }, { rootMargin: '900px 0px' });
+    watch.observe(sentinel);
+    return () => watch.disconnect();
+  }, [totalGroups, limit, visibleSections]);
 
   const accountOf = (id?: string | null) => accounts.find((account) => docId(account) === id);
   const nameOf = (id?: string | null) => accountOf(id)?.name || '—';
@@ -279,7 +345,7 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
       </div>
       {ready && <LimitOrders holdings={holdings} onBooked={() => { void load(); }} />}
       {error && <p className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">{error}</p>}
-      {cut && <p className="rounded-2xl bg-white px-4 py-3 text-sm font-medium text-slate-500">Faltan los movimientos más antiguos.</p>}
+      {cut && <p className="rounded-2xl bg-slate-100/80 px-4 py-3 text-sm font-medium text-slate-500 dark:bg-white/[0.06] dark:text-slate-400">Faltan los movimientos más antiguos.</p>}
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
         <select className={fieldClass} aria-label="Sitio" value={filters.accountId} onChange={(event) => setFilters({ ...filters, accountId: event.target.value })}>
           <option value="">Todos los sitios</option>
@@ -330,18 +396,19 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
           <Input label="Hasta" type="date" value={filters.to} onChange={(e) => setFilters({ ...filters, to: e.target.value })} />
         </div>
       </details>
-      {!ready && <QuietLoad kind="rows" />}
-      {ready && sections.length === 0 && (
-        <div className="rounded-[28px] bg-white px-4 py-8 text-center text-sm text-slate-500 ring-1 ring-slate-200/70 dark:bg-slate-900 dark:ring-white/10">
+      {!ready && <RowBones count={8} logo={36} />}
+      {ready && !updating && sections.length === 0 && (
+        <div className="px-4 py-10 text-center text-[15px] text-slate-400">
           No hay movimientos en este periodo.
           {year === initialYear && <button type="button" className="mt-3 block w-full font-semibold text-slate-900 dark:text-white" onClick={() => { const previous = String(Number(initialYear) - 1); setYear(previous); setMonth(''); setFilters({ ...filters, ...periodRange(previous, '') }); }}>Ver {Number(initialYear) - 1}</button>}
         </div>
       )}
-      <div className="space-y-6">
-        {sections.map((section) => (
+      {updating && <p role="status" className="px-1 text-[13px] font-medium text-slate-400">Actualizando con el filtro nuevo…</p>}
+      <div aria-busy={updating} className={cn('space-y-6 transition-opacity duration-200', updating && 'pointer-events-none opacity-40')}>
+        {visibleSections.map((section) => (
           <section key={`${section.title}-${section.groups[0]?.id || ''}`}>
-            {section.title && <h3 className="px-1 pb-2 text-[13px] font-semibold text-slate-400">{section.title}</h3>}
-            <ul className="overflow-hidden rounded-[28px] bg-white ring-1 ring-slate-200/70 dark:bg-slate-900 dark:ring-white/10">
+            {section.title && <h3 className="pb-1 text-[13px] font-semibold text-slate-500 dark:text-slate-400">{section.title}</h3>}
+            <ul className="divide-y divide-slate-100 dark:divide-white/[0.08]">
               {section.groups.map((group) => {
                 const row = group.rows[0];
                 const many = group.rows.length > 1;
@@ -353,12 +420,12 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
                 const mark = row.type === 'transfer' && flow === 'flat' ? '' : signed > 0 ? '+' : signed < 0 ? '−' : '';
                 const shown = coin ? `${mark}${coin}` : `${mark}${formatMove(Math.abs(signed), row.currency)}`;
                 return (
-                  <li key={group.id} className="border-t border-slate-100 first:border-t-0 dark:border-white/10">
-                    <button type="button" onClick={() => { if (many) setOpenGroup(open ? null : group.id); else openEdit(row); }} className="flex w-full items-center gap-3 px-4 py-3 text-left">
+                  <li key={group.id}>
+                    <button type="button" onClick={() => { if (many) setOpenGroup(open ? null : group.id); else openEdit(row); }} className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-3 rounded-2xl px-2 py-3 text-left transition-colors duration-150 active:bg-slate-50 dark:active:bg-white/[0.04]">
                       <PlatformLogo name={accountOf(row.accountId)?.platform || nameOf(row.accountId)} size={36} />
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-[15px] font-semibold">{titleOf(row)}</span>
-                        <span className="mt-0.5 block truncate text-[12px] font-medium text-slate-400">
+                        <span className="mt-0.5 block truncate text-[13px] font-medium text-slate-400">
                           {many ? `${group.rows.length} apuntes · ${nameOf(row.accountId)}` : `${nameOf(row.accountId)} · ${kindOf(row)}${row.applyToBalances === false ? ' · guardado para la renta' : ''}`}
                         </span>
                       </span>
@@ -367,10 +434,10 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
                       </span>
                     </button>
                     {many && open && (
-                      <ul className="border-t border-slate-100 dark:border-white/10">
+                      <ul className="mb-2 rounded-2xl bg-slate-50/80 px-2 dark:bg-white/[0.04]">
                         {group.rows.map((item) => (
                           <li key={docId(item)} className="border-t border-slate-100 first:border-t-0 dark:border-white/10">
-                            <button type="button" onClick={() => openEdit(item)} className="flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left">
+                            <button type="button" onClick={() => openEdit(item)} className="flex w-full items-center justify-between gap-3 px-2 py-2.5 text-left">
                               <span className="text-[13px] font-medium text-slate-500">{formatDay(item.date)} · {(item.description.split('·')[1] || '').trim()}</span>
                               <span className={cn('text-xs font-semibold tabular-nums', toneOf(item))}>{(() => { const side = flowOf(item, filters.accountId); const prefix = item.type === 'transfer' ? (side === 'out' ? '−' : side === 'in' ? '+' : '') : (moveSign(item) < 0 ? '−' : '+'); return `${prefix}${figureOf(item) || formatMove(item.amount, item.currency)}`; })()}</span>
                             </button>
@@ -385,6 +452,11 @@ export function Movements({ embedded = false }: { embedded?: boolean } = {}) {
           </section>
         ))}
       </div>
+      {totalGroups > limit && (
+        <div ref={moreRef} className="py-4 text-center text-[13px] font-medium text-slate-400">
+          Mostrando {limit} de {totalGroups} · bajando aparecen más
+        </div>
+      )}
       {exportOpen && (
         <Modal title="Descargar movimientos" onClose={() => setExportOpen(false)}>
           <div className="space-y-5">

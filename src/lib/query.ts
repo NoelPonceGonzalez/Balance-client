@@ -19,14 +19,49 @@ interface Entry {
 
 const store = new Map<string, Entry>();
 let epoch = 0;
+const resetListeners = new Set<() => void>();
 
-onApiWrite(() => {
+function currentOwner(): string | null {
+  try {
+    return typeof localStorage === 'undefined' ? null : localStorage.getItem('pat_token');
+  } catch {
+    return null;
+  }
+}
+let owner = currentOwner();
+
+function reset() {
   epoch += 1;
   store.clear();
-});
+  resetListeners.forEach((listener) => listener());
+}
+
+/** Cada usuario (sesión) tiene su caché: si cambia la sesión, lo guardado se olvida antes de leer nada. */
+export function ensureOwner() {
+  const now = currentOwner();
+  if (now !== owner) {
+    owner = now;
+    reset();
+  }
+}
+
+/** Avisa cuando la caché se vacía (escritura o cambio de sesión): para memorias propias de cada pantalla. */
+export function onCacheReset(listener: () => void): () => void {
+  resetListeners.add(listener);
+  return () => { resetListeners.delete(listener); };
+}
+
+/** Contador de vaciados: una carga que empezó antes de un vaciado no debe guardarse. */
+export function cacheEpoch(): number {
+  ensureOwner();
+  return epoch;
+}
+
+onApiWrite(reset);
 
 /** Lo último guardado para `path`, si no supera `maxAge` ms (por defecto, cualquier edad). */
 export function peek<T>(path: string, maxAge = Infinity): T | undefined {
+  ensureOwner();
   const entry = store.get(path);
   if (!entry || entry.value === undefined || Date.now() - entry.at > maxAge) return undefined;
   return entry.value as T;
@@ -34,6 +69,7 @@ export function peek<T>(path: string, maxAge = Infinity): T | undefined {
 
 /** Milisegundos desde que se guardó `path` (null si no hay nada). */
 export function ageOf(path: string): number | null {
+  ensureOwner();
   const entry = store.get(path);
   return entry && entry.value !== undefined ? Date.now() - entry.at : null;
 }
@@ -43,6 +79,7 @@ export function ageOf(path: string): number | null {
  * Si ya hay una petición en vuelo para la misma ruta, se comparte.
  */
 export function cachedApi<T>(path: string, { maxAge = 0, force = false }: { maxAge?: number; force?: boolean } = {}): Promise<T> {
+  ensureOwner();
   const entry = store.get(path);
   if (!force && entry?.value !== undefined && Date.now() - entry.at <= maxAge) return Promise.resolve(entry.value as T);
   if (entry?.inflight) return entry.inflight as Promise<T>;

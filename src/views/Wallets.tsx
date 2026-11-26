@@ -1,5 +1,5 @@
 import { ChartBone } from '@/components/Skeleton';
-import { cachedApi, peek } from '@/lib/query';
+import { cachedApi, ensureOwner, onCacheReset, peek } from '@/lib/query';
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { matchesSearch, useDockSearch, useOpenDockSearch } from '@/components/dock/dock-search';
 import { AnimatePresence, motion } from 'motion/react';
@@ -11,7 +11,7 @@ import { Modal } from '@/components/Modal';
 import { EntrySheet } from '@/components/EntrySheet';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { api, onApiWrite, ApiError } from '@/lib/api';
+import { api, ApiError } from '@/lib/api';
 import { loadMovementPages } from '@/lib/history';
 import { shapeLine } from '@/lib/shape-line';
 import { OriginGlyph, OriginPicker } from '@/components/OriginMark';
@@ -649,7 +649,7 @@ const seriesMemo = new Map<string, { points: LinePoint[]; at: number }>();
 const movesMemo = new Map<string, { rows: BookedMove[]; at: number }>();
 const SERIES_KEEP = 10 * 60_000;
 const MOVES_KEEP = 60_000;
-onApiWrite(() => {
+onCacheReset(() => {
   seriesMemo.clear();
   movesMemo.clear();
 });
@@ -657,6 +657,7 @@ onApiWrite(() => {
 function useSeries(accountKey: string | null, group: string, holdingId: string | null = null): LinePoint[] | null {
   const key = accountKey ? `${accountKey}|${group}|${holdingId || ''}` : '';
   const remembered = (): LinePoint[] | null => {
+    ensureOwner();
     const hit = key ? seriesMemo.get(key) : undefined;
     return hit && Date.now() - hit.at < SERIES_KEEP ? hit.points : null;
   };
@@ -1011,6 +1012,7 @@ export function Wallets({ accounts, hidden, beat = 0, openId, paneSlot = null, o
     }
     let cancelled = false;
     const memoKey = `${openId}|${openCash ?? ''}`;
+    ensureOwner();
     const memo = movesMemo.get(memoKey);
     if (memo && Date.now() - memo.at < MOVES_KEEP) {
       setBooked(memo.rows);

@@ -1,9 +1,9 @@
 /**
- * Vista previa del Bloque B: Shell y dock reales, Resumen → Carteras y Mercado REALES con datos sintéticos
+ * Vista previa de los bloques B y C: Shell y dock reales, Resumen → Carteras y Mercado REALES con datos sintéticos
  * (./fixtures-b.ts). Las llamadas a /api se responden aquí, en el navegador: sin servidor ni base de datos.
  *
  * Uso en Windows: npm run dev → http://localhost:5181/preview/app.html
- *   ?theme=dark · ?section=market · ?slow=800 (conexión lenta: ms por petición)
+ *   ?theme=dark · ?section=market|plans|movements · ?slow=800 (conexión lenta: ms por petición) · ?moves=1000
  * Medición (solo aquí): window.__net (peticiones /api) y window.__prof (commits de React).
  * No forma parte del build de producción.
  */
@@ -13,8 +13,11 @@ import '../src/index.css';
 import { Shell, type Section } from '@/components/Shell';
 import { Dashboard } from '@/views/Dashboard';
 import { Market } from '@/views/Market';
+import { Plans } from '@/views/Plans';
+import { Movements } from '@/views/Movements';
 import { installSquish } from '@/lib/squish';
 import { previewResponseB } from './fixtures-b';
+import { previewResponseC } from './fixtures-c';
 
 const params = new URLSearchParams(location.search);
 if (params.get('theme') === 'dark') document.documentElement.classList.add('dark');
@@ -29,9 +32,12 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   const path = typeof input === 'string' ? input : input instanceof URL ? input.pathname + input.search : input.url;
   if (!path.startsWith('/api')) return realFetch(input, init);
   net.push({ path, at: Math.round(performance.now()) });
-  const body = previewResponseB(path, (init?.method || 'GET').toUpperCase());
+  const method = (init?.method || 'GET').toUpperCase();
+  const body = (method === 'GET' ? previewResponseC(path) : undefined) ?? previewResponseB(path, method);
   await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(resolve, slow);
+    // ?race=1: las respuestas filtradas por la cuenta nómina tardan 900 ms más (prueba de respuestas fuera de orden).
+    const late = params.get('race') === '1' && path.includes('accountId=acc-bank') ? 900 : 0;
+    const timer = setTimeout(resolve, slow + late);
     init?.signal?.addEventListener('abort', () => { clearTimeout(timer); reject(new DOMException('Aborted', 'AbortError')); });
   });
   return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -48,7 +54,9 @@ function Preview() {
       <Profiler id="pantalla" onRender={onRender}>
         {section === 'dashboard' && <Dashboard heroMs={5000} home={0} books={0} />}
         {section === 'market' && <Market />}
-        {(section === 'plans' || section === 'movements' || section === 'settings') && <p className="p-6 text-sm text-slate-500">Esta pantalla no forma parte de la vista previa del Bloque B.</p>}
+        {section === 'plans' && <Plans userId="preview" />}
+        {section === 'movements' && <Movements />}
+        {section === 'settings' && <p className="p-6 text-sm text-slate-500">Ajustes no forma parte de la vista previa.</p>}
       </Profiler>
     </Shell>
   );

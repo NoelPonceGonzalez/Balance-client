@@ -507,7 +507,7 @@ export function TripPlan({
 
       <section>
         <h3 className="mb-2 px-1 text-sm font-semibold">Gastos</h3>
-        <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white/70 dark:border-white/10 dark:bg-black/20">
+        <div className="divide-y divide-slate-100 dark:divide-white/[0.08]">
           {expenses.length === 0 && <p className="px-3 py-3 text-xs font-medium text-slate-400">Todavía no hay gastos.</p>}
           {expenses.map((expense, index) => {
             const id = String(expense._id || '');
@@ -515,15 +515,19 @@ export function TripPlan({
             const payerName = payer?.name || expense.paidByName || '';
             const gone = !payer && Boolean(expense.paidByName);
             return (
-              <button key={id} type="button" onClick={() => { if (phase === 'active') openExpense(expense); }} className={cn('flex w-full items-center gap-3 px-3 py-2.5 text-left', index > 0 && 'border-t border-slate-200/70 dark:border-white/10', phase !== 'active' && 'cursor-default')}>
+              <button key={id} type="button" onClick={() => { if (phase === 'active') openExpense(expense); }} className={cn('-mx-2 flex w-[calc(100%+1rem)] items-center gap-3 rounded-2xl px-2 py-3 text-left transition-colors active:bg-slate-50 dark:active:bg-white/[0.04]', phase !== 'active' && 'cursor-default')}>
                 <Mark name={payerName || expense.name} color={payer?.color || '#94a3b8'} light />
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-semibold">{expense.name}</span>
-                  <span className="mt-0.5 block truncate text-[11px] font-medium text-slate-400">
-                    {payerName ? (gone ? `${payerName} · se ha salido` : payerName) : 'Sin quien lo pague'} · {amongText(expense)}{expense.counts === false ? ' · Fuera' : ''}{expense.charge === 'pending' ? ' · Por aceptar' : ''}
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="truncate text-[15px] font-semibold">{expense.name}</span>
+                    {/* Pendiente ≠ confirmado: la etiqueta se ve siempre, sin depender de una animación. */}
+                    {expense.charge === 'pending' && <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800 dark:bg-amber-400/15 dark:text-amber-300">Por aceptar</span>}
+                  </span>
+                  <span className="mt-0.5 block truncate text-[13px] font-medium text-slate-400">
+                    {payerName ? (gone ? `${payerName} · se ha salido` : payerName) : 'Sin quien lo pague'} · {amongText(expense)}{expense.counts === false ? ' · Fuera' : ''}
                   </span>
                 </span>
-                <span className="shrink-0 text-sm font-semibold tabular-nums">{formatEur(expense.amount)}</span>
+                <span className={cn('shrink-0 text-[15px] font-semibold tabular-nums', expense.charge === 'pending' && 'text-slate-400')}>{formatEur(expense.amount)}</span>
               </button>
             );
           })}
