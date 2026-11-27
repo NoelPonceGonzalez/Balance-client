@@ -92,6 +92,7 @@ export function ScopeTabs({ value, onChange }: { value: 'general' | 'cartera'; o
             {on && (
               <motion.span
                 layoutId="resumen-scope"
+                layoutDependency={value}
                 transition={still ? { duration: 0 } : softSpring}
                 className="absolute inset-x-0 -bottom-px h-[2px] rounded-full bg-slate-950 dark:bg-white"
               />
@@ -103,6 +104,11 @@ export function ScopeTabs({ value, onChange }: { value: 'general' | 'cartera'; o
   );
 }
 
+/* Fluidez: con `layoutDependency` (la opción elegida) Motion solo mide y anima la raya o la pastilla cuando cambia
+   la elección. Sin ella, cada render del Resumen (datos, latido, scrub) pedía una medición completa del árbol de
+   proyección con lectura forzada del layout. El deslizamiento es el mismo: medido fotograma a fotograma, también
+   con el contenido desplazado. */
+
 /** Pastilla con indicador compartido. La usan los rangos y el cambio Línea / Reparto. */
 function Track({ id, children, className }: { id: string; children: ReactNode; className?: string }) {
   return (
@@ -112,11 +118,12 @@ function Track({ id, children, className }: { id: string; children: ReactNode; c
   );
 }
 
-function Mark({ layoutId }: { layoutId: string }) {
+function Mark({ layoutId, dep }: { layoutId: string; dep: string }) {
   const still = useReducedMotion();
   return (
     <motion.span
       layoutId={layoutId}
+      layoutDependency={dep}
       transition={still ? { duration: 0 } : softSpring}
       className="pointer-events-none absolute inset-0 rounded-full bg-slate-100 dark:bg-white/[0.12]"
     />
@@ -140,7 +147,7 @@ export function RangeBar({ value, onChange }: { value: LineRangeId; onChange: (n
               on ? 'text-slate-950 dark:text-white' : 'text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300',
             )}
           >
-            {on && <Mark layoutId="resumen-range" />}
+            {on && <Mark layoutId="resumen-range" dep={value} />}
             <span className="relative">{item.label}</span>
           </button>
         );
@@ -168,7 +175,7 @@ export function ChartToggle({ value, onChange }: { value: 'line' | 'ring'; onCha
               on ? 'text-slate-950 dark:text-white' : 'text-slate-400 dark:text-slate-500',
             )}
           >
-            {on && <Mark layoutId="resumen-chart" />}
+            {on && <Mark layoutId="resumen-chart" dep={value} />}
             <Icon size={16} strokeWidth={2.2} className="relative" />
           </button>
         );

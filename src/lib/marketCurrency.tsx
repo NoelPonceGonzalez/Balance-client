@@ -34,17 +34,21 @@ export function marketReady(): boolean {
   return current.code === 'EUR' || current.usdPerEur > 0;
 }
 
+const MONEY = new Map<string, Intl.NumberFormat>();
+
 export function marketMoney(value: number | null | undefined): string {
   if (value == null || Number.isNaN(value)) return '—';
   const shown = dollars() ? value * current.usdPerEur : value;
   const abs = Math.abs(shown);
   const digits = abs >= 1 ? 2 : abs >= 0.01 ? 4 : 6;
-  return new Intl.NumberFormat('es-ES', {
-    style: 'currency',
-    currency: dollars() ? 'USD' : 'EUR',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: digits,
-  }).format(shown);
+  const currency = dollars() ? 'USD' : 'EUR';
+  const key = `${currency}:${digits}`;
+  let format = MONEY.get(key);
+  if (!format) {
+    format = new Intl.NumberFormat('es-ES', { style: 'currency', currency, minimumFractionDigits: 2, maximumFractionDigits: digits });
+    MONEY.set(key, format);
+  }
+  return format.format(shown);
 }
 
 export function marketDisplay(eur: number): string {

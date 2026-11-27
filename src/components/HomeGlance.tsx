@@ -15,8 +15,11 @@ interface Glance {
   moments: string[];
 }
 
+const MADRID_DAY = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit' });
+const ONE_DECIMAL = new Intl.NumberFormat('es-ES', { maximumFractionDigits: 1 });
+
 function madridDay(value: string): string {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(value));
+  return MADRID_DAY.format(new Date(value));
 }
 
 /** Una sola señal que merezca mirar el plan, y el logro más reciente. Nada de listar cada tanda. */
@@ -41,7 +44,7 @@ function planHighlights(plans: { plan: PlanRow; invest?: PlanInvest }[], holding
 }
 
 function oneDecimal(value: number): string {
-  return new Intl.NumberFormat('es-ES', { maximumFractionDigits: 1 }).format(Math.abs(value));
+  return ONE_DECIMAL.format(Math.abs(value));
 }
 
 export function HomeGlance({ data, hidden, notes }: { data: DashboardData; hidden: boolean; notes: AppNotification[] }) {

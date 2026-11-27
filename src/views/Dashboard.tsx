@@ -245,22 +245,21 @@ function AccountFold({ open, children }: { open: boolean; children: ReactNode })
   );
 }
 
-// Bloque E (D040): los importes (`once`) suben desde cero solo la primera vez de la sesión. Al volver al
-// Resumen o cuando llegan datos nuevos se muestran ya en su valor: sin repetir la animación ni enseñar
-// importes intermedios que no son reales. El anillo (Donut, protegido por D013) conserva su animación.
-let risenOnce = false;
+// D040 (resuelta en la corrección de fluidez): los importes ya no cuentan desde cero. Se pinta la cifra real en
+// el primer fotograma en que existe y la primera vez de la sesión aparece con un fundido corto (`amount-in`, solo
+// opacidad: lo anima el compositor y no mueve la geometría). Al volver al Resumen, con datos nuevos o durante el
+// scrub no hay animación ni importes intermedios. useRise queda solo para el anillo (Donut, protegido por D013).
+let amountsShown = false;
 
-function useRise(target: number, play: boolean, duration = 1100, delay = 0, stick = false, once = false) {
-  const fresh = useRef(!(once && risenOnce));
-  const [value, setValue] = useState(() => (play && fresh.current && !prefersStill() ? 0 : target));
+function useRise(target: number, play: boolean, duration = 1100, delay = 0, stick = false) {
+  const [value, setValue] = useState(() => (play && !prefersStill() ? 0 : target));
   const rose = useRef(false);
   useEffect(() => {
-    if (!play || prefersStill() || (stick && rose.current) || (once && (!fresh.current || rose.current))) {
+    if (!play || prefersStill() || (stick && rose.current)) {
       setValue(target);
       return;
     }
     rose.current = true;
-    if (once) risenOnce = true;
     let frame = 0;
     const start = performance.now() + delay;
     const tick = (now: number) => {
@@ -276,23 +275,27 @@ function useRise(target: number, play: boolean, duration = 1100, delay = 0, stic
   return value;
 }
 
+const RISING_EUR = new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR', minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
 function formatRisingEur(value: number): string {
-  return new Intl.NumberFormat('es-ES', {
-    style: 'currency',
-    currency: 'EUR',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(value);
+  return RISING_EUR.format(value);
 }
 
-function RisingAmount({ value, hidden, signed = false, card = false, delay = 0, stick = false }: { value: number; hidden: boolean; signed?: boolean; card?: boolean; delay?: number; stick?: boolean }) {
-  const shown = useRise(Math.abs(value), !hidden, 680, delay, stick, true);
+/** Importe real, sin conteo: `stick` y `card` se conservan en la firma (los usa la región protegida del scrub). */
+function RisingAmount({ value, hidden, signed = false, delay = 0 }: { value: number; hidden: boolean; signed?: boolean; card?: boolean; delay?: number; stick?: boolean }) {
+  const [arrive] = useState(() => !amountsShown && !hidden);
+  useEffect(() => {
+    amountsShown = true;
+  }, []);
   if (hidden) return <>*****</>;
-  const text = formatRisingEur(shown);
-  if (!signed) return <>{text}</>;
-  if (value > 0) return <>+{text}</>;
-  if (value < 0) return <>−{text}</>;
-  return <>{text}</>;
+  const text = formatRisingEur(Math.abs(value));
+  const sign = !signed ? '' : value > 0 ? '+' : value < 0 ? '−' : '';
+  if (!arrive) return <>{sign}{text}</>;
+  return (
+    <span className="amount-in" style={delay ? { animationDelay: `${delay}ms` } : undefined}>
+      {sign}{text}
+    </span>
+  );
 }
 
 const rise = glide;
@@ -952,8 +955,10 @@ type PlanPack = {
   forecast?: { plannedToday: number; plannedWithExpectedToday: number };
 };
 
+const MADRID_TODAY = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit' });
+
 function madridToday(): string {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  return MADRID_TODAY.format(new Date());
 }
 
 function todayMark(packs: PlanPack[], today: string): { planId: string; label: string; amount: number } | null {
@@ -2067,7 +2072,10 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={still ? { opacity: 0 } : { opacity: 0, scale: 0.985, transition: quickOut }}
               transition={still ? { duration: 0 } : softSpring}
-              className="origin-top"
+              // Sin saltos de geometría (D040): la gráfica de línea ocupa 192 px desde el primer fotograma (hueco de
+              // carga incluido). Antes el hueco medía 184 px y la gráfica pasaba de 168 a 192 px al pintarse, y empujaba
+              // los rangos y «Sitios» 24 px hacia abajo.
+              className={cn('origin-top', chart === 'line' && 'min-h-[192px]')}
             >
               {chart === 'line' ? (
                 linePoints.length >= 2 ? (
@@ -2085,7 +2093,7 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
                     emptyText=""
                   />
                 ) : (
-                  <div className="mt-4 h-[168px]" role="status" aria-busy={!lineReady}>
+                  <div className="h-[192px]" role="status" aria-busy={!lineReady}>
                     <span className="sr-only">Cargando</span>
                   </div>
                 )
