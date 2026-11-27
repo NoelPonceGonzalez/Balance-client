@@ -3,6 +3,7 @@
  * No son cotizaciones reales ni pretenden parecerlo: nombres reconocibles con precios inventados y fijos.
  */
 import { dashboard, previewResponse } from './fixtures';
+import { previewCatalogIndex, previewCatalogItem, previewCatalogOverview, previewCatalogPage, previewPrice } from './fixtures-f1';
 
 function random(seed: number) {
   let state = seed >>> 0;
@@ -42,7 +43,11 @@ const holdings = [
 ];
 
 type Tape = { key: string; kind: string; name: string; symbol: string; price: number; pct: number };
-const tape = (kind: string, rows: [string, string, number, number][]): Tape[] => rows.map(([name, symbol, price, pct]) => ({ key: `${kind}:${symbol}`, kind, name, symbol, price, pct }));
+/** Claves con el formato real de cotización (coingecko:id, yahoo:SÍMBOLO), como las del servidor y el catálogo. */
+const COIN_ID: Record<string, string> = { BTC: 'bitcoin', ETH: 'ethereum', SOL: 'solana', XRP: 'ripple', ADA: 'cardano', DOT: 'polkadot', LINK: 'chainlink', LTC: 'litecoin' };
+const YAHOO_ID: Record<string, string> = { IWDA: 'IWDA.AS', CSPX: 'CSPX.L', VWCE: 'VWCE.DE', EIMI: 'EIMI.L', XMEU: 'XMEU.DE', INRG: 'INRG.L', ITX: 'ITX.MC', SAN: 'SAN.MC', IBE: 'IBE.MC', ASML: 'ASML.AS', IBEX: '^IBEX', SPX: '^GSPC', SX5E: '^STOXX50E', NDX: '^NDX', XAU: 'GC=F', XAG: 'SI=F', BRENT: 'BZ=F', HG: 'HG=F' };
+const keyFor = (kind: string, symbol: string) => (kind === 'crypto' ? `coingecko:${COIN_ID[symbol] || symbol.toLowerCase()}` : kind === 'cs2' ? `cs2:${symbol}` : `yahoo:${YAHOO_ID[symbol] || symbol}`);
+const tape = (kind: string, rows: [string, string, number, number][]): Tape[] => rows.map(([name, symbol, price, pct]) => ({ key: kind === 'cs2' ? `cs2:${name}` : keyFor(kind, symbol), kind, name, symbol, price, pct }));
 const TAPES: Record<string, Tape[]> = {
   cryptos: tape('crypto', [['Bitcoin', 'BTC', 78_362, 1.84], ['Ethereum', 'ETH', 2_647.1, -0.92], ['Solana', 'SOL', 152.4, 3.41], ['XRP', 'XRP', 0.58, -1.2], ['Cardano', 'ADA', 0.41, 0.35], ['Polkadot', 'DOT', 5.92, -2.7], ['Chainlink', 'LINK', 13.8, 4.9], ['Litecoin', 'LTC', 71.2, 0]]),
   stocks: tape('stock', [['Apple', 'AAPL', 218.18, 0.62], ['Microsoft', 'MSFT', 398.5, -0.41], ['Nvidia', 'NVDA', 121.3, 2.85], ['Amazon', 'AMZN', 171.9, 1.12], ['Inditex', 'ITX', 48.7, -0.66], ['Santander', 'SAN', 4.61, 0.94], ['Iberdrola', 'IBE', 13.42, -0.18], ['Tesla', 'TSLA', 212.4, -3.4], ['ASML', 'ASML', 682.1, 1.7], ['Alphabet', 'GOOGL', 157.2, 0.08]]),
@@ -64,9 +69,9 @@ function tapeItem(row: Tape, updatedAt: string) {
 }
 
 // Seguimiento sintético (contrato de avisos 2026-11-27): en cartera Apple, Bitcoin y el MSCI World; con estrella, Tesla.
-const HELD: Record<string, string> = { 'stock:AAPL': 'Trade Republic', 'crypto:BTC': 'OKX · Ledger', 'etf:IWDA': 'Trade Republic' };
-const stars = new Set<string>(['stock:TSLA']);
-const priced = new Set<string>(['stock:TSLA']);
+const HELD: Record<string, string> = { 'yahoo:AAPL': 'Trade Republic', 'coingecko:bitcoin': 'OKX · Ledger', 'yahoo:IWDA.AS': 'Trade Republic' };
+const stars = new Set<string>(['yahoo:TSLA']);
+const priced = new Set<string>(['yahoo:TSLA']);
 /** Estrella de la vista previa (POST /api/market/star). */
 export function previewStar(key: string, on: boolean) {
   if (on) stars.add(key);
@@ -83,9 +88,12 @@ function board() {
   const keys = [...Object.keys(HELD), ...[...stars].filter((key) => !HELD[key])];
   out.followed = keys.flatMap((key) => {
     const row = all.find((item) => item.key === key);
-    if (!row) return [];
-    return [{ ...tapeItem(row, updatedAt), held: Boolean(HELD[key]), starred: stars.has(key), alerted: priced.has(key), accounts: HELD[key] || '' }];
+    // Una estrella puesta desde el catálogo (F.1) sale del catálogo sintético.
+    const base = row ? tapeItem(row, updatedAt) : previewCatalogItem(key);
+    if (!base) return [];
+    return [{ ...base, held: Boolean(HELD[key]), starred: stars.has(key), alerted: priced.has(key), accounts: HELD[key] || '' }];
   });
+  out.catalog = previewCatalogOverview();
   return out;
 }
 
@@ -97,8 +105,8 @@ function series(accountId: string, group: string) {
 }
 
 function story(key: string, days: number) {
-  const row = Object.values(TAPES).flat().find((item) => key.includes(item.symbol)) || null;
-  const unit = holdings.find((item) => key.endsWith(item.quoteId))?.unitMarketValue ?? row?.price ?? 100;
+  const row = Object.values(TAPES).flat().find((item) => item.key === key) || null;
+  const unit = holdings.find((item) => key.endsWith(item.quoteId))?.unitMarketValue ?? previewPrice(key) ?? row?.price ?? 100;
   const line = walk(key, unit, Math.min(days || 365, 400));
   return { series: line.map((point) => ({ at: `${point.day}T16:00:00Z`, eur: point.eur })), changePct: row?.pct ?? null, changeLabel: '24 h', floats: [], note: 'Serie sintética de la vista previa.' };
 }
@@ -111,6 +119,8 @@ export function previewResponseB(path: string, method: string): unknown {
   if (route === '/api/wallets/series') return series(url.searchParams.get('accountId') || '', url.searchParams.get('group') || 'all');
   if (route === '/api/market') return board();
   if (route === '/api/market/moves') return { moves: [] };
+  if (route === '/api/market/catalog') return previewCatalogPage(url.searchParams.get('group') || '');
+  if (route === '/api/market/catalog-index') return previewCatalogIndex();
   if (route === '/api/market/story') return story(url.searchParams.get('key') || '', Number(url.searchParams.get('days') || 365));
   if (route === '/api/movements') return { movements: [], complete: true };
   if (route === '/api/market/csfloat/catalog') return { results: [] };

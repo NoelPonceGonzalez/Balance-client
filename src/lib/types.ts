@@ -128,7 +128,7 @@ export interface MarketPending {
 
 export interface MarketTapeItem {
   key: string;
-  kind: 'crypto' | 'etf' | 'stock' | 'gold' | 'silver' | 'oil' | 'copper' | 'index' | 'cs2' | 'tf2';
+  kind: 'crypto' | 'etf' | 'stock' | 'gold' | 'silver' | 'oil' | 'copper' | 'index' | 'cs2' | 'tf2' | 'commodity' | 'fx' | 'bond' | 'reit';
   name: string;
   symbol: string;
   image: string | null;
@@ -170,6 +170,50 @@ export interface MarketBoard {
   signals?: MarketSignal[];
   /** Lo que sigues: cartera + estrella, una fila por activo (contrato de avisos 2026-11-27). */
   followed?: MarketFollowed[];
+  /** Portada del catálogo (Bloque F.1): categorías con su valor que más se mueve y mayores movimientos. */
+  catalog?: MarketCatalogOverview;
+}
+
+/** Valor del catálogo de Mercado (Bloque F.1). `sub`: subgrupo (región, tipo de materia prima…). */
+export interface MarketCatalogItem extends MarketTapeItem {
+  sub?: string;
+}
+
+export interface MarketCatalogGroupSummary {
+  id: string;
+  title: string;
+  kind: string;
+  /** Valores del catálogo en la categoría. */
+  total: number;
+  /** Valores con precio guardado ahora mismo. */
+  priced: number;
+  lead: { symbol: string; name: string; changePct: number | null } | null;
+}
+
+export interface MarketCatalogOverview {
+  groups: MarketCatalogGroupSummary[];
+  /** Solo cotizaciones recientes y sin error; si hay pocas, vienen pocas (no se rellena). */
+  movers: {
+    bolsa: { up: MarketCatalogItem[]; down: MarketCatalogItem[] };
+    cripto: { up: MarketCatalogItem[]; down: MarketCatalogItem[] };
+  };
+}
+
+/** Una categoría del catálogo (GET /api/market/catalog?group=…). */
+export interface MarketCatalogPage {
+  id: string;
+  title: string;
+  kind: string;
+  total: number;
+  /** El servidor sigue cotizando valores de la categoría. */
+  loading: boolean;
+  updatedAt: string | null;
+  items: MarketCatalogItem[];
+}
+
+/** Índice del catálogo para la búsqueda (nombres y símbolos, sin precio). */
+export interface MarketCatalogIndex {
+  entries: { key: string; group: string; kind: string; symbol: string; name: string; sub: string | null; image: string | null }[];
 }
 
 export interface MarketFollowed extends MarketTapeItem {

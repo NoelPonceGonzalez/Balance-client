@@ -2142,7 +2142,8 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
           const held = row.sides.filter((side) => side.group !== 'cash').reduce((sum, side) => sum + side.items.length, 0);
           const caption = row.tracking === 'positions' && held > 0 ? `${held} ${held === 1 ? 'posición' : 'posiciones'}` : 'Saldo';
           return (
-            <motion.div key={row.key} initial={still ? false : { opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={still ? { duration: 0 } : { ...glide, delay: Math.min(index, 5) * 0.04 }}>
+            // Entrada de la fila en CSS (F.1 §15): mismo recorrido y retraso que el muelle «glide», sin un componente de animación por fila.
+            <div key={row.key} className={still ? undefined : 'account-row-rise'} style={still ? undefined : { animationDelay: `${Math.min(index, 5) * 40}ms` }}>
               <div
                 role="button"
                 tabIndex={0}
@@ -2292,7 +2293,7 @@ export function Dashboard({ heroMs, home, books }: { heroMs: number; home: numbe
                     )}
                   </ul>
               </AccountFold>
-            </motion.div>
+            </div>
           );
         })}
         {countExtras && extraWealth > 0 && (
