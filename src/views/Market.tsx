@@ -212,7 +212,7 @@ function HeroBoard({ item, accent, onOpen }: { item: MarketTapeItem | undefined;
       className="w-full rounded-3xl px-1 py-2 text-left"
     >
       <span className="flex items-center gap-3">
-        <Mark image={item.image} symbol={item.symbol} name={item.name} ticker={tickerOf(item)} />
+        <Mark image={item.image} symbol={item.symbol} name={item.name} ticker={tickerOf(item)} kind={item.kind} assetKey={item.key} />
         <span className="min-w-0">
           <span className="block truncate text-lg font-semibold">{item.name}</span>
           <span className="block text-[11px] font-bold uppercase tracking-[0.16em]" style={{ color: accent }}>{item.symbol}</span>
@@ -306,7 +306,7 @@ function TapeRow({ item, fallback, onOpen }: { item: MarketTapeItem; fallback?: 
   const game = item.kind === 'cs2' || item.kind === 'tf2';
   return (
     <button type="button" onClick={onOpen} className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-3 border-b border-slate-100 py-3 text-left last:border-0 dark:border-slate-800 sm:items-center sm:grid-cols-[auto_minmax(0,1fr)_5.5rem_auto]">
-      <Mark image={item.image} symbol={item.symbol} name={item.name} ticker={tickerOf(item)} fallback={fallback} contain={game} />
+      <Mark image={item.image} symbol={item.symbol} name={item.name} ticker={tickerOf(item)} kind={item.kind} assetKey={item.key} fallback={fallback} contain={game} />
       <div className="min-w-0">
         <p className={cn('font-semibold leading-snug', game ? 'break-words' : 'truncate')}>{item.name}</p>
         <p className="truncate text-[11px] font-bold uppercase text-slate-400">{item.symbol} · {item.sourceLabel}</p>
@@ -1015,7 +1015,7 @@ function TapeSection({ title, icon, items, onOpen, onPick }: { title: string; ic
           return (
             <button key={item.key} type="button" onClick={() => onOpen(item)} className="flex flex-col rounded-3xl bg-white p-3 text-left ring-1 ring-slate-200/70 dark:bg-slate-900 dark:ring-white/10">
               <span className="flex items-center justify-between gap-2">
-                <Mark image={item.image} symbol={item.symbol} fallback={item.image ? null : icon} contain={game} />
+                <Mark image={item.image} symbol={item.symbol} kind={item.kind} assetKey={item.key} fallback={item.image ? null : icon} contain={game} />
                 <span className={cn('rounded-full px-2 py-1 text-[11px] font-black tabular-nums', !up && !down ? 'bg-slate-100 text-slate-500 dark:bg-white/10' : up ? 'bg-[#16c784]/15 text-[#16c784]' : 'bg-[#ea3943]/15 text-[#ea3943]')}>
                   {item.changePct == null ? '—' : formatPct(item.changePct)}
                 </span>

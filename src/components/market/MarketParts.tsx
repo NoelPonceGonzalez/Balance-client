@@ -10,7 +10,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { motion } from 'motion/react';
 import {
-  Activity, ArrowLeftRight, Bell, Bitcoin, Building2, ChevronRight, Gem, Globe2, Landmark, Layers, Scroll, Star, Wallet,
+  Activity, ArrowLeftRight, Bean, Bell, Bitcoin, Building2, Cable, Candy, ChevronRight, Coffee, Coins, Flame, Fuel, Gem, Globe2, Landmark, Layers,
+  Popcorn, Scroll, Sprout, Star, Wallet, Wheat, type LucideIcon,
 } from 'lucide-react';
 import { Sparkline } from '@/components/Sparkline';
 import { Segmented } from '@/components/Segmented';
@@ -18,6 +19,7 @@ import { ChartBone, RowBones } from '@/components/Skeleton';
 import { LineRangeTabs, lineDays, type LineRangeId } from '@/components/LineRanges';
 import { CashChart, type LinePoint } from '@/views/Wallets';
 import { findBrand } from '@/lib/brands';
+import { commodityOf, flagsFor, logoSources, providerSymbol, type CommodityId } from '@/lib/market-logos';
 import { cachedApi, peek } from '@/lib/query';
 import { captureFlip, playFlip } from '@/lib/flip';
 import { formatAgo, formatDay, formatNumber, formatPct } from '@/lib/format';
@@ -68,11 +70,6 @@ export function displaySymbol(symbol: string): string {
 
 /* ───────────── Logos ───────────── */
 
-/** Logo de un valor de bolsa por su símbolo (servicio público de logos; si no hay, se cae a las iniciales). */
-function tickerLogo(ticker: string): string {
-  return `https://financialmodelingprep.com/image-stock/${encodeURIComponent(ticker.toUpperCase())}.png`;
-}
-
 /** Símbolo para buscar el logo: acciones, ETF e inmobiliario cotizado (las cripto ya traen su imagen). */
 export function tickerOf(item: { key?: string; quoteKey?: string | null; kind?: string; assetClass?: string; symbol?: string }): string | null {
   const kind = item.kind || item.assetClass || '';
@@ -84,21 +81,73 @@ export function tickerOf(item: { key?: string; quoteKey?: string | null; kind?: 
 
 const MONO_TINTS = ['from-slate-600 to-slate-800', 'from-sky-600 to-sky-800', 'from-indigo-500 to-indigo-700', 'from-emerald-600 to-emerald-800', 'from-amber-500 to-amber-700', 'from-rose-500 to-rose-700', 'from-violet-500 to-violet-700', 'from-teal-600 to-teal-800'];
 
+/** Icono y color de cada materia prima (sin logo de empresa posible). */
+const COMMODITY_LOOK: Record<CommodityId, { icon: LucideIcon; tone: string }> = {
+  gold: { icon: Coins, tone: 'from-amber-300 to-amber-600' },
+  silver: { icon: Coins, tone: 'from-slate-300 to-slate-500' },
+  platinum: { icon: Gem, tone: 'from-slate-300 to-slate-600' },
+  palladium: { icon: Gem, tone: 'from-zinc-400 to-zinc-600' },
+  copper: { icon: Cable, tone: 'from-orange-400 to-orange-700' },
+  oil: { icon: Fuel, tone: 'from-stone-600 to-stone-900' },
+  gas: { icon: Flame, tone: 'from-sky-400 to-blue-600' },
+  wheat: { icon: Wheat, tone: 'from-amber-400 to-amber-600' },
+  corn: { icon: Popcorn, tone: 'from-yellow-300 to-yellow-500' },
+  soy: { icon: Sprout, tone: 'from-lime-500 to-green-600' },
+  coffee: { icon: Coffee, tone: 'from-amber-700 to-amber-950' },
+  cocoa: { icon: Bean, tone: 'from-orange-800 to-stone-900' },
+  sugar: { icon: Candy, tone: 'from-pink-400 to-rose-500' },
+};
+
+/** Bandera redonda (archivo local, sin red). */
+function Flag({ code, size, className }: { code: string; size: number; className?: string }) {
+  return (
+    <img
+      src={`/logos/flags/${code}.svg`}
+      alt=""
+      width={size}
+      height={size}
+      decoding="async"
+      style={{ width: size, height: size }}
+      className={cn('shrink-0 rounded-full object-cover ring-1 ring-black/[0.08] dark:ring-white/15', className)}
+    />
+  );
+}
+
 /**
- * Logo de un activo. Orden: imagen del proveedor (cripto) → imagen propia → logo de marca local →
- * logo por símbolo (acciones/ETF) → iniciales en un cuadrado redondeado con color propio.
+ * Logo de un activo. Índices, divisas y bonos llevan su bandera; materias primas, su icono. El resto prueba
+ * imágenes en orden (lib/market-logos.ts: proveedor → iconos guardados en la app → marca local → logo por símbolo →
+ * icono del dominio) y solo si ninguna carga quedan las iniciales.
  */
-export function Mark({ image, symbol, fallback, contain, name, ticker, size = 40, neutral = false }: { image: string | null; symbol: string; fallback?: string | null; contain?: boolean; name?: string; ticker?: string | null; size?: number; neutral?: boolean }) {
+export function Mark({ image, symbol, fallback, contain, name, ticker, kind, assetKey, size = 40, neutral = false }: { image: string | null; symbol: string; fallback?: string | null; contain?: boolean; name?: string; ticker?: string | null; kind?: string; assetKey?: string; size?: number; neutral?: boolean }) {
+  const plain = providerSymbol(assetKey, symbol);
+  const flags = kind ? flagsFor(kind, plain) : [];
+  const commodity = kind ? commodityOf(kind, plain) : null;
   const sources = useMemo(() => {
     const brand = name ? findBrand(name) : undefined;
     const local = brand && brand.kind === 'brand' ? `/brands/${brand.id}.${brand.image}` : null;
-    return [image, fallback, local, ticker ? tickerLogo(ticker) : null].filter((src): src is string => Boolean(src));
-  }, [image, fallback, name, ticker]);
+    return logoSources({ image, fallback, local, kind: kind || (ticker ? 'stock' : ''), key: assetKey, symbol: ticker || symbol });
+  }, [image, fallback, name, ticker, kind, assetKey, symbol]);
   const [failed, setFailed] = useState(0);
-  const src = sources[failed];
+  useEffect(() => setFailed(0), [sources]);
   const box = { width: size, height: size };
+  if (flags.length === 1) return <Flag code={flags[0]} size={size} />;
+  if (flags.length === 2) {
+    const small = Math.round(size * 0.68);
+    return (
+      <span aria-hidden style={box} className="relative block shrink-0">
+        <Flag code={flags[0]} size={small} className="absolute left-0 top-0" />
+        <Flag code={flags[1]} size={small} className="absolute bottom-0 right-0 shadow-[0_0_0_2px_var(--app-bg)]" />
+      </span>
+    );
+  }
+  if (commodity) {
+    const look = COMMODITY_LOOK[commodity];
+    const Icon = look.icon;
+    return <span aria-hidden style={box} className={cn('grid shrink-0 place-items-center rounded-full bg-gradient-to-br text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.35)]', look.tone)}><Icon size={Math.round(size * 0.5)} strokeWidth={2} /></span>;
+  }
+  const src = sources[failed];
   if (src) {
-    const own = src === image && !contain;
+    const round = (src === image && !contain) || src.startsWith('/logos/crypto/');
     return (
       <img
         src={src}
@@ -110,7 +159,7 @@ export function Mark({ image, symbol, fallback, contain, name, ticker, size = 40
         referrerPolicy="no-referrer"
         onError={() => setFailed((value) => value + 1)}
         style={box}
-        className={cn('shrink-0 bg-white', own ? 'rounded-full object-cover' : 'rounded-[12px] object-contain p-1 ring-1 ring-black/[0.06] dark:ring-white/10')}
+        className={cn('shrink-0', round ? 'rounded-full object-cover ring-1 ring-black/[0.06] dark:ring-white/15' : 'rounded-[12px] bg-white object-contain p-1 ring-1 ring-black/[0.06] dark:ring-white/10', src.startsWith('/logos/brands/') && 'p-[7px]')}
       />
     );
   }
@@ -180,7 +229,7 @@ export function AssetRow({ item, follow, index = 0, detail, onOpen }: {
       style={moving ? { animationDelay: `${index * 22}ms` } : undefined}
       className={cn(moving && 'market-row-in', "market-press -mx-2 grid min-h-[64px] w-[calc(100%+1rem)] grid-cols-[2.5rem_minmax(0,1fr)_6.5rem] items-center gap-3 rounded-2xl px-2 py-2.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900/30 active:bg-slate-200/50 min-[360px]:grid-cols-[2.5rem_minmax(0,1fr)_4rem_6.5rem] sm:grid-cols-[2.5rem_minmax(0,1fr)_7rem_6.5rem] dark:focus-visible:ring-white/40 dark:active:bg-white/[0.05]")}
     >
-      <span data-flip="logo" className="block"><Mark image={item.image} symbol={item.symbol} name={item.name} ticker={tickerOf(item)} contain={game || item.kind === 'index'} neutral={neutralMark(item.kind)} /></span>
+      <span data-flip="logo" className="block"><Mark image={item.image} symbol={item.symbol} name={item.name} ticker={tickerOf(item)} kind={item.kind} assetKey={item.key} contain={game} neutral={neutralMark(item.kind)} /></span>
       <span className="min-w-0">
         <span className="flex min-w-0 items-center gap-1.5">
           <span data-flip="name" className="truncate text-[15px] font-semibold leading-tight text-slate-950 dark:text-white">{item.name}</span>
@@ -457,7 +506,7 @@ export function AssetPage({ item, follow, alerts, onStar, onAlerts }: {
     <div ref={topRef} className="space-y-5">
       <header className="space-y-3">
         <div className="flex items-center gap-3">
-          <span data-flip-to="logo" className="block"><Mark image={item.image} symbol={item.symbol} name={item.name} ticker={tickerOf(item)} contain={item.kind === 'index' || item.kind === 'cs2' || item.kind === 'tf2'} size={44} neutral={neutralMark(item.kind)} /></span>
+          <span data-flip-to="logo" className="block"><Mark image={item.image} symbol={item.symbol} name={item.name} ticker={tickerOf(item)} kind={item.kind} assetKey={item.key} contain={item.kind === 'cs2' || item.kind === 'tf2'} size={44} neutral={neutralMark(item.kind)} /></span>
           <div className="min-w-0">
             <h1 data-flip-to="name" className="truncate text-[20px] font-semibold leading-tight tracking-tight text-slate-950 dark:text-white">{item.name}</h1>
             <p className="truncate text-[13px] font-medium text-slate-500 dark:text-slate-400">{[displaySymbol(item.symbol), item.sub].filter(Boolean).join(' · ')}</p>
