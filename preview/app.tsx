@@ -19,7 +19,7 @@ import { Settings } from '@/views/Settings';
 import type { User } from '@/lib/types';
 import { installSquish } from '@/lib/squish';
 import { CameraLayer, useCameraPreload } from '@/components/CameraLayer';
-import { previewResponseB } from './fixtures-b';
+import { previewResponseB, previewStar } from './fixtures-b';
 import { previewResponseC } from './fixtures-c';
 
 const params = new URLSearchParams(location.search);
@@ -37,6 +37,10 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   net.push({ path, at: Math.round(performance.now()) });
   const method = (init?.method || 'GET').toUpperCase();
   let body = (method === 'GET' ? previewResponseC(path) : undefined) ?? previewResponseB(path, method);
+  if (path === '/api/market/star' && method === 'POST') {
+    const sent = JSON.parse(String(init?.body || '{}')) as { source: string; externalId: string; on?: boolean };
+    body = previewStar(`${sent.source}:${sent.externalId}`, sent.on !== false);
+  }
   // ?many=N (Bloque E): N cuentas sintéticas más, para probar el selector con búsqueda.
   const many = Number(params.get('many') || 0);
   if (many && method === 'GET' && path.startsWith('/api/accounts') && body && typeof body === 'object' && Array.isArray((body as { accounts?: unknown[] }).accounts)) {

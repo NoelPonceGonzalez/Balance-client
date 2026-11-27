@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronLeft, ChevronRight, Heart, Search, Star, X } from 'lucide-react';
+import { Bell, ChevronLeft, ChevronRight, Heart, Search, Star, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { CsfloatFinder, SkinMarket, SkinSuggest, type SkinHit } from '@/components/CsfloatFinder';
 import { DragRow } from '@/components/DragRow';
@@ -23,7 +23,7 @@ import { glide, quickOut, softSpring } from '@/lib/motion';
 import { cn } from '@/lib/utils';
 import { LineRangeTabs, lineDays, type LineRangeId } from '@/components/LineRanges';
 import { CashChart, type LinePoint } from '@/views/Wallets';
-import type { AppNotification, MarketBoard, MarketItem, MarketPending, MarketSignal, MarketStory, MarketTapeItem, QuoteCandidate } from '@/lib/types';
+import type { AppNotification, MarketBoard, MarketFollowed, MarketItem, MarketPending, MarketSignal, MarketStory, MarketTapeItem, QuoteCandidate } from '@/lib/types';
 
 function fold(value: string): string {
   return value.toLocaleLowerCase('es').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -342,6 +342,51 @@ function GameBoard({ items, filtered, quiet, warm, onOpen }: { items: MarketTape
         </motion.button>
       ))}
     </div>
+  );
+}
+
+/** Activos que admiten seguimiento y avisos de cotización. */
+const FOLLOWABLE = new Set(['crypto', 'stock', 'etf']);
+
+/**
+ * «Siguiendo»: lo que tienes en cartera y lo que sigues con estrella, una fila por activo. Marcas discretas:
+ * la línea de abajo dice si está en cartera o lo sigues; estrella si lo sigues a mano; campana si tiene aviso
+ * de precio.
+ */
+function FollowList({ items, onOpen }: { items: MarketFollowed[]; onOpen: (item: MarketFollowed) => void }) {
+  if (!items.length) return null;
+  return (
+    <section aria-label="Siguiendo">
+      <p className="px-1 pb-1 text-[13px] font-semibold text-slate-500 dark:text-slate-400">Siguiendo · {items.length}</p>
+      <div className="divide-y divide-slate-100 dark:divide-white/[0.08]">
+        {items.map((item) => (
+          <button
+            key={item.key}
+            type="button"
+            onClick={() => onOpen(item)}
+            className="-mx-2 grid w-[calc(100%+1rem)] grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-2xl px-2 py-3 text-left transition-colors duration-150 active:bg-slate-50 dark:active:bg-white/[0.04]"
+          >
+            <Mark image={item.image} symbol={item.symbol} />
+            <span className="min-w-0">
+              <span className="flex min-w-0 items-center gap-1.5">
+                <span className="truncate text-[15px] font-semibold leading-tight text-slate-950 dark:text-white">{item.name}</span>
+                {item.starred && <Star size={12} strokeWidth={2.4} aria-hidden className="shrink-0 fill-current text-slate-900 dark:text-white" />}
+                {item.alerted && <Bell size={12} strokeWidth={2.4} aria-hidden className="shrink-0 text-slate-400" />}
+              </span>
+              <span className="mt-0.5 block truncate text-[13px] font-medium text-slate-400 dark:text-slate-500">
+                {item.held ? `En cartera${item.accounts ? ` · ${item.accounts}` : ''}` : 'La sigues'}
+                {item.held && item.starred ? <span className="sr-only"> · también con estrella</span> : null}
+                {item.alerted ? <span className="sr-only"> · con aviso de precio</span> : null}
+              </span>
+            </span>
+            <span className="text-right">
+              <span className="block text-[15px] font-semibold leading-tight tabular-nums tracking-tight text-slate-950 dark:text-white">{quoteAmount(item.kind, item.priceEur)}</span>
+              <Pct value={item.changePct} className="mt-0.5 block text-[13px]" />
+            </span>
+          </button>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -1128,7 +1173,25 @@ function PendingRow({ item, onChanged }: { item: MarketPending; onChanged: () =>
   );
 }
 
-function StoryDialog({ item, onClose }: { item: { kind: string; key: string; name: string; symbol: string; priceEur: number | null; changePct: number | null; changeLabel: string; sparkline: number[] }; onClose: () => void }) {
+function StoryDialog({ item, onClose, follow = null, onStar }: { item: { kind: string; key: string; name: string; symbol: string; priceEur: number | null; changePct: number | null; changeLabel: string; sparkline: number[] }; onClose: () => void; follow?: MarketFollowed | null; onStar?: (on: boolean) => Promise<void> }) {
+  // Estrella = seguimiento voluntario. El estado cambia cuando el servidor lo confirma (sin adelantarse).
+  const [starred, setStarred] = useState(Boolean(follow?.starred));
+  const [starBusy, setStarBusy] = useState(false);
+  const [starError, setStarError] = useState('');
+  const held = Boolean(follow?.held);
+  const toggleStar = async () => {
+    if (!onStar || starBusy) return;
+    setStarBusy(true);
+    setStarError('');
+    try {
+      await onStar(!starred);
+      setStarred(!starred);
+    } catch (err) {
+      setStarError(err instanceof Error ? err.message : 'No se ha podido cambiar.');
+    } finally {
+      setStarBusy(false);
+    }
+  };
   const spansAtStart = canSpan(item.kind);
   const storyPath = (span: number) => {
     const params = new URLSearchParams({ kind: item.kind, key: item.key, name: item.name, symbol: item.symbol });
@@ -1178,6 +1241,29 @@ function StoryDialog({ item, onClose }: { item: { kind: string; key: string; nam
           {change != null && <span className="ml-1 text-[10px] font-bold opacity-80">{label}</span>}
         </span>
       </div>
+      {onStar && (
+        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+          <button
+            type="button"
+            aria-pressed={starred}
+            disabled={starBusy}
+            onClick={() => void toggleStar()}
+            className={cn('inline-flex min-h-9 items-center gap-1.5 rounded-full px-3 text-[13px] font-semibold ring-1 transition-colors disabled:opacity-60', starred ? 'bg-slate-950 text-white ring-slate-950 dark:bg-white dark:text-slate-950 dark:ring-white' : 'text-slate-700 ring-slate-200 dark:text-slate-200 dark:ring-white/15')}
+          >
+            <Star size={14} strokeWidth={2.4} aria-hidden className={cn(starred && 'fill-current')} />
+            {starred ? 'Siguiendo' : 'Seguir'}
+          </button>
+          <p className="text-[13px] font-medium text-slate-500 dark:text-slate-400">
+            {held
+              ? 'En tu cartera: te avisamos si se mueve con fuerza.'
+              : starred
+                ? 'Lo sigues: te avisamos si se mueve con fuerza aunque no lo tengas.'
+                : 'No lo sigues: no te avisaremos de sus movimientos.'}
+            {follow?.alerted ? ' Tiene un aviso de precio activo.' : ''}
+          </p>
+          {starError && <p role="alert" className="w-full text-[13px] font-medium text-rose-600">{starError}</p>}
+        </div>
+      )}
       {spans && <LineRangeTabs value={range} onChange={setRange} />}
       <div className="mt-4">
         {item.key && waiting ? (
@@ -1367,6 +1453,13 @@ function MarketScreen({ focusListing, focusTick = 0, focusSkin = null }: { focus
   const tone = MARKET_TONE[market];
   const heading = skinDesk ? skinDesk.label : market === 'all' ? 'Mercado' : active?.title || 'Mercado';
   const stageKey = skinDesk ? `skin:${skinDesk.name}:${skinDesk.paintIndex ?? ''}` : market;
+  const followed = data.followed || [];
+  const followOf = new Map(followed.map((row) => [row.key, row]));
+  const star = async (key: string, on: boolean) => {
+    const cut = key.indexOf(':');
+    await api('/api/market/star', { method: 'POST', body: JSON.stringify({ source: key.slice(0, cut), externalId: key.slice(cut + 1), on }) });
+    load();
+  };
   const openTape = (item: MarketTapeItem) => setOpen({ kind: item.kind, key: item.key, name: item.name, symbol: item.symbol, priceEur: item.priceEur, changePct: item.changePct, changeLabel: item.changeLabel, sparkline: item.sparkline });
   const enter = (id: string) => {
     const section = sections.find((item) => item.id === id);
@@ -1515,6 +1608,8 @@ function MarketScreen({ focusListing, focusTick = 0, focusSkin = null }: { focus
             empty ? <EmptyNote>El mercado no ha respondido todavía.</EmptyNote>
             : noMatch ? <EmptyNote>{`Nada coincide con «${needle}».`}</EmptyNote>
             : (
+              <div className="space-y-5">
+              <FollowList items={followed.filter((item) => matches(needle, [item.name, item.symbol, item.sourceLabel]))} onOpen={openTape} />
               <div className="divide-y divide-slate-100 dark:divide-white/[0.08]">
                 {doors.map((section, index) => {
                   const lead = section.preview[0];
@@ -1550,6 +1645,7 @@ function MarketScreen({ focusListing, focusTick = 0, focusSkin = null }: { focus
                   );
                 })}
               </div>
+              </div>
             )
           ) : skinDesk ? (
             <SkinMarket skin={skinDesk} wear={wearPick} />
@@ -1568,7 +1664,15 @@ function MarketScreen({ focusListing, focusTick = 0, focusSkin = null }: { focus
           )}
         </motion.div>
       </AnimatePresence>
-      {open && <StoryDialog item={open} onClose={() => setOpen(null)} />}
+      {open && (
+        <StoryDialog
+          key={open.key}
+          item={open}
+          onClose={() => setOpen(null)}
+          follow={followOf.get(open.key) ?? null}
+          onStar={FOLLOWABLE.has(open.kind) && open.key.includes(':') ? (on) => star(open.key, on) : undefined}
+        />
+      )}
     </div>
   );
 }

@@ -168,6 +168,19 @@ export interface MarketBoard {
   icons?: { cs2: string | null; tf2: string | null };
   purchases?: PurchaseWatch[];
   signals?: MarketSignal[];
+  /** Lo que sigues: cartera + estrella, una fila por activo (contrato de avisos 2026-11-27). */
+  followed?: MarketFollowed[];
+}
+
+export interface MarketFollowed extends MarketTapeItem {
+  /** Lo tienes en alguna cartera (seguimiento automático). */
+  held: boolean;
+  /** Lo sigues con estrella (seguimiento voluntario). */
+  starred: boolean;
+  /** Tiene un aviso de precio activo. */
+  alerted: boolean;
+  /** Carteras donde está, separadas por « · ». */
+  accounts: string;
 }
 
 export interface MarketSignal {

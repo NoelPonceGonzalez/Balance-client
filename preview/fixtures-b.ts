@@ -63,11 +63,29 @@ function tapeItem(row: Tape, updatedAt: string) {
   };
 }
 
+// Seguimiento sintético (contrato de avisos 2026-11-27): en cartera Apple, Bitcoin y el MSCI World; con estrella, Tesla.
+const HELD: Record<string, string> = { 'stock:AAPL': 'Trade Republic', 'crypto:BTC': 'OKX · Ledger', 'etf:IWDA': 'Trade Republic' };
+const stars = new Set<string>(['stock:TSLA']);
+const priced = new Set<string>(['stock:TSLA']);
+/** Estrella de la vista previa (POST /api/market/star). */
+export function previewStar(key: string, on: boolean) {
+  if (on) stars.add(key);
+  else stars.delete(key);
+  return { key, starred: on };
+}
+
 function board() {
   // updatedAt fijo respecto a la carga: la vista previa no simula cotizaciones en tiempo real.
   const updatedAt = new Date(Date.now() - 45_000).toISOString();
   const out: Record<string, unknown> = { updatedAt, warning: null, items: [], pending: [], icons: { cs2: null, tf2: null }, purchases: [], signals: [], tf2: [] };
   for (const [field, rows] of Object.entries(TAPES)) out[field] = rows.map((row) => tapeItem(row, updatedAt));
+  const all = Object.values(TAPES).flat();
+  const keys = [...Object.keys(HELD), ...[...stars].filter((key) => !HELD[key])];
+  out.followed = keys.flatMap((key) => {
+    const row = all.find((item) => item.key === key);
+    if (!row) return [];
+    return [{ ...tapeItem(row, updatedAt), held: Boolean(HELD[key]), starred: stars.has(key), alerted: priced.has(key), accounts: HELD[key] || '' }];
+  });
   return out;
 }
 
