@@ -2,13 +2,46 @@ self.addEventListener('install', (event) => {
   event.waitUntil(self.skipWaiting());
 });
 
+// Sesión abierta en este navegador (huella del usuario o 'none'). Se conserva entre versiones del worker.
+const SESSION_CACHE = 'balance-session';
+const SESSION_KEY = '/__balance_session';
+
 self.addEventListener('activate', (event) => {
   event.waitUntil((async () => {
     const keys = await caches.keys();
-    await Promise.all(keys.map((key) => caches.delete(key)));
+    await Promise.all(keys.filter((key) => key !== SESSION_CACHE).map((key) => caches.delete(key)));
     await self.clients.claim();
   })());
 });
+
+self.addEventListener('message', (event) => {
+  const data = event.data || {};
+  if (data.type !== 'balance-user') return;
+  const save = (async () => {
+    const cache = await caches.open(SESSION_CACHE);
+    await cache.put(SESSION_KEY, new Response(String(data.audience || 'none')));
+  })();
+  if (event.waitUntil) event.waitUntil(save);
+});
+
+async function sessionAudience() {
+  try {
+    const cache = await caches.open(SESSION_CACHE);
+    const hit = await cache.match(SESSION_KEY);
+    return hit ? await hit.text() : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Privacidad: si el aviso es para otra cuenta (suscripción que quedó del usuario anterior) o no hay sesión,
+ * se enseña sin título, importe ni imagen. Sin dato de sesión (versiones anteriores), como antes.
+ */
+function privacyGate(payload, current) {
+  if (!payload.u || current == null || current === payload.u) return payload;
+  return { title: 'Balance', body: 'Tienes un aviso nuevo. Abre Balance con tu cuenta para verlo.', url: '/', image: '', tag: 'balance-privado' };
+}
 
 function absolute(path) {
   if (!path) return '';
@@ -20,12 +53,17 @@ function absolute(path) {
 }
 
 self.addEventListener('push', (event) => {
+  event.waitUntil(showPush(event));
+});
+
+async function showPush(event) {
   let payload = { title: 'Balance', body: '', url: '/', image: '', tag: '' };
   try {
     payload = { ...payload, ...(event.data ? event.data.json() : {}) };
   } catch {
     payload.body = event.data ? event.data.text() : '';
   }
+  payload = privacyGate(payload, await sessionAudience());
   const title = payload.title || 'Balance';
   const url = payload.url || '/';
   const icon = absolute('/icons/icon-192.png');
@@ -44,14 +82,12 @@ self.addEventListener('push', (event) => {
     shown.tag = payload.tag;
     shown.renotify = true;
   }
-  event.waitUntil((async () => {
-    try {
-      await self.registration.showNotification(title, shown);
-    } catch {
-      await self.registration.showNotification(title, { body: payload.body, lang: 'es', icon, badge, data: { url } });
-    }
-  })());
-});
+  try {
+    await self.registration.showNotification(title, shown);
+  } catch {
+    await self.registration.showNotification(title, { body: payload.body, lang: 'es', icon, badge, data: { url } });
+  }
+}
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();

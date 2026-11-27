@@ -19,6 +19,9 @@ function sameKey(current: ArrayBuffer | null | undefined, next: ArrayBuffer): bo
   return true;
 }
 
+export { pushAudience } from './push-audience';
+import { pushAudience } from './push-audience';
+
 export function warmPushKey(): void {
   if (cachedKey !== undefined) return;
   void api<{ publicKey: string | null }>('/api/market/push-key')
@@ -90,6 +93,27 @@ export async function disablePhonePush(): Promise<void> {
     }).catch(() => undefined);
   }
   await subscription.unsubscribe().catch(() => undefined);
+}
+
+/** Dice al service worker de quién es la sesión abierta (o que no hay ninguna). */
+export async function announcePushUser(userId: string | null): Promise<void> {
+  if (!('serviceWorker' in navigator)) return;
+  const registration = await navigator.serviceWorker.getRegistration().catch(() => undefined);
+  const worker = registration?.active || navigator.serviceWorker.controller;
+  if (!worker) return;
+  worker.postMessage({ type: 'balance-user', audience: userId ? await pushAudience(userId) : 'none' });
+}
+
+/**
+ * Sin sesión abierta, este navegador no debe seguir suscrito: si la baja al cerrar sesión no llegó
+ * (sin red, sesión caducada), se da de baja aquí. El servidor borra la suscripción al primer envío fallido.
+ */
+export async function dropStalePush(): Promise<void> {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+  if (localStorage.getItem('pat_token')) return;
+  const registration = await navigator.serviceWorker.getRegistration().catch(() => undefined);
+  const subscription = await registration?.pushManager.getSubscription().catch(() => null);
+  if (subscription) await subscription.unsubscribe().catch(() => undefined);
 }
 
 /** Si el permiso ya está dado, vuelve a registrar el móvil sin pedir otro aviso de prueba. */

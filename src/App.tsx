@@ -3,7 +3,7 @@ import { motion } from 'motion/react';
 import { Shell, type Section } from '@/components/Shell';
 import { api, ApiError } from '@/lib/api';
 import { forgetWallets, loadWallets } from '@/lib/wallet-accounts';
-import { disablePhonePush } from '@/lib/push';
+import { announcePushUser, disablePhonePush, dropStalePush } from '@/lib/push';
 import type { User } from '@/lib/types';
 import { Dashboard } from '@/views/Dashboard';
 import { LoginView } from '@/views/Login';
@@ -197,12 +197,22 @@ export default function App() {
     void loadWallets().catch(() => undefined);
   }, [user, bookOpen]);
 
+  // Privacidad de los avisos (2026-11-27): el service worker sabe de quién es la sesión abierta y, sin sesión,
+  // este navegador deja de estar suscrito aunque la baja del cierre de sesión no llegara.
+  const sessionId = user?.id ?? null;
+  useEffect(() => {
+    if (!ready) return;
+    void announcePushUser(sessionId).catch(() => undefined);
+    if (!sessionId) void dropStalePush().catch(() => undefined);
+  }, [ready, sessionId]);
+
   const changeHero = (ms: number) => {
     setHeroMs(ms);
     localStorage.setItem('pat_hero_ms', String(ms));
   };
 
   const logout = () => {
+    void announcePushUser(null).catch(() => undefined);
     void disablePhonePush().catch(() => undefined).finally(() => {
       localStorage.removeItem('pat_token');
       sessionStorage.removeItem('pat_gate');
