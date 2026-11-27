@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Bell, ChevronLeft, ChevronRight, Heart, Search, Star, X } from 'lucide-react';
+import { GlassButton, GlassGroup } from '@/components/GlassButton';
+import { findBrand } from '@/lib/brands';
 import { AnimatePresence, motion } from 'motion/react';
 import { CsfloatFinder, SkinMarket, SkinSuggest, type SkinHit } from '@/components/CsfloatFinder';
 import { DragRow } from '@/components/DragRow';
@@ -63,11 +65,36 @@ function applySkinMoves(
   };
 }
 
-function Mark({ image, symbol, fallback, contain }: { image: string | null; symbol: string; fallback?: string | null; contain?: boolean }) {
-  const [broken, setBroken] = useState(false);
-  const [fallbackBroken, setFallbackBroken] = useState(false);
-  const src = image && !broken ? image : fallback && !fallbackBroken ? fallback : null;
+/** Logo de un valor de bolsa por su símbolo (servicio público de logos; si no hay, se cae a las iniciales). */
+function tickerLogo(ticker: string): string {
+  return `https://financialmodelingprep.com/image-stock/${encodeURIComponent(ticker.toUpperCase())}.png`;
+}
+
+/** Símbolo para buscar el logo: solo acciones y ETF (las cripto ya traen su imagen). */
+function tickerOf(item: { key?: string; quoteKey?: string | null; kind?: string; assetClass?: string; symbol?: string }): string | null {
+  const kind = item.kind || item.assetClass || '';
+  if (kind !== 'stock' && kind !== 'etf') return null;
+  const key = item.key || item.quoteKey || '';
+  if (key.startsWith('yahoo:')) return key.slice(6);
+  return item.symbol || null;
+}
+
+const MONO_TINTS = ['from-slate-600 to-slate-800', 'from-sky-600 to-sky-800', 'from-indigo-500 to-indigo-700', 'from-emerald-600 to-emerald-800', 'from-amber-500 to-amber-700', 'from-rose-500 to-rose-700', 'from-violet-500 to-violet-700', 'from-teal-600 to-teal-800'];
+
+/**
+ * Logo de un activo. Orden: imagen del proveedor (cripto) → imagen propia → logo de marca local →
+ * logo por símbolo (acciones/ETF) → iniciales en un cuadrado redondeado con color propio.
+ */
+function Mark({ image, symbol, fallback, contain, name, ticker }: { image: string | null; symbol: string; fallback?: string | null; contain?: boolean; name?: string; ticker?: string | null }) {
+  const sources = useMemo(() => {
+    const brand = name ? findBrand(name) : undefined;
+    const local = brand && brand.kind === 'brand' ? `/brands/${brand.id}.${brand.image}` : null;
+    return [image, fallback, local, ticker ? tickerLogo(ticker) : null].filter((src): src is string => Boolean(src));
+  }, [image, fallback, name, ticker]);
+  const [failed, setFailed] = useState(0);
+  const src = sources[failed];
   if (src) {
+    const own = src === image && !contain;
     return (
       <img
         src={src}
@@ -75,15 +102,14 @@ function Mark({ image, symbol, fallback, contain }: { image: string | null; symb
         width={40}
         height={40}
         referrerPolicy="no-referrer"
-        onError={() => {
-          if (image && !broken) setBroken(true);
-          else setFallbackBroken(true);
-        }}
-        className={cn('h-10 w-10 bg-white', contain || (!image && fallback) ? 'rounded-xl object-contain p-0.5' : 'rounded-full object-cover')}
+        onError={() => setFailed((value) => value + 1)}
+        className={cn('h-10 w-10 shrink-0 bg-white', own ? 'rounded-full object-cover' : 'rounded-[12px] object-contain p-1 ring-1 ring-black/[0.06] dark:ring-white/10')}
       />
     );
   }
-  return <span className="grid h-10 w-10 place-items-center rounded-full bg-slate-800 text-[11px] font-black text-white">{(symbol || '?').slice(0, 3)}</span>;
+  const letters = (symbol || '?').split(/[.:\s-]/)[0].replace(/[^A-Za-z0-9]/g, '').slice(0, 2).toUpperCase() || '?';
+  const tint = MONO_TINTS[[...(symbol || '?')].reduce((sum, char) => sum + char.charCodeAt(0), 0) % MONO_TINTS.length];
+  return <span aria-hidden className={cn('grid h-10 w-10 shrink-0 place-items-center rounded-[12px] bg-gradient-to-b text-[14px] font-semibold tracking-tight text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.22)]', tint)}>{letters}</span>;
 }
 
 function QuoteSearch({ assetClass, onPick }: { assetClass: string; onPick: (item: QuoteCandidate) => void }) {
@@ -118,7 +144,7 @@ function QuoteSearch({ assetClass, onPick }: { assetClass: string; onPick: (item
       <div className="space-y-1">
         {results.map((item) => (
           <button key={`${item.source}:${item.externalId}`} type="button" onClick={() => onPick(item)} className="flex w-full items-center gap-3 rounded-2xl px-2 py-2 text-left hover:bg-slate-50 dark:hover:bg-slate-800">
-            <Mark image={item.image} symbol={item.symbol} />
+            <Mark image={item.image} symbol={item.symbol} name={item.name} ticker={tickerOf(item)} />
             <span className="min-w-0">
               <span className="block truncate text-sm font-semibold">{item.name}</span>
               <span className="block text-xs font-bold text-slate-500">{item.symbol} · {item.source === 'coingecko' ? 'CoinGecko' : 'Yahoo Finance'}</span>
@@ -241,7 +267,7 @@ function QuoteList({ items, onOpen }: { items: MarketTapeItem[]; onOpen: (item: 
             transition={moving ? { ...glide, delay: index * 0.025 } : { duration: 0 }}
             className="-mx-2 grid w-[calc(100%+1rem)] grid-cols-[auto_minmax(0,1fr)_auto_6.5rem] items-center gap-3 rounded-2xl px-2 py-3 text-left transition-colors duration-150 active:bg-slate-50 dark:active:bg-white/[0.04]"
           >
-            <Mark image={item.image} symbol={item.symbol} contain={item.kind === 'index'} />
+            <Mark image={item.image} symbol={item.symbol} name={item.name} ticker={tickerOf(item)} contain={item.kind === 'index'} />
             <span className="min-w-0">
               <span className="block truncate text-[15px] font-semibold leading-tight text-slate-950 dark:text-white">{item.name}</span>
               <span className="mt-0.5 block truncate text-[13px] font-medium uppercase text-slate-400 dark:text-slate-500">{item.symbol}</span>
@@ -297,7 +323,7 @@ function HeroBoard({ item, accent, onOpen }: { item: MarketTapeItem | undefined;
       className="w-full rounded-3xl px-1 py-2 text-left"
     >
       <span className="flex items-center gap-3">
-        <Mark image={item.image} symbol={item.symbol} />
+        <Mark image={item.image} symbol={item.symbol} name={item.name} ticker={tickerOf(item)} />
         <span className="min-w-0">
           <span className="block truncate text-lg font-semibold">{item.name}</span>
           <span className="block text-[11px] font-bold uppercase tracking-[0.16em]" style={{ color: accent }}>{item.symbol}</span>
@@ -366,7 +392,7 @@ function FollowList({ items, onOpen }: { items: MarketFollowed[]; onOpen: (item:
             onClick={() => onOpen(item)}
             className="-mx-2 grid w-[calc(100%+1rem)] grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-2xl px-2 py-3 text-left transition-colors duration-150 active:bg-slate-50 dark:active:bg-white/[0.04]"
           >
-            <Mark image={item.image} symbol={item.symbol} />
+            <Mark image={item.image} symbol={item.symbol} name={item.name} ticker={tickerOf(item)} />
             <span className="min-w-0">
               <span className="flex min-w-0 items-center gap-1.5">
                 <span className="truncate text-[15px] font-semibold leading-tight text-slate-950 dark:text-white">{item.name}</span>
@@ -400,7 +426,7 @@ function QuoteRow({ item, onOpen, onChanged }: { item: MarketItem; onOpen: () =>
   return (
     <article className="border-b border-slate-100 py-4 last:border-0 dark:border-slate-800">
       <button type="button" onClick={onOpen} className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 text-left sm:grid-cols-[auto_minmax(0,1fr)_5.5rem_auto]">
-        <Mark image={item.image} symbol={item.symbol} />
+        <Mark image={item.image} symbol={item.symbol} name={item.name} ticker={tickerOf(item)} />
         <div className="min-w-0">
           <p className="truncate font-semibold">{item.name}</p>
           <p className="truncate text-[11px] font-bold uppercase text-slate-400">{item.symbol} · {item.accountName}</p>
@@ -439,7 +465,7 @@ function TapeRow({ item, fallback, onOpen }: { item: MarketTapeItem; fallback?: 
   const game = item.kind === 'cs2' || item.kind === 'tf2';
   return (
     <button type="button" onClick={onOpen} className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-3 border-b border-slate-100 py-3 text-left last:border-0 dark:border-slate-800 sm:items-center sm:grid-cols-[auto_minmax(0,1fr)_5.5rem_auto]">
-      <Mark image={item.image} symbol={item.symbol} fallback={fallback} contain={game} />
+      <Mark image={item.image} symbol={item.symbol} name={item.name} ticker={tickerOf(item)} fallback={fallback} contain={game} />
       <div className="min-w-0">
         <p className={cn('font-semibold leading-snug', game ? 'break-words' : 'truncate')}>{item.name}</p>
         <p className="truncate text-[11px] font-bold uppercase text-slate-400">{item.symbol} · {item.sourceLabel}</p>
@@ -1050,7 +1076,7 @@ function AlertDesk({ items, catalog, hashes, market, onChanged }: { items: Marke
                         }}
                         className={resultClass}
                       >
-                        <Mark image={item.image} symbol={item.symbol} />
+                        <Mark image={item.image} symbol={item.symbol} name={item.name} ticker={tickerOf(item)} />
                         <span className="min-w-0">
                           {item.name}
                           <span className="ml-2 text-[11px] font-bold uppercase text-slate-400">{item.priceEur == null ? item.symbol : inPoints(quote?.externalId, item.key) ? pointText(item.priceEur) : marketMoney(item.priceEur)}</span>
@@ -1064,7 +1090,7 @@ function AlertDesk({ items, catalog, hashes, market, onChanged }: { items: Marke
                 <div className="grid gap-1">
                   {quotes.filter((item) => !local.some((row) => row.key === `${item.source}:${item.externalId}`)).map((item) => (
                     <button key={`${item.source}:${item.externalId}`} type="button" onClick={() => revealPrice({ source: item.source, externalId: item.externalId, name: item.name, symbol: item.symbol, priceEur: null, image: item.image })} className={resultClass}>
-                      <Mark image={item.image} symbol={item.symbol} />
+                      <Mark image={item.image} symbol={item.symbol} name={item.name} ticker={tickerOf(item)} />
                       <span className="min-w-0">{item.name}<span className="ml-2 text-[11px] font-bold uppercase text-slate-400">{item.symbol}</span></span>
                     </button>
                   ))}
@@ -1515,27 +1541,27 @@ function MarketScreen({ focusListing, focusTick = 0, focusSkin = null }: { focus
             <img src={active.icon} alt="" referrerPolicy="no-referrer" className="h-7 w-7 shrink-0 rounded-lg bg-white object-cover" />
           ) : null}
           <h1 className="min-w-0 flex-1 truncate text-base font-semibold">{heading}</h1>
-          <div className="flex shrink-0 rounded-full bg-slate-200/80 p-0.5 text-[12px] font-bold dark:bg-white/10" role="group" aria-label="Moneda de los precios">
+          <GlassGroup className="shrink-0 p-[3px] text-[12px] font-bold" role="group" aria-label="Moneda de los precios">
             {(['EUR', 'USD'] as const).map((id) => (
               <button
                 key={id}
                 type="button"
                 aria-pressed={code === id}
                 onClick={() => setCode(id)}
-                className={cn('rounded-full px-2 py-1 tabular-nums', code === id ? 'bg-white text-slate-950 shadow-sm dark:bg-slate-950 dark:text-white' : 'text-slate-500')}
+                className={cn('min-w-7 rounded-full px-2 py-1 tabular-nums transition-colors', code === id ? 'bg-white/95 text-slate-950 shadow-[0_1px_4px_rgba(15,23,42,0.14)] dark:bg-white/25 dark:text-white' : 'text-slate-600 dark:text-slate-300')}
               >
                 {id === 'EUR' ? '€' : '$'}
               </button>
             ))}
-          </div>
-          <div className="flex shrink-0 items-center">
-            <button type="button" aria-label="CSFloat" onClick={() => setDesk('csfloat')} className={cn('grid h-8 w-8 place-items-center rounded-full', desk === 'csfloat' ? 'text-slate-950 dark:text-white' : 'text-slate-400')}>
+          </GlassGroup>
+          <GlassGroup className="shrink-0 p-[3px]">
+            <button type="button" aria-label="CSFloat" onClick={() => setDesk('csfloat')} className={cn('grid h-8 w-8 place-items-center rounded-full transition-colors active:bg-white/40', desk === 'csfloat' ? 'text-slate-950 dark:text-white' : 'text-slate-600 dark:text-slate-300')}>
               <Star size={16} />
             </button>
-            <button type="button" aria-label="Me interesa" onClick={() => setDesk('saved')} className={cn('grid h-8 w-8 place-items-center rounded-full', desk === 'saved' ? 'text-slate-950 dark:text-white' : 'text-slate-400')}>
+            <button type="button" aria-label="Me interesa" onClick={() => setDesk('saved')} className={cn('grid h-8 w-8 place-items-center rounded-full transition-colors active:bg-white/40', desk === 'saved' ? 'text-slate-950 dark:text-white' : 'text-slate-600 dark:text-slate-300')}>
               <Heart size={16} />
             </button>
-          </div>
+          </GlassGroup>
         </div>
         <p className="truncate text-[13px] font-semibold text-slate-500 dark:text-slate-400">
           {cached ? `Actualizando · datos de ${formatAgo(data.updatedAt)}` : fresh ? `En vivo · ${formatAgo(data.updatedAt)}` : `Último intento ${formatAgo(data.updatedAt)}`}
@@ -1560,14 +1586,14 @@ function MarketScreen({ focusListing, focusTick = 0, focusSkin = null }: { focus
         </Modal>
       )}
       {!desk && !open && createPortal(
-        <button
-          type="button"
+        <GlassButton
           onClick={() => setDesk('alerts')}
-          className="fixed z-50 rounded-full bg-slate-950 px-4 py-2.5 text-[15px] font-semibold text-white shadow-[0_10px_28px_rgba(15,23,42,0.18)] dark:bg-white dark:text-slate-950"
+          className="fixed z-50 h-11 px-4 text-[15px] font-semibold"
           style={{ right: '1.15rem', bottom: 'calc(env(safe-area-inset-bottom) + 6.25rem)' }}
         >
+          <Bell size={16} strokeWidth={2.3} aria-hidden />
           Aviso
-        </button>,
+        </GlassButton>,
         document.body,
       )}
       {desk === 'alerts' && (
