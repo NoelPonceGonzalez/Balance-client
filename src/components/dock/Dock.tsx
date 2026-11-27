@@ -142,7 +142,9 @@ export function Dock<S extends DockSection>({ section, onChange, onTicket, scrol
 
   // Indicador: viaja con el muelle de referencia y se estira en campana según el recorrido.
   const indX = useTransform([slot, morph, boxW, search] as MotionValue<number>[], ([s, p, cw, q]: number[]) => lerp(slotCenter(s, capsuleWidth(cw, q > 0.5)), HALF, clamp01(p)) - INDICATOR / 2);
-  const indOpacity = useTransform(morph, (p) => (active < 0 ? 0 : 1 - smooth(span(p, 0.5, 1))));
+  // El indicador se apaga mientras la burbuja aún es ancha (antes: del 50 % al 100 % del recorrido). Así nunca queda,
+  // medio transparente, dentro de una burbuja estrecha, donde sus dos cantos parecían dos rayas en medio. Solo tiempos.
+  const indOpacity = useTransform(morph, (p) => (active < 0 ? 0 : 1 - smooth(span(p, 0.15, 0.55))));
   const travel = useTransform(slot, (s) => {
     const total = Math.abs(active - travelFrom.current);
     return total < 0.01 ? 0 : bell(1 - Math.abs(active - s) / total) * Math.min(1, total / 2);
